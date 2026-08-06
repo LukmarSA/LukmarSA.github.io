@@ -451,6 +451,31 @@ function renderMain(){
 }
 
 /* ---------- Modal genérico ---------- */
+// Selector estándar de "elementos focuseables" — se usa tanto para enfocar
+// el primero al abrir el modal como para que Tab/Shift+Tab ciclen dentro de
+// él sin escaparse al contenido de fondo.
+const SELECTOR_FOCUSABLE_MODAL = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+function obtenerFocusablesModal(){
+  const host = document.getElementById("modal-host");
+  if(!host) return [];
+  // offsetParent === null descarta elementos con display:none (p.ej. un
+  // campo que un fieldset condicional no llegó a mostrar).
+  return Array.from(host.querySelectorAll(SELECTOR_FOCUSABLE_MODAL)).filter(el => el.offsetParent !== null);
+}
+// A dónde va el foco automático al abrir: se prioriza el primer campo de
+// formulario real (como ya hacía la app, para poder escribir de inmediato
+// sin tocar el mouse) — el botón "✕" de cerrar suele quedar primero en el
+// DOM, pero enfocarlo a él en vez del campo no ayudaría a la eficiencia que
+// se busca. Si el modal no tiene ningún campo (uno de solo confirmación,
+// por ejemplo), se cae al primer elemento focuseable que exista.
+function primerFocoDelModal(){
+  const host = document.getElementById("modal-host");
+  if(!host) return null;
+  const campo = host.querySelector('input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])');
+  if(campo && campo.offsetParent !== null) return campo;
+  const focusables = obtenerFocusablesModal();
+  return focusables.length ? focusables[0] : null;
+}
 function abrirModal(html, onMount){
   let host = document.getElementById("modal-host");
   if(!host){
@@ -464,22 +489,44 @@ function abrirModal(html, onMount){
   });
   document.querySelectorAll(".modal-close").forEach(b=>b.addEventListener("click", cerrarModal));
   if(onMount) onMount();
-  // Foco directo en el primer campo editable, para poder navegar todo el
-  // formulario con Tab sin tener que tocar el mouse primero.
-  const primerCampo = host.querySelector("input, select, textarea");
-  if(primerCampo) primerCampo.focus();
-  // Esc cierra el modal — se registra un solo listener a la vez (por si un
-  // modal abre otro sin pasar por cerrarModal primero).
+  // Foco directo en el primer campo real del formulario (o, si no hay
+  // ninguno, en el primer elemento focuseable que exista) — para que quien
+  // trabaja solo con teclado pueda empezar a escribir sin tocar el mouse.
+  const primerFoco = primerFocoDelModal();
+  if(primerFoco) primerFoco.focus();
+  // Esc cierra el modal, y Tab/Shift+Tab quedan atrapados dentro de él — los
+  // dos pares se registran uno a la vez (por si un modal abre otro sin pasar
+  // por cerrarModal primero).
   document.removeEventListener("keydown", escCierraModal);
   document.addEventListener("keydown", escCierraModal);
+  document.removeEventListener("keydown", atraparTabModal);
+  document.addEventListener("keydown", atraparTabModal);
 }
 function escCierraModal(e){
   if(e.key === "Escape") cerrarModal();
+}
+// Ciclar el foco dentro del modal: Tab en el último elemento vuelve al
+// primero, Shift+Tab en el primero salta al último. Si por algún motivo el
+// foco queda fuera del modal (p.ej. no había ningún focuseable al abrir), lo
+// trae de vuelta al primer elemento en vez de dejarlo escapar al fondo.
+function atraparTabModal(e){
+  if(e.key !== "Tab") return;
+  const focusables = obtenerFocusablesModal();
+  if(!focusables.length) return;
+  const primero = focusables[0];
+  const ultimo = focusables[focusables.length - 1];
+  const dentroDelModal = focusables.includes(document.activeElement);
+  if(e.shiftKey){
+    if(!dentroDelModal || document.activeElement === primero){ e.preventDefault(); ultimo.focus(); }
+  } else {
+    if(!dentroDelModal || document.activeElement === ultimo){ e.preventDefault(); primero.focus(); }
+  }
 }
 function cerrarModal(){
   const host = document.getElementById("modal-host");
   if(host) host.innerHTML = "";
   document.removeEventListener("keydown", escCierraModal);
+  document.removeEventListener("keydown", atraparTabModal);
 }
 
 /* ============================================================
