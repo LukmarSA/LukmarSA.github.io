@@ -1,23 +1,23 @@
 
 /* ============================================================
-   1. DATOS SEMILLA (activos.json embebido, v7) Y CONSTANTES
+   1. CONFIGURACIÓN DE SUPABASE Y CONSTANTES
    ============================================================ */
-const VERSION_ESQUEMA_ACTUAL = 8;
-const CLAVE_ACTIVOS   = "lukmar_activos_tecnologicos";
-const CLAVE_BAJAS     = "lukmar_activos_bajas";
-const CLAVE_USUARIOS  = "lukmar_usuarios";
-const CLAVE_PERMISOS  = "lukmar_permisos";
-const CLAVE_SESION    = "lukmar_sesion";
-const CLAVE_LOG       = "lukmar_log_auditoria";
+const SUPABASE_URL = "https://tavyirvdfbetblprhtbo.supabase.co";
+const SUPABASE_KEY = "sb_publishable_-AXUgStuUjI8JENtt3BzUg_aDmlQPqX";
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// El login sigue pidiendo solo un "usuario" corto (admin/registrador/visitante,
+// o los que se agreguen a futuro); por dentro se completa a un correo interno
+// porque Supabase Auth identifica cuentas por email, no por username.
+const DOMINIO_USUARIO_INTERNO = "@lukmar.local";
 
 // Logo real de Lukmar, como archivos en assets/img/ (no embebido en el JS).
 const LOGO_MARK_SRC = "assets/img/logo-mark.png";
 const LOGO_FULL_SRC = "assets/img/logo-full.png";
 
-
-// DATOS_SEMILLA ahora vive en data.json (fetch en asegurarSemilla).
-
-// Acciones controlables por la matriz de permisos.
+// Acciones controlables por la matriz de permisos. Esta lista es solo para
+// pintar la UI (Configuración → Permisos); la que de verdad se aplica vive en
+// la tabla `permisos` de Postgres y se hace cumplir vía RLS — ver puede().
 const ACCIONES = [
   { id:"ver_listado",      label:"Ver listado de activos" },
   { id:"ver_detalle",      label:"Ver detalle e historial de un activo" },
@@ -30,97 +30,90 @@ const ACCIONES = [
   { id:"ver_bajas",        label:"Consultar la bitácora de bajas" },
 ];
 
-// El rol "administrador" siempre tiene todo (evita que se bloquee a sí mismo
-// editando mal la matriz). La matriz solo gobierna a los demás roles.
+// El rol "administrador" siempre tiene todo — hardcoded aquí Y en Postgres
+// (función es_admin()), para que nunca pueda bloquearse a sí mismo.
 const ROL_ADMIN = "administrador";
 
-const USUARIOS_SEMILLA = [
-  { usuario:"admin",        password:"admin123",        rol:"administrador", nombre_completo:"Administrador" },
-  { usuario:"registrador",  password:"registrador123",  rol:"registrador",   nombre_completo:"Registrador" },
-  { usuario:"visitante",    password:"visitante123",    rol:"visitante",     nombre_completo:"Visitante" },
-];
-
-const PERMISOS_SEMILLA = {
-  registrador: {
-    ver_listado:true, ver_detalle:true, crear_activo:true, editar_activo:true,
-    cambiar_custodio:true, editar_historial:false, dar_baja:false,
-    restaurar_baja:false, ver_bajas:true,
-  },
-  visitante: {
-    ver_listado:true, ver_detalle:true, crear_activo:false, editar_activo:false,
-    cambiar_custodio:false, editar_historial:false, dar_baja:false,
-    restaurar_baja:false, ver_bajas:false,
-  },
-};
-
 /* ============================================================
-   2. CAPA DE ACCESO A DATOS (LocalStorage + semilla remota)
+   2. CAPA DE ACCESO A DATOS (Supabase — antes LocalStorage)
    ============================================================ */
-// Se ejecuta una sola vez al arrancar: si no hay datos guardados, o son de
-// una versión de esquema distinta, trae la semilla desde data.json (fetch,
-// funciona porque GitHub Pages sirve el sitio por HTTP) y la guarda en
-// LocalStorage. A partir de ahí, cargarActivos()/guardarActivos() son síncronas.
-async function asegurarSemilla(){
-  const guardado = localStorage.getItem(CLAVE_ACTIVOS);
-  if(guardado){
-    try{
-      const datos = JSON.parse(guardado);
-      if(datos.version === VERSION_ESQUEMA_ACTUAL) return;
-      // Versión distinta a la esperada: no asumir la forma vieja, reimportar semilla.
-    }catch(e){ /* corrupto: reimportar */ }
-  }
-  const resp = await fetch("assets/data/data.json");
-  if(!resp.ok) throw new Error("No se pudo cargar data.json (" + resp.status + ")");
-  const datos = await resp.json();
-  localStorage.setItem(CLAVE_ACTIVOS, JSON.stringify(datos));
-}
-function cargarActivos(){
-  const guardado = localStorage.getItem(CLAVE_ACTIVOS);
-  // asegurarSemilla() ya corrió en el arranque, así que esto siempre debería existir.
-  return guardado ? JSON.parse(guardado) : { version:VERSION_ESQUEMA_ACTUAL, generado_en:null, activos:[] };
-}
-function guardarActivos(datos){
-  datos.generado_en = new Date().toISOString();
-  localStorage.setItem(CLAVE_ACTIVOS, JSON.stringify(datos));
-}
-function cargarBajas(){
-  const g = localStorage.getItem(CLAVE_BAJAS);
-  return g ? JSON.parse(g) : [];
-}
-function guardarBajas(lista){
-  localStorage.setItem(CLAVE_BAJAS, JSON.stringify(lista));
-}
-function cargarUsuarios(){
-  const g = localStorage.getItem(CLAVE_USUARIOS);
-  if(g) return JSON.parse(g);
-  localStorage.setItem(CLAVE_USUARIOS, JSON.stringify(USUARIOS_SEMILLA));
-  return JSON.parse(JSON.stringify(USUARIOS_SEMILLA));
-}
-function guardarUsuarios(lista){
-  localStorage.setItem(CLAVE_USUARIOS, JSON.stringify(lista));
-}
-function cargarPermisos(){
-  const g = localStorage.getItem(CLAVE_PERMISOS);
-  if(g) return JSON.parse(g);
-  localStorage.setItem(CLAVE_PERMISOS, JSON.stringify(PERMISOS_SEMILLA));
-  return JSON.parse(JSON.stringify(PERMISOS_SEMILLA));
-}
-function guardarPermisos(matriz){
-  localStorage.setItem(CLAVE_PERMISOS, JSON.stringify(matriz));
-}
-function cargarLog(){
-  const g = localStorage.getItem(CLAVE_LOG);
-  return g ? JSON.parse(g) : [];
-}
-function registrarLog(accion, detalle){
-  const log = cargarLog();
-  log.unshift({
-    fecha: new Date().toISOString(),
-    usuario: state.sesion ? state.sesion.usuario : "(desconocido)",
-    nombre_completo: state.sesion ? state.sesion.nombre_completo : "",
-    accion, detalle,
+// state.datos/state.bajas/state.permisos/state.log son un espejo en memoria
+// de Supabase. cargarActivos()/cargarBajas()/cargarPermisos()/cargarLog()
+// siguen siendo síncronas a propósito — leen ese espejo — para no tener que
+// tocar las ~1600 líneas de renderizado que las llaman así. El espejo se
+// llena con refrescarDatos() (async) al iniciar sesión y después de cada
+// mutación, en vez de sembrarse una sola vez desde data.json.
+
+async function refrescarDatos(){
+  const [{ data: activosRaw, error: e1 }, { data: historialRaw, error: e2 }] = await Promise.all([
+    supabase.from("activos").select("*").order("id"),
+    supabase.from("historial_custodia").select("*").order("activo_id").order("orden"),
+  ]);
+  if(e1) throw e1;
+  if(e2) throw e2;
+  const historialPorActivo = {};
+  (historialRaw||[]).forEach(t=>{
+    (historialPorActivo[t.activo_id] ||= []).push({
+      _id: t.id, tipo_custodio: t.tipo_custodio, nombre: t.nombre, cargo: t.cargo,
+      desde: t.desde, hasta: t.hasta, tipo_devolucion: t.tipo_devolucion,
+      observacion: t.observacion,
+    });
   });
-  localStorage.setItem(CLAVE_LOG, JSON.stringify(log.slice(0,500)));
+  const activos = (activosRaw||[]).map(a=>{
+    const historial_custodia = historialPorActivo[a.id] || [];
+    const vigente = historial_custodia.find(t=>t.hasta===null) || null;
+    return {
+      id: a.id, propiedad: a.propiedad, tipo: a.tipo, marca: a.marca, modelo: a.modelo,
+      serie: a.serie, nombre_dispositivo: a.nombre_dispositivo, mac_wifi: a.mac_wifi,
+      mac_ethernet: a.mac_ethernet, sistema_operativo: a.sistema_operativo,
+      ram_gb: a.ram_gb, disco_gb: a.disco_gb, procesador: a.procesador,
+      proveedor: a.proveedor, fecha_adquisicion: a.fecha_adquisicion,
+      celular: (a.celular_gmail || a.celular_password) ? { gmail: a.celular_gmail, password: a.celular_password } : null,
+      custodio: vigente ? { tipo_custodio: vigente.tipo_custodio, nombre: vigente.nombre, cargo: vigente.cargo } : null,
+      historial_custodia,
+      trazabilidad: a.trazabilidad,
+    };
+  });
+  state.datos = { version: 8, generado_en: new Date().toISOString(), activos };
+
+  const { data: bajasRaw, error: e3 } = await supabase.from("bajas").select("*").order("fecha_baja", { ascending:false });
+  if(e3) throw e3;
+  state.bajas = (bajasRaw||[]).map(b=>({ id: b.id, activo: b.activo, fecha_baja: b.fecha_baja, motivo: b.motivo, dado_de_baja_por: b.dado_de_baja_por }));
+
+  // TODOS los roles necesitan leer la matriz completa de permisos (no solo
+  // la propia): puede() la usa para decidir qué botones mostrar, igual que
+  // en la versión anterior con LocalStorage, donde tampoco había esa
+  // restricción. La tabla permisos permite SELECT a cualquier autenticado
+  // (ver política sel_permisos) — solo INSERT/UPDATE/DELETE quedan admin-only.
+  const { data: permisosRaw } = await supabase.from("permisos").select("*");
+  const matriz = {};
+  (permisosRaw||[]).forEach(p=>{ (matriz[p.rol] ||= {})[p.accion] = p.permitido; });
+  state.permisos = matriz;
+
+  if(state.sesion && state.sesion.rol === ROL_ADMIN){
+    const { data: perfilesRaw } = await supabase.from("perfiles").select("*");
+    state.perfiles = perfilesRaw || [];
+    const { data: logRaw } = await supabase.from("auditoria").select("*").order("fecha", { ascending:false }).limit(500);
+    state.log = (logRaw||[]).map(l=>({ fecha: l.fecha, usuario: l.usuario_id, nombre_completo: (state.perfiles.find(p=>p.id===l.usuario_id)||{}).nombre_completo || l.usuario_id, accion: l.accion, detalle: l.detalle }));
+  }
+}
+
+function cargarActivos(){ return state.datos || { version:8, generado_en:null, activos:[] }; }
+function cargarBajas(){ return state.bajas || []; }
+function cargarPermisos(){ return state.permisos || {}; }
+function cargarLog(){ return state.log || []; }
+function cargarPerfiles(){ return state.perfiles || []; }
+
+async function guardarPermisos(matriz){
+  const filas = [];
+  Object.keys(matriz).forEach(rol=>{
+    Object.keys(matriz[rol]).forEach(accion=>{
+      filas.push({ rol, accion, permitido: !!matriz[rol][accion] });
+    });
+  });
+  const { error } = await supabase.from("permisos").upsert(filas, { onConflict: "rol,accion" });
+  if(error) throw error;
+  await refrescarDatos();
 }
 
 /* ============================================================
@@ -128,6 +121,7 @@ function registrarLog(accion, detalle){
    ============================================================ */
 const state = {
   sesion: null,       // { usuario, rol, nombre_completo }
+  sesionUid: null,    // uuid de auth.users — para identificar "soy yo" en Configuración → Usuarios
   vista: "activos",   // activos | bajas | auditoria | config
   configSubtab: "permisos",
   // null en tipo/propiedad/custodioClase = "sin filtrar" (equivale a todas las opciones marcadas).
@@ -137,17 +131,28 @@ const state = {
   modal: null,         // función que renderiza el modal actual, o null
 };
 
-function iniciarSesionGuardada(){
-  const g = localStorage.getItem(CLAVE_SESION);
-  if(g){ try{ state.sesion = JSON.parse(g); }catch(e){ state.sesion=null; } }
+// Supabase Auth ya persiste su propia sesión (en su propia clave de
+// LocalStorage, manejada por supabase-js) — esto solo reconstruye
+// state.sesion = {usuario, rol, nombre_completo} a partir de esa sesión,
+// leyendo el perfil (rol) desde la tabla perfiles.
+async function iniciarSesionGuardada(){
+  const { data: { session } } = await supabase.auth.getSession();
+  if(!session) { state.sesion = null; return; }
+  await cargarSesionDesdePerfil(session.user);
 }
-function guardarSesion(sesion){
-  state.sesion = sesion;
-  localStorage.setItem(CLAVE_SESION, JSON.stringify(sesion));
+async function cargarSesionDesdePerfil(user){
+  const { data: perfil, error } = await supabase.from("perfiles").select("rol, nombre_completo").eq("id", user.id).single();
+  if(error || !perfil){ state.sesion = null; state.sesionUid = null; return; }
+  state.sesionUid = user.id;
+  state.sesion = {
+    usuario: (user.email||"").replace(DOMINIO_USUARIO_INTERNO, ""),
+    rol: perfil.rol,
+    nombre_completo: perfil.nombre_completo || perfil.rol,
+  };
 }
-function cerrarSesion(){
+async function cerrarSesion(){
+  await supabase.auth.signOut();
   state.sesion = null;
-  localStorage.removeItem(CLAVE_SESION);
   state.vista = "activos";
   render();
 }
@@ -184,9 +189,6 @@ function esc(s){
   if(s===null||s===undefined) return "";
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-function siguienteId(datos){
-  return datos.activos.reduce((max,a)=>Math.max(max,a.id),0) + 1;
-}
 function buscarActivo(datos, id){
   return datos.activos.find(a=>a.id===id);
 }
@@ -214,14 +216,17 @@ function calcularAgregados(activos){
 }
 
 /* ============================================================
-   7. OPERACIONES DE NEGOCIO (mutan LocalStorage + registran auditoría)
+   7. OPERACIONES DE NEGOCIO (Supabase — antes LocalStorage)
    ============================================================ */
-function crearActivo(campos){
-  const datos = cargarActivos();
-  const nuevo = {
-    id: siguienteId(datos),
+// La auditoría ya no se registra desde aquí: un trigger en Postgres
+// (registrar_auditoria()) escribe en la tabla auditoria automáticamente en
+// cada INSERT/UPDATE/DELETE — no se puede falsificar desde el navegador,
+// a diferencia del log anterior en LocalStorage.
+
+async function crearActivo(campos){
+  const esCelular = campos.tipo === "Celular" && (campos.gmail || campos.password);
+  const { data, error } = await supabase.from("activos").insert({
     propiedad: campos.propiedad,
-    custodio: null,
     tipo: campos.tipo || null,
     marca: campos.marca || null,
     modelo: campos.modelo || null,
@@ -235,137 +240,86 @@ function crearActivo(campos){
     procesador: campos.procesador || null,
     proveedor: campos.proveedor || null,
     fecha_adquisicion: campos.fecha_adquisicion || null,
-    celular: (campos.tipo === "Celular" && (campos.gmail || campos.password))
-      ? { gmail: campos.gmail || null, password: campos.password || null }
-      : null,
-    historial_custodia: [],
-    trazabilidad: {
-      categoria: null, custodio_texto: null, numero_original: null,
-      estado_notas: null, seccion_origen: "Alta manual (app)", fila_excel: null,
-      id_anterior: null,
-    },
-  };
-  datos.activos.push(nuevo);
-  guardarActivos(datos);
-  registrarLog("crear_activo", `Se creó el activo ${fmtTag(nuevo.id)} (${nuevo.tipo||"?"} ${nuevo.marca||""}).`);
-  return nuevo.id;
+    celular_gmail: esCelular ? (campos.gmail || null) : null,
+    celular_password: esCelular ? (campos.password || null) : null,
+    trazabilidad: { categoria:null, custodio_texto:null, numero_original:null, estado_notas:null, seccion_origen:"Alta manual (app)", fila_excel:null, id_anterior:null },
+  }).select("id").single();
+  if(error) throw error;
+  await refrescarDatos();
+  return data.id;
 }
 
-function editarActivoBase(id, campos){
-  const datos = cargarActivos();
-  const a = buscarActivo(datos, id);
-  if(!a) return;
+async function editarActivoBase(id, campos){
+  const patch = {};
   const editables = ["propiedad","tipo","marca","modelo","serie","nombre_dispositivo",
     "mac_wifi","mac_ethernet","sistema_operativo","procesador","proveedor","fecha_adquisicion"];
-  editables.forEach(k=>{ if(k in campos) a[k] = campos[k] || null; });
-  if("ram_gb" in campos) a.ram_gb = campos.ram_gb ? Number(campos.ram_gb) : null;
-  if("disco_gb" in campos) a.disco_gb = campos.disco_gb ? Number(campos.disco_gb) : null;
-  if(a.tipo === "Celular"){
-    if("gmail" in campos || "password" in campos){
-      a.celular = { gmail: campos.gmail || (a.celular?a.celular.gmail:null) || null,
-                    password: campos.password || (a.celular?a.celular.password:null) || null };
-    }
+  editables.forEach(k=>{ if(k in campos) patch[k] = campos[k] || null; });
+  if("ram_gb" in campos) patch.ram_gb = campos.ram_gb ? Number(campos.ram_gb) : null;
+  if("disco_gb" in campos) patch.disco_gb = campos.disco_gb ? Number(campos.disco_gb) : null;
+  const esCelular = (campos.tipo || (buscarActivo(cargarActivos(), id)||{}).tipo) === "Celular";
+  if(esCelular){
+    if("gmail" in campos) patch.celular_gmail = campos.gmail || null;
+    if("password" in campos) patch.celular_password = campos.password || null;
   } else {
-    a.celular = null;
+    patch.celular_gmail = null; patch.celular_password = null;
   }
-  guardarActivos(datos);
-  registrarLog("editar_activo", `Se editaron datos base del activo ${fmtTag(id)}.`);
+  const { error } = await supabase.from("activos").update(patch).eq("id", id);
+  if(error) throw error;
+  await refrescarDatos();
 }
 
-// Registrar cambio de custodio: cierra el tramo vigente (hasta/tipo_devolucion/
-// observación de la entrega) y prepend-ea el nuevo tramo. custodio de nivel
-// superior queda como espejo.
-function cambiarCustodio(id, nuevoCustodio, tipoDevolucionSaliente, fechaHasta, observacionSaliente){
-  const datos = cargarActivos();
-  const a = buscarActivo(datos, id);
-  if(!a) return;
-  const fechaCambio = fechaHasta || hoyISO();
-  if(a.historial_custodia.length > 0){
-    a.historial_custodia[0].hasta = fechaCambio;
-    a.historial_custodia[0].tipo_devolucion = tipoDevolucionSaliente || null;
-    a.historial_custodia[0].observacion = observacionSaliente || null;
-  }
-  const tramoNuevo = {
-    tipo_custodio: nuevoCustodio.tipo_custodio,
-    nombre: nuevoCustodio.nombre,
-    cargo: nuevoCustodio.cargo || null,
-    desde: fechaCambio,
-    hasta: null,
-    tipo_devolucion: null,
-    observacion: null,
-  };
-  a.historial_custodia.unshift(tramoNuevo);
-  a.custodio = { tipo_custodio: tramoNuevo.tipo_custodio, nombre: tramoNuevo.nombre, cargo: tramoNuevo.cargo };
-  guardarActivos(datos);
-  registrarLog("cambiar_custodio", `Activo ${fmtTag(id)}: nuevo custodio "${nuevoCustodio.nombre}" (${nuevoCustodio.tipo_custodio}).`);
+// Registrar cambio de custodio: vía RPC (cierra el tramo vigente + abre uno
+// nuevo en una sola transacción atómica en Postgres — ver f_cambiar_custodio).
+async function cambiarCustodio(id, nuevoCustodio, tipoDevolucionSaliente, fechaHasta, observacionSaliente){
+  const { error } = await supabase.rpc("f_cambiar_custodio", {
+    p_activo_id: id, p_tipo_custodio: nuevoCustodio.tipo_custodio, p_nombre: nuevoCustodio.nombre,
+    p_cargo: nuevoCustodio.cargo || null, p_fecha: fechaHasta || hoyISO(),
+    p_tipo_devolucion: tipoDevolucionSaliente || null, p_observacion: observacionSaliente || null,
+  });
+  if(error) throw error;
+  await refrescarDatos();
 }
 
-// Marcar el activo como disponible (sin custodio), cerrando el tramo vigente.
-function liberarCustodio(id, tipoDevolucion, fechaHasta, observacion){
-  const datos = cargarActivos();
-  const a = buscarActivo(datos, id);
-  if(!a) return;
-  const fechaCambio = fechaHasta || hoyISO();
-  if(a.historial_custodia.length > 0){
-    a.historial_custodia[0].hasta = fechaCambio;
-    a.historial_custodia[0].tipo_devolucion = tipoDevolucion || null;
-    a.historial_custodia[0].observacion = observacion || null;
-  }
-  a.custodio = null;
-  guardarActivos(datos);
-  registrarLog("cambiar_custodio", `Activo ${fmtTag(id)}: quedó disponible (sin custodio).`);
+// Marcar el activo como disponible (sin custodio) — vía RPC (f_liberar_custodio).
+async function liberarCustodio(id, tipoDevolucion, fechaHasta, observacion){
+  const { error } = await supabase.rpc("f_liberar_custodio", {
+    p_activo_id: id, p_fecha: fechaHasta || hoyISO(),
+    p_tipo_devolucion: tipoDevolucion || null, p_observacion: observacion || null,
+  });
+  if(error) throw error;
+  await refrescarDatos();
 }
 
-function editarTramoHistorial(id, index, campos){
+async function editarTramoHistorial(id, index, campos){
   const datos = cargarActivos();
   const a = buscarActivo(datos, id);
   if(!a) return;
   const tramo = a.historial_custodia[index];
-  if(!tramo) return;
+  if(!tramo || !tramo._id) return;
+  const patch = {};
   ["tipo_custodio","nombre","cargo","desde","hasta","tipo_devolucion","observacion"].forEach(k=>{
-    if(k in campos) tramo[k] = campos[k] || null;
+    if(k in campos) patch[k] = campos[k] || null;
   });
-  if(index === 0){
-    a.custodio = { tipo_custodio: tramo.tipo_custodio, nombre: tramo.nombre, cargo: tramo.cargo };
-  }
-  guardarActivos(datos);
-  registrarLog("editar_historial", `Activo ${fmtTag(id)}: se corrigió el tramo #${index+1} del historial.`);
+  const { error } = await supabase.from("historial_custodia").update(patch).eq("id", tramo._id);
+  if(error) throw error;
+  await refrescarDatos();
 }
 
-// Dar de baja: se elimina del arreglo activos y se archiva íntegro en la bitácora de bajas.
-function darDeBaja(id, motivo){
-  const datos = cargarActivos();
-  const idx = datos.activos.findIndex(a=>a.id===id);
-  if(idx === -1) return;
-  const activo = datos.activos[idx];
-  datos.activos.splice(idx,1);
-  guardarActivos(datos);
-  const bajas = cargarBajas();
-  bajas.unshift({
-    activo,
-    fecha_baja: new Date().toISOString(),
-    motivo: motivo || null,
-    dado_de_baja_por: state.sesion ? state.sesion.usuario : null,
-  });
-  guardarBajas(bajas);
-  registrarLog("dar_baja", `Activo ${fmtTag(id)} dado de baja. Motivo: ${motivo||"(sin especificar)"}.`);
+// Dar de baja: vía RPC (f_dar_baja) — archiva el snapshot completo y borra el
+// activo en una sola transacción atómica.
+async function darDeBaja(id, motivo){
+  const { error } = await supabase.rpc("f_dar_baja", { p_activo_id: id, p_motivo: motivo || null });
+  if(error) throw error;
+  await refrescarDatos();
 }
 
-function restaurarBaja(indexBaja){
+async function restaurarBaja(indexBaja){
   const bajas = cargarBajas();
   const registro = bajas[indexBaja];
   if(!registro) return;
-  const datos = cargarActivos();
-  const idOcupado = datos.activos.some(a=>a.id===registro.activo.id);
-  if(idOcupado){
-    // El id fue reasignado a otro activo nuevo mientras estaba de baja: se reinserta con id nuevo.
-    registro.activo.id = siguienteId(datos);
-  }
-  datos.activos.push(registro.activo);
-  guardarActivos(datos);
-  bajas.splice(indexBaja,1);
-  guardarBajas(bajas);
-  registrarLog("restaurar_baja", `Se restauró el activo ${fmtTag(registro.activo.id)} desde la bitácora de bajas.`);
+  const { error } = await supabase.rpc("f_restaurar_baja", { p_baja_id: registro.id });
+  if(error) throw error;
+  await refrescarDatos();
 }
 
 /* ============================================================
@@ -396,20 +350,24 @@ function renderLogin(errorMsg){
           <button type="submit" id="btn-login-submit" class="btn btn-primary" style="width:100%;margin-top:6px;">Ingresar</button>
         </form>
         <div class="login-hint">
-          Este inicio de sesión es solo para diferenciar roles dentro de la app (sin seguridad real; las contraseñas se guardan sin cifrar en este navegador).<br>
-          Usuarios de prueba: <code>admin/admin123</code> · <code>registrador/registrador123</code> · <code>visitante/visitante123</code>
+          Inicio de sesión real: tu contraseña viaja cifrada y se verifica en Supabase, no en este navegador.
         </div>
       </div>
     </div>`;
-  document.getElementById("form-login").addEventListener("submit", (e)=>{
+  document.getElementById("form-login").addEventListener("submit", async (e)=>{
     e.preventDefault();
     const u = document.getElementById("login-usuario").value.trim();
     const p = document.getElementById("login-password").value;
-    const usuarios = cargarUsuarios();
-    const encontrado = usuarios.find(x=>x.usuario===u && x.password===p);
-    if(!encontrado){ renderLogin("Usuario o contraseña incorrectos."); return; }
-    guardarSesion({ usuario:encontrado.usuario, rol:encontrado.rol, nombre_completo:encontrado.nombre_completo });
-    registrarLog("iniciar_sesion", `Inicio de sesión de ${encontrado.usuario}.`);
+    const btn = document.getElementById("btn-login-submit");
+    btn.disabled = true; btn.textContent = "Ingresando…";
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: u.includes("@") ? u : u + DOMINIO_USUARIO_INTERNO,
+      password: p,
+    });
+    if(error || !data.user){ renderLogin("Usuario o contraseña incorrectos."); return; }
+    await cargarSesionDesdePerfil(data.user);
+    if(!state.sesion){ await supabase.auth.signOut(); renderLogin("Tu cuenta no tiene un perfil asignado. Contacta a un administrador."); return; }
+    await refrescarDatos();
     // El toast vive fuera de #app (se agrega directo a document.body), así que
     // render() no lo reemplaza solo — hay que quitarlo explícitamente al entrar,
     // o se queda flotando encima de la app ya autenticada.
@@ -1107,7 +1065,6 @@ function exportarActivosCSV(){
   a.href = url; a.download = "activos_lukmar_" + hoyISO() + ".csv";
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  registrarLog("exportar", `Se exportaron ${lista.length} activos (según filtros activos) a CSV/Excel.`);
 }
 
 // ---------- Iconos SVG por tipo de activo (línea, un color distintivo por tipo) ----------
@@ -1361,7 +1318,7 @@ function abrirFormActivo(id){
       </div>
     </div>`;
   abrirModal(html, ()=>{
-    document.getElementById("btn-guardar-activo").addEventListener("click", ()=>{
+    document.getElementById("btn-guardar-activo").addEventListener("click", async ()=>{
       const campos = {
         tipo: document.getElementById("fa-tipo").value.trim(),
         propiedad: document.getElementById("fa-propiedad").value,
@@ -1381,10 +1338,10 @@ function abrirFormActivo(id){
         password: document.getElementById("fa-password").value.trim(),
       };
       if(esNuevo){
-        const nuevoId = crearActivo(campos);
+        const nuevoId = await crearActivo(campos);
         cerrarModal(); renderMain(); abrirDetalle(nuevoId);
       } else {
-        editarActivoBase(a.id, campos);
+        await editarActivoBase(a.id, campos);
         cerrarModal(); renderMain(); abrirDetalle(a.id);
       }
     });
@@ -1440,26 +1397,26 @@ function abrirCambioCustodio(id){
       </div>
     </div>`;
   abrirModal(html, ()=>{
-    document.getElementById("btn-confirmar-custodio").addEventListener("click", ()=>{
+    document.getElementById("btn-confirmar-custodio").addEventListener("click", async ()=>{
       const nombre = document.getElementById("cc-nombre").value.trim();
       if(!nombre){ alert("Ingresa el nombre del nuevo custodio."); return; }
       const tipoDev = tieneVigente ? document.getElementById("cc-tipodev").value : null;
       if(tieneVigente && !tipoDev){ alert("Selecciona el tipo de devolución del custodio saliente."); return; }
       const fecha = document.getElementById("cc-fecha").value || hoyISO();
       const observacion = tieneVigente ? document.getElementById("cc-observacion").value.trim() : "";
-      cambiarCustodio(id, {
+      await cambiarCustodio(id, {
         tipo_custodio: document.getElementById("cc-tipo").value,
         nombre, cargo: document.getElementById("cc-cargo").value.trim(),
       }, tipoDev, fecha, observacion);
       cerrarModal(); renderMain(); abrirDetalle(id);
     });
     const bl = document.getElementById("btn-liberar");
-    if(bl) bl.addEventListener("click", ()=>{
+    if(bl) bl.addEventListener("click", async ()=>{
       const tipoDev = document.getElementById("cc-tipodev").value;
       if(!tipoDev){ alert("Selecciona el tipo de devolución antes de marcar disponible."); return; }
       const fecha = document.getElementById("cc-fecha").value || hoyISO();
       const observacion = document.getElementById("cc-observacion").value.trim();
-      liberarCustodio(id, tipoDev, fecha, observacion);
+      await liberarCustodio(id, tipoDev, fecha, observacion);
       cerrarModal(); renderMain(); abrirDetalle(id);
     });
   });
@@ -1502,8 +1459,8 @@ function abrirEditarTramo(id, index){
       </div>
     </div>`;
   abrirModal(html, ()=>{
-    document.getElementById("btn-guardar-tramo").addEventListener("click", ()=>{
-      editarTramoHistorial(id, index, {
+    document.getElementById("btn-guardar-tramo").addEventListener("click", async ()=>{
+      await editarTramoHistorial(id, index, {
         tipo_custodio: document.getElementById("et-tipo").value,
         nombre: document.getElementById("et-nombre").value.trim(),
         cargo: document.getElementById("et-cargo").value.trim(),
@@ -1535,8 +1492,8 @@ function abrirConfirmarBaja(id){
       </div>
     </div>`;
   abrirModal(html, ()=>{
-    document.getElementById("btn-confirmar-baja").addEventListener("click", ()=>{
-      darDeBaja(id, document.getElementById("baja-motivo").value.trim());
+    document.getElementById("btn-confirmar-baja").addEventListener("click", async ()=>{
+      await darDeBaja(id, document.getElementById("baja-motivo").value.trim());
       cerrarModal(); renderMain();
     });
   });
@@ -1569,8 +1526,8 @@ function renderVistaBajas(main){
       ${bajas.length===0 ? `<div class="empty-state"><div class="big">—</div>No hay activos dados de baja.</div>` : ""}
     </div>`;
   main.querySelectorAll("[data-restaurar]").forEach(b=>{
-    b.addEventListener("click", ()=>{
-      restaurarBaja(Number(b.dataset.restaurar));
+    b.addEventListener("click", async ()=>{
+      await restaurarBaja(Number(b.dataset.restaurar));
       renderVistaBajas(main);
     });
   });
@@ -1639,78 +1596,83 @@ function renderConfigPermisos(content){
       <div class="fb-spacer"></div>
       <button class="btn btn-primary" id="btn-guardar-permisos">Guardar matriz de permisos</button>
     </div>`;
-  document.getElementById("btn-guardar-permisos").addEventListener("click", ()=>{
+  document.getElementById("btn-guardar-permisos").addEventListener("click", async ()=>{
     const nueva = {};
     roles.forEach(r=>{ nueva[r]={}; });
     content.querySelectorAll("input[type=checkbox]").forEach(cb=>{
       nueva[cb.dataset.rol][cb.dataset.accion] = cb.checked;
     });
-    guardarPermisos(nueva);
-    registrarLog("editar_permisos", "Se actualizó la matriz de permisos.");
+    await guardarPermisos(nueva);
     alert("Matriz de permisos guardada.");
   });
-  document.getElementById("btn-agregar-rol").addEventListener("click", ()=>{
+  document.getElementById("btn-agregar-rol").addEventListener("click", async ()=>{
     const nombre = document.getElementById("nuevo-rol").value.trim().toLowerCase();
     if(!nombre){ return; }
     if(nombre===ROL_ADMIN || matriz[nombre]){ alert("Ese nombre de rol ya existe."); return; }
     matriz[nombre] = {}; ACCIONES.forEach(a=>matriz[nombre][a.id]=false);
-    guardarPermisos(matriz);
-    registrarLog("editar_permisos", `Se creó el rol "${nombre}".`);
+    await guardarPermisos(matriz);
     renderVistaConfig(document.getElementById("main"));
   });
 }
 
+// A diferencia del resto de la app, aquí NO se puede recrear el flujo
+// original de "crear usuario con clave" desde el navegador: eso requeriría
+// una clave de servicio de Supabase, que nunca debe vivir en código de
+// cliente (le daría a cualquiera acceso total, sin RLS). El flujo real queda
+// en dos pasos: (1) crear la cuenta en el panel de Supabase → Authentication
+// → Add user, con su correo; (2) vincularla aquí a un rol por ese mismo
+// correo (usa la función buscar_uid_por_email, que sí puede vivir en el
+// cliente porque solo devuelve un id, nunca la lista completa de cuentas).
 function renderConfigUsuarios(content){
-  const usuarios = cargarUsuarios();
+  const perfiles = cargarPerfiles();
   const matriz = cargarPermisos();
   const roles = [ROL_ADMIN, ...Object.keys(matriz)];
   content.innerHTML = `
     <div class="tablewrap" style="margin-bottom:14px;">
       <table>
-        <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th></th></tr></thead>
+        <thead><tr><th>Nombre</th><th>Rol</th><th></th></tr></thead>
         <tbody>
-          ${usuarios.map((u,i)=>`<tr>
-            <td class="mono">${esc(u.usuario)}</td>
-            <td>${esc(u.nombre_completo)}</td>
-            <td><span class="rolebadge rol-${esc(u.rol)}">${esc(u.rol)}</span></td>
-            <td class="cell-actions">
-              ${u.usuario!==state.sesion.usuario ? `<button class="btn btn-sm btn-danger" data-borrar-usuario="${i}">Eliminar</button>` : `<span class="cell-muted">(tú)</span>`}
+          ${perfiles.map(p=>`<tr>
+            <td>${esc(p.nombre_completo)}</td>
+            <td>
+              ${p.id===state.sesionUid ? `<span class="rolebadge rol-${esc(p.rol)}">${esc(p.rol)}</span>` : `
+              <select data-cambiar-rol="${esc(p.id)}">${roles.map(r=>`<option value="${esc(r)}" ${r===p.rol?'selected':''}>${esc(r)}</option>`).join("")}</select>`}
             </td>
+            <td class="cell-actions">${p.id===state.sesionUid ? `<span class="cell-muted">(tú)</span>` : ""}</td>
           </tr>`).join("")}
         </tbody>
       </table>
     </div>
+    <div class="alert alert-info">
+      Para dar acceso a alguien nuevo: primero créale la cuenta en el panel de Supabase (Authentication → Add user, con su correo y una contraseña), y luego vincúlala aquí abajo con su rol. Esta pantalla nunca puede crear cuentas de acceso por sí sola — eso es intencional, por seguridad.
+    </div>
     <fieldset>
-      <legend>Nuevo usuario</legend>
+      <legend>Vincular usuario existente</legend>
       <div class="form-grid">
-        <div class="field"><label>Usuario</label><input type="text" id="nu-usuario"></div>
-        <div class="field"><label>Contraseña</label><input type="text" id="nu-password"></div>
+        <div class="field"><label>Correo (el mismo con el que se creó en Supabase)</label><input type="email" id="nu-email"></div>
         <div class="field"><label>Nombre completo</label><input type="text" id="nu-nombre"></div>
         <div class="field"><label>Rol</label><select id="nu-rol">${roles.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join("")}</select></div>
       </div>
-      <button class="btn btn-primary" id="btn-crear-usuario" style="margin-top:10px;">Crear usuario</button>
+      <button class="btn btn-primary" id="btn-vincular-usuario" style="margin-top:10px;">Vincular</button>
     </fieldset>`;
-  content.querySelectorAll("[data-borrar-usuario]").forEach(b=>{
-    b.addEventListener("click", ()=>{
-      const idx = Number(b.dataset.borrarUsuario);
-      const lista = cargarUsuarios();
-      const eliminado = lista.splice(idx,1)[0];
-      guardarUsuarios(lista);
-      registrarLog("editar_usuarios", `Se eliminó el usuario "${eliminado.usuario}".`);
+  content.querySelectorAll("[data-cambiar-rol]").forEach(sel=>{
+    sel.addEventListener("change", async ()=>{
+      const { error } = await supabase.from("perfiles").update({ rol: sel.value }).eq("id", sel.dataset.cambiarRol);
+      if(error){ alert("No se pudo cambiar el rol: " + error.message); return; }
+      await refrescarDatos();
       renderVistaConfig(document.getElementById("main"));
     });
   });
-  document.getElementById("btn-crear-usuario").addEventListener("click", ()=>{
-    const usuario = document.getElementById("nu-usuario").value.trim();
-    const password = document.getElementById("nu-password").value.trim();
+  document.getElementById("btn-vincular-usuario").addEventListener("click", async ()=>{
+    const email = document.getElementById("nu-email").value.trim();
     const nombre_completo = document.getElementById("nu-nombre").value.trim();
     const rol = document.getElementById("nu-rol").value;
-    if(!usuario || !password || !nombre_completo){ alert("Completa usuario, contraseña y nombre."); return; }
-    const lista = cargarUsuarios();
-    if(lista.some(u=>u.usuario===usuario)){ alert("Ese usuario ya existe."); return; }
-    lista.push({usuario,password,rol,nombre_completo});
-    guardarUsuarios(lista);
-    registrarLog("editar_usuarios", `Se creó el usuario "${usuario}" con rol "${rol}".`);
+    if(!email || !nombre_completo){ alert("Completa correo y nombre."); return; }
+    const { data: uid, error: e1 } = await supabase.rpc("buscar_uid_por_email", { p_email: email });
+    if(e1 || !uid){ alert("No se encontró ninguna cuenta con ese correo. Crea la cuenta primero en el panel de Supabase (Authentication → Add user)."); return; }
+    const { error: e2 } = await supabase.from("perfiles").insert({ id: uid, rol, nombre_completo });
+    if(e2){ alert("No se pudo vincular: " + e2.message); return; }
+    await refrescarDatos();
     renderVistaConfig(document.getElementById("main"));
   });
 }
@@ -1744,15 +1706,20 @@ window.addEventListener("resize", ()=>{
   const root = document.getElementById("app");
   root.innerHTML = `<div class="login-wrap"><div class="login-sub">Cargando inventario…</div></div>`;
   try{
-    await asegurarSemilla();
+    await iniciarSesionGuardada();
+    if(state.sesion) await refrescarDatos();
   }catch(err){
     root.innerHTML = `<div class="login-wrap"><div class="login-card">
-      <div class="alert alert-error">No se pudo cargar <code>data.json</code>. Si abriste este archivo con doble clic (file://), súbelo a un servidor o a GitHub Pages — los navegadores bloquean fetch() de archivos locales.<br><br>Detalle: ${err.message}</div>
+      <div class="alert alert-error">No se pudo conectar con la base de datos (Supabase). Revisa tu conexión a internet e intenta de nuevo.<br><br>Detalle: ${err.message}</div>
     </div></div>`;
     return;
   }
-  cargarUsuarios(); cargarPermisos();
-  iniciarSesionGuardada();
   inyectarDecoracionFondo();
   render();
+  // Si la sesión cambia en otra pestaña (o expira), refleja el cambio aquí
+  // también — sin esto, esta pestaña seguiría mostrando la app ya cerrada la
+  // sesión en otra parte hasta el siguiente refresco manual.
+  supabase.auth.onAuthStateChange((_evento, session)=>{
+    if(!session && state.sesion){ state.sesion = null; state.vista = "activos"; render(); }
+  });
 })();
