@@ -1,0 +1,4243 @@
+{
+  "esquema": "./activos.schema.json",
+  "version": 8,
+  "generado_en": "2026-08-06T06:11:07.837127Z",
+  "fuente": {
+    "archivo": "Libro1.xlsx",
+    "hoja": "Computadores",
+    "actualizado_hoja": "2025-10-07"
+  },
+  "activos": [
+    {
+      "id": 1,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Alexander Quelal",
+        "cargo": "Supervisor de Producción"
+      },
+      "tipo": "Laptop",
+      "marca": "Dell",
+      "modelo": "Inspiron 15 3000",
+      "serie": "B6Z6X23",
+      "nombre_dispositivo": "DESKTOP-VHVK2AI",
+      "mac_wifi": "4C:EB:BD:AF:C0:BD",
+      "mac_ethernet": "98:E7:43:4A:CB:33",
+      "sistema_operativo": "Windows",
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Alexander Quelal",
+          "cargo": "Supervisor de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Alexander Quelal",
+        "numero_original": 1,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Computadores",
+        "fila_excel": 10,
+        "id_anterior": "COMP-001"
+      }
+    },
+    {
+      "id": 2,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Brayan Balcazar",
+        "cargo": "Supervisor de Producción"
+      },
+      "tipo": "Laptop",
+      "marca": "Dell",
+      "modelo": "Inspiron 15 3520",
+      "serie": "DS9H6F3",
+      "nombre_dispositivo": "DELL-LUKMAR",
+      "mac_wifi": "58:CE:2A:1F:42:17",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 32,
+      "disco_gb": 512,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Brayan Balcazar",
+          "cargo": "Supervisor de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Junior Almeida",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Brayan Balcazar/Junior Almeida",
+        "numero_original": 2,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Computadores",
+        "fila_excel": 11,
+        "id_anterior": "COMP-002"
+      }
+    },
+    {
+      "id": 3,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Dayanna Zambrano",
+        "cargo": "Supervisor de Producción"
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "Macbook Air M3",
+      "serie": "MFVXXPM950",
+      "nombre_dispositivo": "Macbook Air de Produccion1",
+      "mac_wifi": "9C:58:84:3D:98:6C",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2024-10-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Dayanna Zambrano",
+          "cargo": "Supervisor de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Dayanna Zambrano",
+        "numero_original": 3,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 12,
+        "id_anterior": "COMP-003"
+      }
+    },
+    {
+      "id": 4,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Lisseth Vega",
+        "cargo": "Supervisor de Producción"
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "MacBookAir10,1",
+      "serie": "C02K71EQQ6LW",
+      "nombre_dispositivo": "MacBook Air de Produccion2",
+      "mac_wifi": "70:AE:D5:53:5E:CD",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2024-10-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Lisseth Vega",
+          "cargo": "Supervisor de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Lisseth Vega",
+        "numero_original": 4,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 13,
+        "id_anterior": "COMP-004"
+      }
+    },
+    {
+      "id": 5,
+      "propiedad": "propio",
+      "custodio": null,
+      "tipo": "Laptop",
+      "marca": "Dell",
+      "modelo": "Inspiron 15 3000",
+      "serie": "81BCH33",
+      "nombre_dispositivo": "LUKMAR44",
+      "mac_wifi": "D8:12:65:70:DE:BF",
+      "mac_ethernet": "C0:3E:BA:03:D5:92",
+      "sistema_operativo": "Windows",
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Erick Delgado",
+          "cargo": "Supervisor de Producción",
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Disponible/Erick Delgado",
+        "numero_original": 5,
+        "estado_notas": "Validar",
+        "seccion_origen": "Computadores",
+        "fila_excel": 14,
+        "id_anterior": "COMP-005"
+      }
+    },
+    {
+      "id": 6,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Produccion Biodynamics",
+        "cargo": "Operador de Producción"
+      },
+      "tipo": "Desktop",
+      "marca": "Intel",
+      "modelo": "NUC8BEH",
+      "serie": "G6BE92000DX4",
+      "nombre_dispositivo": "DESKTOP-U1QLRI2",
+      "mac_wifi": "D0:C6:37:CA:B4:C1",
+      "mac_ethernet": "1C:69:7A:02:69:03",
+      "sistema_operativo": "Windows",
+      "ram_gb": 4,
+      "disco_gb": 250,
+      "procesador": "i3",
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Produccion Biodynamics",
+          "cargo": "Operador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "area",
+          "nombre": "Bodega TMP",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Lissette Garcia",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Produccion Biodynamics/Bodega TMP/Lissette Garcia",
+        "numero_original": 6,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 15,
+        "id_anterior": "COMP-006"
+      }
+    },
+    {
+      "id": 7,
+      "propiedad": "propio",
+      "custodio": null,
+      "tipo": "Laptop",
+      "marca": "Dell",
+      "modelo": "Inspiron 15 3000",
+      "serie": "HCKJXF3",
+      "nombre_dispositivo": "DESKTOP-6G24B8H",
+      "mac_wifi": "F0:77:C3:F0:5D:F7",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Maria Leon",
+          "cargo": "Coordinador SGI",
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Disponible/Maria Leon",
+        "numero_original": 7,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 16,
+        "id_anterior": "COMP-007"
+      }
+    },
+    {
+      "id": 8,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Luis Ochoa",
+        "cargo": "Gerente de Producción"
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "Apple M1",
+      "serie": "FVFHDZPYQ6L4",
+      "nombre_dispositivo": "Macbook Air de Juan",
+      "mac_wifi": "FC:E2:6C:2C:51:4C",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": "M1",
+      "proveedor": null,
+      "fecha_adquisicion": "2023-02-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Luis Ochoa",
+          "cargo": "Gerente de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Daniel Lavayen",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Juan Carlos Arroyo",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Luis Ochoa/Daniel Lavayen/ Juan Carlos Arroyo",
+        "numero_original": 8,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 17,
+        "id_anterior": "COMP-008"
+      }
+    },
+    {
+      "id": 9,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Adan Arzube",
+        "cargo": "Analista de Compras"
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "Mac Mini",
+      "serie": "H2WHC1EDQ6NV",
+      "nombre_dispositivo": "Compras's Mac Mini",
+      "mac_wifi": "14:98:77:65:F4:B2",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": "M1",
+      "proveedor": null,
+      "fecha_adquisicion": "2020-02-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Adan Arzube",
+          "cargo": "Analista de Compras",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Melissa Chilan",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Adan Arzube/Melissa Chilan",
+        "numero_original": 9,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 18,
+        "id_anterior": "COMP-009"
+      }
+    },
+    {
+      "id": 10,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Diego Nagua",
+        "cargo": "Asistente de RRHH"
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "MacBookAir10,1",
+      "serie": "FVFFPDG5Q6L4",
+      "nombre_dispositivo": "LUKMAR45",
+      "mac_wifi": "1C:91:80:D7:7F:19",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2023-02-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Diego Nagua",
+          "cargo": "Asistente de RRHH",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Ricardo Ayora",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Walter Jalón",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Diego Nagua/Ricardo Ayora/Walter Jalón",
+        "numero_original": 10,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 19,
+        "id_anterior": "COMP-010"
+      }
+    },
+    {
+      "id": 11,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Facundo Scavone",
+        "cargo": "Tesorera"
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "Apple M1",
+      "serie": "C02H9CJTQ6L7",
+      "nombre_dispositivo": "Macbook Air de Mariela",
+      "mac_wifi": "FC:E2:6C:09:56:7D",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2022-06-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Facundo Scavone",
+          "cargo": "Tesorera",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Mariela Zambrano",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Facundo Scavone/Mariela Zambrano",
+        "numero_original": 11,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 20,
+        "id_anterior": "COMP-011"
+      }
+    },
+    {
+      "id": 12,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Jazmin Herrera",
+        "cargo": "Contador General"
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "Apple M1",
+      "serie": "C02K73YGQ6LR",
+      "nombre_dispositivo": "Macbook Air de Carlos",
+      "mac_wifi": "70:AE:D5:56:6F:60",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2022-06-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jazmin Herrera",
+          "cargo": "Contador General",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Paulina Sanchez",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Luis Ochoa",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Carlos Paucar",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Jazmin Herrera/Paulina Sanchez/Luis Ochoa / Carlos Paucar",
+        "numero_original": 12,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 21,
+        "id_anterior": "COMP-012"
+      }
+    },
+    {
+      "id": 13,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Nicole Rivero",
+        "cargo": "Asistente Contable"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "IDEAPAD Slim 3i",
+      "serie": "PF505J7M",
+      "nombre_dispositivo": "DESKTOP-7PA0HG6",
+      "mac_wifi": "70:08:94:11:08:DF",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 500,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2025-03-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Nicole Rivero",
+          "cargo": "Asistente Contable",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Fernando Lopez",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Nicole Rivero/Fernando Lopez",
+        "numero_original": 13,
+        "estado_notas": "2025-03-01",
+        "seccion_origen": "Computadores",
+        "fila_excel": 22,
+        "id_anterior": "COMP-013"
+      }
+    },
+    {
+      "id": 14,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Kelvin Luk",
+        "cargo": "Gerente Comercial"
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "Apple M1 Pro",
+      "serie": "XH3JJGTCWG",
+      "nombre_dispositivo": "kELVIN s Laptop",
+      "mac_wifi": "F8:4D:89:84:41:46",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 16,
+      "disco_gb": 500,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2022-04-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Kelvin Luk",
+          "cargo": "Gerente Comercial",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Kelvin Luk",
+        "numero_original": 14,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 23,
+        "id_anterior": "COMP-014"
+      }
+    },
+    {
+      "id": 15,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Alejandra Argandoña",
+        "cargo": "Analista de Costos"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "83ER",
+      "serie": "PF503HGY",
+      "nombre_dispositivo": "LUKMAR29",
+      "mac_wifi": "70:08:94:14:7F:CD",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 500,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2025-03-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Alejandra Argandoña",
+          "cargo": "Analista de Costos",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Julio Lara",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Alejandra Argandoña/Julio Lara",
+        "numero_original": 15,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 24,
+        "id_anterior": "COMP-015"
+      }
+    },
+    {
+      "id": 16,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Nicolle Goyes",
+        "cargo": "Asistente de Tesorería"
+      },
+      "tipo": "Laptop",
+      "marca": "Dell",
+      "modelo": "Vostro 5568",
+      "serie": "5T8X7T2",
+      "nombre_dispositivo": "DESKTOP-17ADPIH",
+      "mac_wifi": "FC:77:74:CA:7D:D0",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 8,
+      "disco_gb": 500,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Nicolle Goyes",
+          "cargo": "Asistente de Tesorería",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Pasante Financiero",
+          "cargo": "Pasante Financiero",
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Nicolle Goyes/Pasante Financiero",
+        "numero_original": 16,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 25,
+        "id_anterior": "COMP-016"
+      }
+    },
+    {
+      "id": 17,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Thalia Castillo",
+        "cargo": "Analista de Laboratorio"
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "Apple M1",
+      "serie": "FVFHRQADQ6L4",
+      "nombre_dispositivo": "Macbook Air de Produccion2",
+      "mac_wifi": "B6:CA:DD:FF:BD:72",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2022-06-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Thalia Castillo",
+          "cargo": "Analista de Laboratorio",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Thalia Castillo",
+        "numero_original": 17,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 26,
+        "id_anterior": "COMP-017"
+      }
+    },
+    {
+      "id": 18,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Bodega Egresos",
+        "cargo": "Auxiliar de Bodega"
+      },
+      "tipo": "Desktop",
+      "marca": "Intel",
+      "modelo": "NUC7i3BNB",
+      "serie": "G6BN736000ZE",
+      "nombre_dispositivo": "PC-BODEGA4",
+      "mac_wifi": "1C:4D:70:C0:7F:74",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 20,
+      "disco_gb": 500,
+      "procesador": "i3",
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Bodega Egresos",
+          "cargo": "Auxiliar de Bodega",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Bodega Egresos",
+        "numero_original": 18,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 27,
+        "id_anterior": "COMP-018"
+      }
+    },
+    {
+      "id": 19,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "William Cabrera",
+        "cargo": "Asistente de Bodega"
+      },
+      "tipo": "Desktop",
+      "marca": "Intel",
+      "modelo": "NUC7i5BNB",
+      "serie": "G6BN01300RW5",
+      "nombre_dispositivo": "PC-BODEGA1",
+      "mac_wifi": "24:41:8C:54:72:02",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 20,
+      "disco_gb": 500,
+      "procesador": "i5",
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "William Cabrera",
+          "cargo": "Asistente de Bodega",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "William Cabrera",
+        "numero_original": 19,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 28,
+        "id_anterior": "COMP-019"
+      }
+    },
+    {
+      "id": 20,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Cristhian Pin",
+        "cargo": "Auxiliar de Bodega"
+      },
+      "tipo": "Desktop",
+      "marca": "Intel",
+      "modelo": "NUC7i3BNB",
+      "serie": "G6BN73200RVF",
+      "nombre_dispositivo": "PC-BODEGA2",
+      "mac_wifi": "68:EC:C5:C1:90:21",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 24,
+      "disco_gb": 500,
+      "procesador": "i3",
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Cristhian Pin",
+          "cargo": "Auxiliar de Bodega",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Cristhian Pin",
+        "numero_original": 20,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 29,
+        "id_anterior": "COMP-020"
+      }
+    },
+    {
+      "id": 21,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Peter Vargas",
+        "cargo": "Asistente de Bodega"
+      },
+      "tipo": "Desktop",
+      "marca": "Intel",
+      "modelo": "NUC7i5BNB",
+      "serie": "G6BN7410075B",
+      "nombre_dispositivo": "PC-BODEGA1",
+      "mac_wifi": "88:B1:11:EA:A2:F4",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 20,
+      "disco_gb": 500,
+      "procesador": "i5",
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Peter Vargas",
+          "cargo": "Asistente de Bodega",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Peter Vargas",
+        "numero_original": 21,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 30,
+        "id_anterior": "COMP-021"
+      }
+    },
+    {
+      "id": 22,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Marco antonio Loza",
+        "cargo": "Seguridad Física"
+      },
+      "tipo": "Desktop",
+      "marca": "Clon",
+      "modelo": "GameMax",
+      "serie": "Tarjeta de video 8GB",
+      "nombre_dispositivo": "LUKMAR36",
+      "mac_wifi": null,
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 250,
+      "procesador": "i5",
+      "proveedor": null,
+      "fecha_adquisicion": "2025-06-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Marco antonio Loza",
+          "cargo": "Seguridad Física",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Marco antonio Loza",
+        "numero_original": 22,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 31,
+        "id_anterior": "COMP-022"
+      }
+    },
+    {
+      "id": 23,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Data Center",
+        "cargo": "Soporte TI"
+      },
+      "tipo": "Desktop",
+      "marca": "Intel",
+      "modelo": "NUC7i5BNHXF",
+      "serie": "G6BN73900D8L",
+      "nombre_dispositivo": "PC",
+      "mac_wifi": "88:B1:11:93:E0:72",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 900,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Data Center",
+          "cargo": "Soporte TI",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jhidalgo",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "DataCenter/Jhidalgo",
+        "numero_original": 23,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 32,
+        "id_anterior": "COMP-023"
+      }
+    },
+    {
+      "id": 24,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Tatiana Cruz",
+        "cargo": "Trabajor Social"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "83ER",
+      "serie": "PF5B0NLX",
+      "nombre_dispositivo": "LUKMAR30",
+      "mac_wifi": "70:08:94:9D:6F:1D",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2025-04-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Tatiana Cruz",
+          "cargo": "Trabajor Social",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jean Carlos Cujilan",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Tatiana Cruz/Jean Carlos Cujilan",
+        "numero_original": 24,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 33,
+        "id_anterior": "COMP-024"
+      }
+    },
+    {
+      "id": 25,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Mariana Elizabeth Arteaga Loor",
+        "cargo": "Analista de Nómina"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "83ER",
+      "serie": "PF5AW1WQ",
+      "nombre_dispositivo": "LUKMAR31",
+      "mac_wifi": "70:08:94:A8:43:61",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": null,
+      "proveedor": "NOVICOMPU",
+      "fecha_adquisicion": "2025-04-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Mariana Elizabeth Arteaga Loor",
+          "cargo": "Analista de Nómina",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Mariana Elizabeth Arteaga Loor",
+        "numero_original": 25,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 34,
+        "id_anterior": "COMP-025"
+      }
+    },
+    {
+      "id": 26,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Franklin Cuenca",
+        "cargo": "Técnico Eléctrico"
+      },
+      "tipo": "Laptop",
+      "marca": "Dell",
+      "modelo": "VOSTRO",
+      "serie": "CL6KRT2",
+      "nombre_dispositivo": "LUKMAR33",
+      "mac_wifi": "4C:1D:96:30:E9:E5",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2022-06-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Franklin Cuenca",
+          "cargo": "Técnico Eléctrico",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Franklin Cuenca",
+        "numero_original": 26,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 35,
+        "id_anterior": "COMP-026"
+      }
+    },
+    {
+      "id": 27,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Paulina Sanchez",
+        "cargo": "Asistente de Producción"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "83ER",
+      "serie": "PF5AZN12",
+      "nombre_dispositivo": "LUKMAR34",
+      "mac_wifi": "70:08:94:A4:07:DB",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 8,
+      "disco_gb": 500,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2025-05-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Paulina Sanchez",
+          "cargo": "Asistente de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jazmin Herrera",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Paulina Sanchez / Jazmin Herrera",
+        "numero_original": 27,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 36,
+        "id_anterior": "COMP-027"
+      }
+    },
+    {
+      "id": 28,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Braulio Carreno",
+        "cargo": "Supervisor de Bioremediación"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "IDEAPAD Slim 3i",
+      "serie": "PF5CY8NV",
+      "nombre_dispositivo": "LUKMAR35",
+      "mac_wifi": "70:08:94:83:A3:35",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2025-05-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Braulio Carreno",
+          "cargo": "Supervisor de Bioremediación",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Braulio Carreno",
+        "numero_original": 28,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 37,
+        "id_anterior": "COMP-028"
+      }
+    },
+    {
+      "id": 29,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Patricio Sauce",
+        "cargo": "Analista de Selección y Desarrollo"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "IDEAPAD Slim 3i",
+      "serie": "PF5Q6ME3",
+      "nombre_dispositivo": "LUKMAR37",
+      "mac_wifi": "28:0C:50:B3:4B:79",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 500,
+      "procesador": "i5",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2025-07-22",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Patricio Sauce",
+          "cargo": "Analista de Selección y Desarrollo",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Patricio Sauce",
+        "numero_original": 29,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 38,
+        "id_anterior": "COMP-029"
+      }
+    },
+    {
+      "id": 30,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Lissette Garcia",
+        "cargo": "Asistente SISO"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "IDEAPAD Slim 3i",
+      "serie": "PF5QKZM0",
+      "nombre_dispositivo": "LUKMAR38",
+      "mac_wifi": "28:0C:50:B2:E9:F4",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 500,
+      "procesador": "i5",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2025-07-22",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Lissette Garcia",
+          "cargo": "Asistente SISO",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Lissette Garcia",
+        "numero_original": 30,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 39,
+        "id_anterior": "COMP-030"
+      }
+    },
+    {
+      "id": 31,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Jorge Cabezas",
+        "cargo": "Coordinador de Bodega"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "V15 G4 IRU",
+      "serie": "SPF5B0XT1",
+      "nombre_dispositivo": "LUKMAR39",
+      "mac_wifi": "70:08:94:A2:8A:9D",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 500,
+      "procesador": "i7",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2025-07-22",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jorge Cabezas",
+          "cargo": "Coordinador de Bodega",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Mauricio Alvarado",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Jorge Cabezas /Mauricio Alvarado",
+        "numero_original": 31,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 40,
+        "id_anterior": "COMP-031"
+      }
+    },
+    {
+      "id": 32,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Pablo Cabrera",
+        "cargo": "Jefe de Producción"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "V15 G4 IRU",
+      "serie": "PF5B0RRS",
+      "nombre_dispositivo": "LUKMAR40",
+      "mac_wifi": "70:08:94:AD:08:83",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 500,
+      "procesador": "i7",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2025-07-22",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Pablo Cabrera",
+          "cargo": "Jefe de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Alejandra Argandoña",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Junior Almeida",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Pablo Cabrera/Alejandra Argandoña/Junior Almeida",
+        "numero_original": 32,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 41,
+        "id_anterior": "COMP-032"
+      }
+    },
+    {
+      "id": 33,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Maria Franco",
+        "cargo": "Asistente de Tesorería"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "83ER",
+      "serie": "PF5Q6RCY",
+      "nombre_dispositivo": "LUKMAR41",
+      "mac_wifi": "28:0C:50:DC:93:F8",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 500,
+      "procesador": "i5",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2025-07-22",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Maria Franco",
+          "cargo": "Asistente de Tesorería",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Maria Franco",
+        "numero_original": 33,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 42,
+        "id_anterior": "COMP-033"
+      }
+    },
+    {
+      "id": 34,
+      "propiedad": "propio",
+      "custodio": null,
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "LEGION 5 16IRX9",
+      "serie": "MP2PTXZT",
+      "nombre_dispositivo": "LUKMAR42",
+      "mac_wifi": "70:08:94:CD:EB:B5",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 32,
+      "disco_gb": 1000,
+      "procesador": "i7",
+      "proveedor": "Makrosystem",
+      "fecha_adquisicion": "2025-08-13",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Carlos Velez",
+          "cargo": "Coordinador de Proyectos",
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Disponible/Carlos Velez",
+        "numero_original": 34,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 43,
+        "id_anterior": "COMP-034"
+      }
+    },
+    {
+      "id": 35,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Angelo Franco",
+        "cargo": "Auxiliar Contable"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "83ER",
+      "serie": "PF507599",
+      "nombre_dispositivo": "LUKMAR32",
+      "mac_wifi": "70:08:94:13:BB:4F",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 500,
+      "procesador": "i5",
+      "proveedor": "COMPUTRON",
+      "fecha_adquisicion": "2025-04-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Angelo Franco",
+          "cargo": "Auxiliar Contable",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "José Castillo",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Robert  Knezevich León",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Angelo Franco/José Castillo/Robert  Knezevich León",
+        "numero_original": 35,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 44,
+        "id_anterior": "COMP-035"
+      }
+    },
+    {
+      "id": 36,
+      "propiedad": "propio",
+      "custodio": null,
+      "tipo": "Desktop",
+      "marca": "Apple",
+      "modelo": "Mac Mini",
+      "serie": "H2WHM2BWQ6NV",
+      "nombre_dispositivo": "Mac Mini de Julio",
+      "mac_wifi": "14:98:77:84:A6:5E",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": "M1",
+      "proveedor": null,
+      "fecha_adquisicion": "2020-02-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Gabriela Orellana",
+          "cargo": "Analista de Tesorería",
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Disponible/Gabriela Orellana",
+        "numero_original": 36,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 45,
+        "id_anterior": "COMP-036"
+      }
+    },
+    {
+      "id": 37,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Yulexi Llumitaxi EQ",
+        "cargo": "Analista de Tesorería"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "83ER",
+      "serie": "PF50VQH3",
+      "nombre_dispositivo": "LUKMAR43",
+      "mac_wifi": "E0:8F:4C:AB:9E:1A",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 500,
+      "procesador": "i5",
+      "proveedor": "COMPUTRON",
+      "fecha_adquisicion": "2025-03-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Yulexi Llumitaxi EQ",
+          "cargo": "Analista de Tesorería",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Andres García",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Yulexi Llumitaxi EQ/Andres García",
+        "numero_original": 37,
+        "estado_notas": "2025-03-01",
+        "seccion_origen": "Computadores",
+        "fila_excel": 46,
+        "id_anterior": "COMP-037"
+      }
+    },
+    {
+      "id": 38,
+      "propiedad": "propio",
+      "custodio": null,
+      "tipo": "Desktop",
+      "marca": "Apple",
+      "modelo": "Mac Mini",
+      "serie": "DFH45M93W1",
+      "nombre_dispositivo": "Mac Mini de Costos",
+      "mac_wifi": "5C:1B:F4:7C:C7:37",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2023-02-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Maria Franco",
+          "cargo": "Asistente de Tesorería",
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Disponible/Maria Franco",
+        "numero_original": 38,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 47,
+        "id_anterior": "COMP-038"
+      }
+    },
+    {
+      "id": 39,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Estela Estrada",
+        "cargo": "Líder de Personas"
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "Apple M3",
+      "serie": "CLQ6XMXX1Q",
+      "nombre_dispositivo": "Macbook Air de Talento",
+      "mac_wifi": "E6:55:2C:B4:99:79",
+      "mac_ethernet": "26:A6:29:D1:DC:05",
+      "sistema_operativo": "Apple",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": "M3",
+      "proveedor": null,
+      "fecha_adquisicion": "2024-10-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Estela Estrada",
+          "cargo": "Líder de Personas",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Marcela Vacas EQ",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Estela Estrada/Marcela Vacas EQ",
+        "numero_original": 39,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 48,
+        "id_anterior": "COMP-039"
+      }
+    },
+    {
+      "id": 40,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Data Center",
+        "cargo": "Soporte TI"
+      },
+      "tipo": "Desktop",
+      "marca": "Intel",
+      "modelo": "NUC7I7BNH",
+      "serie": "G6BN95000LB9",
+      "nombre_dispositivo": "DataCenter2",
+      "mac_wifi": "4C:1D:96:60:22:73",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 500,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Data Center",
+          "cargo": "Soporte TI",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "area",
+          "nombre": "ORV Oficina EQ",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Tania Yagual",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Ruddy Medina",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "DataCenter/ORV Oficina EQ/Tania Yagual/Ruddy Medina",
+        "numero_original": 40,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 49,
+        "id_anterior": "COMP-040"
+      }
+    },
+    {
+      "id": 41,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "SalaSesionEQ",
+        "cargo": "Pasante Financiero"
+      },
+      "tipo": "Desktop",
+      "marca": "Intel",
+      "modelo": "NUC7i3BNH",
+      "serie": "G6BN72400CZA",
+      "nombre_dispositivo": "DESKTOP-VJ0D15H",
+      "mac_wifi": "F8:63:3F:44:9A:EE",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 8,
+      "disco_gb": 125,
+      "procesador": "i3",
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "SalaSesionEQ",
+          "cargo": "Pasante Financiero",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Pasante Fin",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Tania Yagual",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Katherine Pincay",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "SalaSesionEQ/Pasante Fin/Tania Yagual/Katherine Pincay",
+        "numero_original": 41,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 50,
+        "id_anterior": "COMP-041"
+      }
+    },
+    {
+      "id": 42,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Victor Chiriguayo (Provexpo)",
+        "cargo": "Asistente Contable"
+      },
+      "tipo": "Desktop",
+      "marca": "Intel",
+      "modelo": "NUC10FNH",
+      "serie": "GEFN010003Q3",
+      "nombre_dispositivo": "DESKTOP-E4Q1U2K",
+      "mac_wifi": "1C:69:7A:61:F3:B7",
+      "mac_ethernet": "D8:3B:BF:93:A7:60",
+      "sistema_operativo": "Windows",
+      "ram_gb": 32,
+      "disco_gb": 500,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Victor Chiriguayo (Provexpo)",
+          "cargo": "Asistente Contable",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Victor Chiriguayo (Provexpo)",
+        "numero_original": 42,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 51,
+        "id_anterior": "COMP-042"
+      }
+    },
+    {
+      "id": 43,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Rosa Zambrano (Provexpo)",
+        "cargo": "Contador General (Asesor)"
+      },
+      "tipo": "Desktop",
+      "marca": "Intel",
+      "modelo": "NUC7i7bnh",
+      "serie": "G6BN951001DD",
+      "nombre_dispositivo": "DESKTOP-8UF6O6T",
+      "mac_wifi": "4C:1D:96:60:43:25",
+      "mac_ethernet": "1C:69:7A:0E:BC:F3",
+      "sistema_operativo": "Windows",
+      "ram_gb": 8,
+      "disco_gb": 500,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Rosa Zambrano (Provexpo)",
+          "cargo": "Contador General (Asesor)",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Rosa Zambrano (Provexpo)",
+        "numero_original": 43,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 52,
+        "id_anterior": "COMP-043"
+      }
+    },
+    {
+      "id": 44,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Emily Zambrano (Provexpo)",
+        "cargo": "Asistente Contable"
+      },
+      "tipo": "Desktop",
+      "marca": "Intel",
+      "modelo": "NUC10FNH",
+      "serie": "GEFN010002H2",
+      "nombre_dispositivo": "DESKTOP-AR1PBJH",
+      "mac_wifi": "D8:3B:BF:99:85:2C",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Emily Zambrano (Provexpo)",
+          "cargo": "Asistente Contable",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Emily Zambrano (Provexpo)",
+        "numero_original": 44,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 53,
+        "id_anterior": "COMP-044"
+      }
+    },
+    {
+      "id": 45,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Tania Yagual (Provexpo)",
+        "cargo": "Coordinador de Personas"
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "MacBook Air M1, 2020",
+      "serie": "FVFHN7SPQ6L7",
+      "nombre_dispositivo": "MacBook  Air de Tania",
+      "mac_wifi": "80:65:7C:E9:53:E9",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": "M1",
+      "proveedor": null,
+      "fecha_adquisicion": "2022-06-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Tania Yagual (Provexpo)",
+          "cargo": "Coordinador de Personas",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Tania Yagual (Provexpo)",
+        "numero_original": 45,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 54,
+        "id_anterior": "COMP-045"
+      }
+    },
+    {
+      "id": 46,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Rosa Zambrano (Provexpo)",
+        "cargo": "Contador General (Asesor)"
+      },
+      "tipo": "Laptop",
+      "marca": "Dell",
+      "modelo": "Insprion 15",
+      "serie": "GSJQX04",
+      "nombre_dispositivo": "ROSA",
+      "mac_wifi": "4C:82:A9:D9:5A:A9",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 8,
+      "disco_gb": 500,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Rosa Zambrano (Provexpo)",
+          "cargo": "Contador General (Asesor)",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Rosa Zambrano (Provexpo)",
+        "numero_original": 46,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 55,
+        "id_anterior": "COMP-046"
+      }
+    },
+    {
+      "id": 47,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Marco Antonio Loza",
+        "cargo": "Seguridad Física"
+      },
+      "tipo": "Desktop",
+      "marca": "Intel",
+      "modelo": "NUC7i5BNH",
+      "serie": "G6BN741006PQ",
+      "nombre_dispositivo": "DESKTOP-CGTR2OM",
+      "mac_wifi": "94:C6:91:16:27:30",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": "2020-01-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Marco Antonio Loza",
+          "cargo": "Seguridad Física",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Marco Antonio Loza",
+        "numero_original": 47,
+        "estado_notas": "2025-03-01",
+        "seccion_origen": "Computadores",
+        "fila_excel": 56,
+        "id_anterior": "COMP-047"
+      }
+    },
+    {
+      "id": 48,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Nicolle Goyes",
+        "cargo": "Asistente de Tesorería"
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "Mac17,5",
+      "serie": "XVM07QW9PW",
+      "nombre_dispositivo": "Lukmar48",
+      "mac_wifi": "5C:13:AC:4A:3D:9E",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": null,
+      "disco_gb": 250,
+      "procesador": "Apple A18 Pro",
+      "proveedor": null,
+      "fecha_adquisicion": "2026-07-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Nicolle Goyes",
+          "cargo": "Asistente de Tesorería",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Nicolle Goyes",
+        "numero_original": 48,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 57,
+        "id_anterior": "COMP-048"
+      }
+    },
+    {
+      "id": 49,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Byron Gonzabay",
+        "cargo": "Coordinador de Alimentación"
+      },
+      "tipo": "Laptop",
+      "marca": "Dell",
+      "modelo": "Inspiron 3593",
+      "serie": "468RLB3",
+      "nombre_dispositivo": "LUKMAR49",
+      "mac_wifi": "64:6C:80:B2:5C:01",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 250,
+      "procesador": "Intel Core i5-1035G1 @ 1.00GHz",
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Byron Gonzabay",
+          "cargo": "Coordinador de Alimentación",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Ricardo Ayora",
+          "cargo": "Jefe de Mantenimiento",
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Joel Sánchez",
+          "cargo": "Coordinador de Alimentación",
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "computador",
+        "custodio_texto": "Byron Gonzabay/Ricardo Ayora/Joel Sánchez",
+        "numero_original": 49,
+        "estado_notas": null,
+        "seccion_origen": "Computadores",
+        "fila_excel": 58,
+        "id_anterior": "COMP-049"
+      }
+    },
+    {
+      "id": 50,
+      "propiedad": "rentado",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Daniel Gonzalez",
+        "cargo": "Gerente de Producción"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "ThinkBook 16 G8 IAL",
+      "serie": "PW0L6ZJZ",
+      "nombre_dispositivo": "LUKMARMTEC01",
+      "mac_wifi": "14:B5:CD:1E:8C:AB",
+      "mac_ethernet": "98:E7:43:4A:CB:33",
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 953,
+      "procesador": "U7",
+      "proveedor": "MARTEC",
+      "fecha_adquisicion": "2025-12-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Daniel Gonzalez",
+          "cargo": "Gerente de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "renta",
+        "custodio_texto": "Daniel Gonzalez",
+        "numero_original": 1,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Renta Marctec",
+        "fila_excel": 63,
+        "id_anterior": "REN-001"
+      }
+    },
+    {
+      "id": 51,
+      "propiedad": "rentado",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Maria Bonifaz",
+        "cargo": "Jefe de Calidad"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "ThinkBook 16 G8 IAL",
+      "serie": "PW0L6ZL1",
+      "nombre_dispositivo": "LUKMARMTEC02",
+      "mac_wifi": "14:B5:CD:1E:8C:DF",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 953,
+      "procesador": "U7",
+      "proveedor": "MARTEC",
+      "fecha_adquisicion": "2025-12-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Maria Bonifaz",
+          "cargo": "Jefe de Calidad",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "renta",
+        "custodio_texto": "Maria Bonifaz",
+        "numero_original": 2,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Renta Marctec",
+        "fila_excel": 64,
+        "id_anterior": "REN-002"
+      }
+    },
+    {
+      "id": 52,
+      "propiedad": "rentado",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Mariela Zambrano",
+        "cargo": "Tesorera"
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": "ThinkBook 16 G8 IAL",
+      "serie": "PW0L6ZKC",
+      "nombre_dispositivo": "LUKMARMTEC03",
+      "mac_wifi": "14:B5:CD:1E:8C:D7",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 953,
+      "procesador": "U7",
+      "proveedor": "MARTEC",
+      "fecha_adquisicion": "2025-12-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Mariela Zambrano",
+          "cargo": "Tesorera",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "renta",
+        "custodio_texto": "Mariela Zambrano",
+        "numero_original": 3,
+        "estado_notas": null,
+        "seccion_origen": "Renta Marctec",
+        "fila_excel": 65,
+        "id_anterior": "REN-003"
+      }
+    },
+    {
+      "id": 53,
+      "propiedad": "rentado",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Erick Delgado",
+        "cargo": "Supervisor de Producción"
+      },
+      "tipo": "Laptop",
+      "marca": "HP",
+      "modelo": "HP ProBook 460 G11",
+      "serie": "1H85120FM1",
+      "nombre_dispositivo": "LUKMARMTEC04",
+      "mac_wifi": "E4:1F:D5:D7:87:A5",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 443,
+      "procesador": "U5",
+      "proveedor": "MARTEC",
+      "fecha_adquisicion": "2025-12-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Erick Delgado",
+          "cargo": "Supervisor de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "renta",
+        "custodio_texto": "Erick Delgado",
+        "numero_original": 4,
+        "estado_notas": null,
+        "seccion_origen": "Renta Marctec",
+        "fila_excel": 66,
+        "id_anterior": "REN-004"
+      }
+    },
+    {
+      "id": 54,
+      "propiedad": "rentado",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Alexander Quelal",
+        "cargo": "Supervisor de Producción"
+      },
+      "tipo": "Laptop",
+      "marca": "HP",
+      "modelo": "HP ProBook 460 G11",
+      "serie": "1H85352FH5",
+      "nombre_dispositivo": "LUKMARMTEC05",
+      "mac_wifi": "D4:AB:61:71:1F:EC",
+      "mac_ethernet": "C0:3E:BA:03:D5:92",
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 443,
+      "procesador": "U5",
+      "proveedor": "MARTEC",
+      "fecha_adquisicion": "2025-12-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Alexander Quelal",
+          "cargo": "Supervisor de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "renta",
+        "custodio_texto": "Alexander Quelal",
+        "numero_original": 5,
+        "estado_notas": "Validar",
+        "seccion_origen": "Renta Marctec",
+        "fila_excel": 67,
+        "id_anterior": "REN-005"
+      }
+    },
+    {
+      "id": 55,
+      "propiedad": "rentado",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "kevin Vargas",
+        "cargo": "Coordinador SGI"
+      },
+      "tipo": "Laptop",
+      "marca": "HP",
+      "modelo": "HP ProBook 460 G11",
+      "serie": "1H85352FHD",
+      "nombre_dispositivo": "LUKMARMTEC06",
+      "mac_wifi": "D4:AB:61:74:D8:12",
+      "mac_ethernet": "1C:69:7A:02:69:03",
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 920,
+      "procesador": "U5",
+      "proveedor": "MARTEC",
+      "fecha_adquisicion": "2025-12-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "kevin Vargas",
+          "cargo": "Coordinador SGI",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "renta",
+        "custodio_texto": "kevin Vargas",
+        "numero_original": 6,
+        "estado_notas": null,
+        "seccion_origen": "Renta Marctec",
+        "fila_excel": 68,
+        "id_anterior": "REN-006"
+      }
+    },
+    {
+      "id": 56,
+      "propiedad": "rentado",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Wladimir Baquerizo",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Laptop",
+      "marca": "HP",
+      "modelo": "HP ProBook 460 G11",
+      "serie": "1H85352FHC",
+      "nombre_dispositivo": "LUKMARMTEC07",
+      "mac_wifi": "D4:AB:61:74:CB:1F",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 954,
+      "procesador": "U5",
+      "proveedor": "MARTEC",
+      "fecha_adquisicion": "2025-12-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Wladimir Baquerizo",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "renta",
+        "custodio_texto": "Wladimir Baquerizo",
+        "numero_original": 7,
+        "estado_notas": null,
+        "seccion_origen": "Renta Marctec",
+        "fila_excel": 69,
+        "id_anterior": "REN-007"
+      }
+    },
+    {
+      "id": 57,
+      "propiedad": "rentado",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "William Cabrera",
+        "cargo": "Bodega"
+      },
+      "tipo": "Laptop",
+      "marca": "HP",
+      "modelo": "HP ProBook 460 G11",
+      "serie": "1H85352FHG",
+      "nombre_dispositivo": "LUKMARMTEC08",
+      "mac_wifi": "D4:AB:61:71:78:1B",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 8,
+      "disco_gb": 250,
+      "procesador": "U5",
+      "proveedor": "MARTEC",
+      "fecha_adquisicion": "2025-12-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "William Cabrera",
+          "cargo": "Bodega",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "renta",
+        "custodio_texto": "William Cabrera",
+        "numero_original": 8,
+        "estado_notas": null,
+        "seccion_origen": "Renta Marctec",
+        "fila_excel": 70,
+        "id_anterior": "REN-008"
+      }
+    },
+    {
+      "id": 58,
+      "propiedad": "rentado",
+      "custodio": null,
+      "tipo": "Laptop",
+      "marca": "HP",
+      "modelo": "HP ProBook 460 G11",
+      "serie": "1H85120FM9",
+      "nombre_dispositivo": "LUKMARMTEC09",
+      "mac_wifi": "E4:1F:D5:DB:4C:37",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 16,
+      "disco_gb": 477,
+      "procesador": "Intel Core Ultra 5 125U",
+      "proveedor": "MARTEC",
+      "fecha_adquisicion": "2025-12-01",
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Luis Mariñas",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        },
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jose Andrade",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": "2026-08-05",
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "renta",
+        "custodio_texto": "Disponible/Luis Mariñas/Jose Andrade",
+        "numero_original": 9,
+        "estado_notas": null,
+        "seccion_origen": "Renta Marctec",
+        "fila_excel": 71,
+        "id_anterior": "REN-009"
+      }
+    },
+    {
+      "id": 59,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Jose Andrade",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Celular",
+      "marca": "Redmi",
+      "modelo": "A5 - 25028RN03L",
+      "serie": "64303/W5XE00787",
+      "nombre_dispositivo": "LUKMARMCEL01",
+      "mac_wifi": "88:B9:51:43:B5:D8",
+      "mac_ethernet": null,
+      "sistema_operativo": "Android V15",
+      "ram_gb": 4,
+      "disco_gb": 128,
+      "procesador": "8 Núcleos",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2026-02-09",
+      "celular": {
+        "gmail": "lukmarcell.1@gmail.com",
+        "password": "CelularLkm1."
+      },
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jose Andrade",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "celular",
+        "custodio_texto": "Jose Andrade",
+        "numero_original": 1,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Celulares",
+        "fila_excel": 75,
+        "id_anterior": "CEL-001"
+      }
+    },
+    {
+      "id": 60,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Jose Andrade",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Celular",
+      "marca": "Redmi",
+      "modelo": "A5 - 25028RN03L",
+      "serie": "64303/W5XR03430",
+      "nombre_dispositivo": "LUKMARMCEL02",
+      "mac_wifi": "88:B9:51:9A:A4:D8",
+      "mac_ethernet": null,
+      "sistema_operativo": "Android V15",
+      "ram_gb": 4,
+      "disco_gb": 128,
+      "procesador": "8 Núcleos",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2026-02-09",
+      "celular": {
+        "gmail": "lukmarcell.1@gmail.com",
+        "password": "CelularLkm1."
+      },
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jose Andrade",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "celular",
+        "custodio_texto": "Jose Andrade",
+        "numero_original": 2,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Celulares",
+        "fila_excel": 76,
+        "id_anterior": "CEL-002"
+      }
+    },
+    {
+      "id": 61,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Jose Andrade",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Celular",
+      "marca": "Redmi",
+      "modelo": "A5 - 25028RN03L",
+      "serie": "64303/W5XE00755",
+      "nombre_dispositivo": "LUKMARMCEL03",
+      "mac_wifi": "88:B9:51:43:B5:0A",
+      "mac_ethernet": null,
+      "sistema_operativo": "Android V15",
+      "ram_gb": 4,
+      "disco_gb": 128,
+      "procesador": "8 Núcleos",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2026-02-09",
+      "celular": {
+        "gmail": "lukmarcell.1@gmail.com",
+        "password": "CelularLkm1."
+      },
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jose Andrade",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "celular",
+        "custodio_texto": "Jose Andrade",
+        "numero_original": 3,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Celulares",
+        "fila_excel": 77,
+        "id_anterior": "CEL-003"
+      }
+    },
+    {
+      "id": 62,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Jose Andrade",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Celular",
+      "marca": "Redmi",
+      "modelo": "A5 - 25028RN03L",
+      "serie": "64303/W5XE00744",
+      "nombre_dispositivo": "LUKMARMCEL04",
+      "mac_wifi": "88:B9:51:43:B4:D0",
+      "mac_ethernet": null,
+      "sistema_operativo": "Android V15",
+      "ram_gb": 4,
+      "disco_gb": 128,
+      "procesador": "8 Núcleos",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2026-02-09",
+      "celular": {
+        "gmail": "lukmarcell.1@gmail.com",
+        "password": "CelularLkm1."
+      },
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jose Andrade",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "celular",
+        "custodio_texto": "Jose Andrade",
+        "numero_original": 4,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Celulares",
+        "fila_excel": 78,
+        "id_anterior": "CEL-004"
+      }
+    },
+    {
+      "id": 63,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Jose Andrade",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Celular",
+      "marca": "Redmi",
+      "modelo": "A5 - 25028RN03L",
+      "serie": "64303/W5XE00788",
+      "nombre_dispositivo": "LUKMARMCEL05",
+      "mac_wifi": "88:B9:51:43:B6:46",
+      "mac_ethernet": null,
+      "sistema_operativo": "Android V15",
+      "ram_gb": 4,
+      "disco_gb": 128,
+      "procesador": "8 Núcleos",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2026-02-09",
+      "celular": {
+        "gmail": "lukmarcel.5@gmail.com",
+        "password": "CelularLkm1."
+      },
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jose Andrade",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "celular",
+        "custodio_texto": "Jose Andrade",
+        "numero_original": 5,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Celulares",
+        "fila_excel": 79,
+        "id_anterior": "CEL-005"
+      }
+    },
+    {
+      "id": 64,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Jose Andrade",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Celular",
+      "marca": "Redmi",
+      "modelo": "A5 - 25028RN03L",
+      "serie": "64303/W5XR03511",
+      "nombre_dispositivo": "LUKMARMCEL06",
+      "mac_wifi": "88:B9:51:9A:A8:54",
+      "mac_ethernet": null,
+      "sistema_operativo": "Android V15",
+      "ram_gb": 4,
+      "disco_gb": 128,
+      "procesador": "8 Núcleos",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2026-02-09",
+      "celular": {
+        "gmail": "lukmarcell.1@gmail.com",
+        "password": "CelularLkm1."
+      },
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jose Andrade",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "celular",
+        "custodio_texto": "Jose Andrade",
+        "numero_original": 6,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Celulares",
+        "fila_excel": 80,
+        "id_anterior": "CEL-006"
+      }
+    },
+    {
+      "id": 65,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Jose Andrade",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Celular",
+      "marca": "Redmi",
+      "modelo": "A5 - 25028RN03L",
+      "serie": "64303/W5XR03522",
+      "nombre_dispositivo": "LUKMARMCEL07",
+      "mac_wifi": "88:B9:51:9A:9A:68",
+      "mac_ethernet": null,
+      "sistema_operativo": "Android V15",
+      "ram_gb": 4,
+      "disco_gb": 128,
+      "procesador": "8 Núcleos",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2026-02-09",
+      "celular": {
+        "gmail": "lukmarcell.1@gmail.com",
+        "password": "CelularLkm1."
+      },
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jose Andrade",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "celular",
+        "custodio_texto": "Jose Andrade",
+        "numero_original": 7,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Celulares",
+        "fila_excel": 81,
+        "id_anterior": "CEL-007"
+      }
+    },
+    {
+      "id": 66,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Jose Andrade",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Celular",
+      "marca": "Redmi",
+      "modelo": "A5 - 25028RN03L",
+      "serie": "64303/W5XR01365",
+      "nombre_dispositivo": "LUKMARMCEL08",
+      "mac_wifi": "44:CB:AD:7D:D8:EE",
+      "mac_ethernet": null,
+      "sistema_operativo": "Android V15",
+      "ram_gb": 4,
+      "disco_gb": 128,
+      "procesador": "8 Núcleos",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2026-02-09",
+      "celular": {
+        "gmail": "lukmarcell.1@gmail.com",
+        "password": "CelularLkm1."
+      },
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jose Andrade",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "celular",
+        "custodio_texto": "Jose Andrade",
+        "numero_original": 8,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Celulares",
+        "fila_excel": 82,
+        "id_anterior": "CEL-008"
+      }
+    },
+    {
+      "id": 67,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Jose Andrade",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Celular",
+      "marca": "Redmi",
+      "modelo": "A5 - 25028RN03L",
+      "serie": "64303/W5XE00793",
+      "nombre_dispositivo": "LUKMARMCEL09",
+      "mac_wifi": "88:B9:51:43:B6:4E",
+      "mac_ethernet": null,
+      "sistema_operativo": "Android V15",
+      "ram_gb": 4,
+      "disco_gb": 128,
+      "procesador": "8 Núcleos",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2026-02-09",
+      "celular": {
+        "gmail": "lukmarcell.1@gmail.com",
+        "password": "CelularLkm1."
+      },
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Jose Andrade",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "celular",
+        "custodio_texto": "Jose Andrade",
+        "numero_original": 9,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Celulares",
+        "fila_excel": 83,
+        "id_anterior": "CEL-009"
+      }
+    },
+    {
+      "id": 68,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Wladimir Baquerizo",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Celular",
+      "marca": "Redmi",
+      "modelo": "A5 - 25028RN03L",
+      "serie": "64303/W5XR01368",
+      "nombre_dispositivo": "LUKMARMCEL10",
+      "mac_wifi": "44:CB:AD:7D:D9:40",
+      "mac_ethernet": null,
+      "sistema_operativo": "Android V15",
+      "ram_gb": 4,
+      "disco_gb": 128,
+      "procesador": "8 Núcleos",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2026-02-09",
+      "celular": {
+        "gmail": "lukmarcell.1@gmail.com",
+        "password": "CelularLkm1."
+      },
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Wladimir Baquerizo",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "celular",
+        "custodio_texto": "Wladimir Baquerizo",
+        "numero_original": 10,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Celulares",
+        "fila_excel": 84,
+        "id_anterior": "CEL-010"
+      }
+    },
+    {
+      "id": 69,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Wladimir Baquerizo",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Celular",
+      "marca": "Redmi",
+      "modelo": "A5 - 25028RN03L",
+      "serie": "64303/W5XR01370",
+      "nombre_dispositivo": "LUKMARMCEL11",
+      "mac_wifi": "44:CB:AD:7D:D5:BC",
+      "mac_ethernet": null,
+      "sistema_operativo": "Android V15",
+      "ram_gb": 4,
+      "disco_gb": 128,
+      "procesador": "8 Núcleos",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2026-02-09",
+      "celular": {
+        "gmail": "lukmarcell.1@gmail.com",
+        "password": "CelularLkm1."
+      },
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Wladimir Baquerizo",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "celular",
+        "custodio_texto": "Wladimir Baquerizo",
+        "numero_original": 11,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Celulares",
+        "fila_excel": 85,
+        "id_anterior": "CEL-011"
+      }
+    },
+    {
+      "id": 70,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Wladimir Baquerizo",
+        "cargo": "Coordinador de Producción"
+      },
+      "tipo": "Celular",
+      "marca": "Redmi",
+      "modelo": "A5 - 25028RN03L",
+      "serie": "64303/W5XR00389",
+      "nombre_dispositivo": "LUKMARMCEL12",
+      "mac_wifi": "88:B9:51:9A:A1:EE",
+      "mac_ethernet": null,
+      "sistema_operativo": "Android V15",
+      "ram_gb": 4,
+      "disco_gb": 128,
+      "procesador": "8 Núcleos",
+      "proveedor": "DTS",
+      "fecha_adquisicion": "2026-02-09",
+      "celular": {
+        "gmail": "lukmarcell.1@gmail.com",
+        "password": "CelularLkm1."
+      },
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Wladimir Baquerizo",
+          "cargo": "Coordinador de Producción",
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "celular",
+        "custodio_texto": "Wladimir Baquerizo",
+        "numero_original": 12,
+        "estado_notas": "Renovar",
+        "seccion_origen": "Celulares",
+        "fila_excel": 86,
+        "id_anterior": "CEL-012"
+      }
+    },
+    {
+      "id": 71,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Financiero",
+        "cargo": null
+      },
+      "tipo": "SmartTV",
+      "marca": "Samsung",
+      "modelo": "UN85DU7000PXPA",
+      "serie": "0GUF3CBY100166P",
+      "nombre_dispositivo": "LukmarTV",
+      "mac_wifi": "F4:DD:06:79:6A:6A",
+      "mac_ethernet": null,
+      "sistema_operativo": null,
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Financiero",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "televisor",
+        "custodio_texto": "Financiero",
+        "numero_original": 1,
+        "estado_notas": null,
+        "seccion_origen": "Televisores",
+        "fila_excel": 91,
+        "id_anterior": "TV-001"
+      }
+    },
+    {
+      "id": 72,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Financiero",
+        "cargo": null
+      },
+      "tipo": "SmartTV",
+      "marca": "Samsung",
+      "modelo": null,
+      "serie": null,
+      "nombre_dispositivo": "Comedor (TV)",
+      "mac_wifi": "1C:86:9A:C1:48:DC",
+      "mac_ethernet": null,
+      "sistema_operativo": null,
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Financiero",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "televisor",
+        "custodio_texto": "Financiero",
+        "numero_original": 2,
+        "estado_notas": null,
+        "seccion_origen": "Televisores",
+        "fila_excel": 92,
+        "id_anterior": "TV-002"
+      }
+    },
+    {
+      "id": 73,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Comedor",
+        "cargo": null
+      },
+      "tipo": "SmartTV",
+      "marca": "Samsung",
+      "modelo": "UN75BU8000PXPA",
+      "serie": "0DGF3CNT500118Z",
+      "nombre_dispositivo": "Campamento (TV)",
+      "mac_wifi": "A0:D0:5B:19:0A:4C",
+      "mac_ethernet": null,
+      "sistema_operativo": null,
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Comedor",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "televisor",
+        "custodio_texto": "Comedor",
+        "numero_original": 3,
+        "estado_notas": null,
+        "seccion_origen": "Televisores",
+        "fila_excel": 93,
+        "id_anterior": "TV-003"
+      }
+    },
+    {
+      "id": 74,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Data Center",
+        "cargo": null
+      },
+      "tipo": "Impresora",
+      "marca": "Epson",
+      "modelo": "WF 5790",
+      "serie": null,
+      "nombre_dispositivo": null,
+      "mac_wifi": "9C:AE:D3:AD:0F:D4",
+      "mac_ethernet": null,
+      "sistema_operativo": null,
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Data Center",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "impresora_scanner",
+        "custodio_texto": "Data Center",
+        "numero_original": 2,
+        "estado_notas": null,
+        "seccion_origen": "Impresoras y escáneres",
+        "fila_excel": 97,
+        "id_anterior": "IMP-001"
+      }
+    },
+    {
+      "id": 75,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Financiero",
+        "cargo": null
+      },
+      "tipo": "Impresora",
+      "marca": "Epson",
+      "modelo": "L4260",
+      "serie": "X8RX288274",
+      "nombre_dispositivo": "EPSONL4260 TESOR LKM",
+      "mac_wifi": "68:55:D4:37:F9:DA",
+      "mac_ethernet": null,
+      "sistema_operativo": null,
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Financiero",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "impresora_scanner",
+        "custodio_texto": "Financiero",
+        "numero_original": 3,
+        "estado_notas": null,
+        "seccion_origen": "Impresoras y escáneres",
+        "fila_excel": 98,
+        "id_anterior": "IMP-002"
+      }
+    },
+    {
+      "id": 76,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Financiero",
+        "cargo": null
+      },
+      "tipo": "Scanner",
+      "marca": "Epson",
+      "modelo": "ES-500W",
+      "serie": "X2HL056563",
+      "nombre_dispositivo": "ES-500W TESOR LKM",
+      "mac_wifi": "38:9D:92:A2:67:DC",
+      "mac_ethernet": null,
+      "sistema_operativo": null,
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Financiero",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "impresora_scanner",
+        "custodio_texto": "Financiero",
+        "numero_original": 4,
+        "estado_notas": null,
+        "seccion_origen": "Impresoras y escáneres",
+        "fila_excel": 99,
+        "id_anterior": "IMP-003"
+      }
+    },
+    {
+      "id": 77,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Financiero",
+        "cargo": null
+      },
+      "tipo": "Plotter",
+      "marca": "HP",
+      "modelo": "5HB06A",
+      "serie": "CN14M3M05Q",
+      "nombre_dispositivo": "HPFFED0D",
+      "mac_wifi": "84:2A:FD:FF:ED:0E",
+      "mac_ethernet": null,
+      "sistema_operativo": null,
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Financiero",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "impresora_scanner",
+        "custodio_texto": "Financiero",
+        "numero_original": 5,
+        "estado_notas": null,
+        "seccion_origen": "Impresoras y escáneres",
+        "fila_excel": 100,
+        "id_anterior": "IMP-004"
+      }
+    },
+    {
+      "id": 78,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Producción intensivo",
+        "cargo": null
+      },
+      "tipo": "Impresora",
+      "marca": "Epson",
+      "modelo": "EPSON L4360",
+      "serie": "XCZY004468",
+      "nombre_dispositivo": "EPSONL4360 PRODU LKM",
+      "mac_wifi": "A0:D0:5B:19:0A:4C",
+      "mac_ethernet": null,
+      "sistema_operativo": null,
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Producción intensivo",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "impresora_scanner",
+        "custodio_texto": "Producción intensivo",
+        "numero_original": 7,
+        "estado_notas": null,
+        "seccion_origen": "Impresoras y escáneres",
+        "fila_excel": 101,
+        "id_anterior": "IMP-005"
+      }
+    },
+    {
+      "id": 79,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "RRHH",
+        "cargo": null
+      },
+      "tipo": "Impresora",
+      "marca": "Epson",
+      "modelo": "EPSON L4360",
+      "serie": "XDN5026196",
+      "nombre_dispositivo": "EPSONL4360 RRHH LKM",
+      "mac_wifi": "68:55:D4:F6:8F:9D",
+      "mac_ethernet": null,
+      "sistema_operativo": null,
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "RRHH",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "impresora_scanner",
+        "custodio_texto": "RRHH",
+        "numero_original": 8,
+        "estado_notas": null,
+        "seccion_origen": "Impresoras y escáneres",
+        "fila_excel": 102,
+        "id_anterior": "IMP-006"
+      }
+    },
+    {
+      "id": 80,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Data Center",
+        "cargo": null
+      },
+      "tipo": "Impresora",
+      "marca": "Epson",
+      "modelo": "EPSON L4160",
+      "serie": "X4DU070327",
+      "nombre_dispositivo": "EPSONL4160 DC LKM",
+      "mac_wifi": "F8:D0:27:5E:43:E4",
+      "mac_ethernet": null,
+      "sistema_operativo": null,
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Data Center",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "impresora_scanner",
+        "custodio_texto": "Data Center",
+        "numero_original": 9,
+        "estado_notas": null,
+        "seccion_origen": "Impresoras y escáneres",
+        "fila_excel": 103,
+        "id_anterior": "IMP-007"
+      }
+    },
+    {
+      "id": 81,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "Dispensario",
+        "cargo": null
+      },
+      "tipo": "Impresora",
+      "marca": "Epson",
+      "modelo": "EPSON L4260",
+      "serie": "X8RX279402",
+      "nombre_dispositivo": "EPSONL4260 DISPEN LKM",
+      "mac_wifi": "68:55:D4:37:90:44",
+      "mac_ethernet": null,
+      "sistema_operativo": null,
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "Dispensario",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "impresora_scanner",
+        "custodio_texto": "Dispensario",
+        "numero_original": 10,
+        "estado_notas": null,
+        "seccion_origen": "Impresoras y escáneres",
+        "fila_excel": 104,
+        "id_anterior": "IMP-008"
+      }
+    },
+    {
+      "id": 82,
+      "propiedad": "propio",
+      "custodio": {
+        "tipo_custodio": "area",
+        "nombre": "RRHH",
+        "cargo": null
+      },
+      "tipo": "Scanner",
+      "marca": "Epson",
+      "modelo": "ES-400",
+      "serie": "X2H8073404",
+      "nombre_dispositivo": null,
+      "mac_wifi": null,
+      "mac_ethernet": null,
+      "sistema_operativo": null,
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "area",
+          "nombre": "RRHH",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "impresora_scanner",
+        "custodio_texto": "RRHH",
+        "numero_original": 10,
+        "estado_notas": "Retornar a Gerencia",
+        "seccion_origen": "Impresoras y escáneres",
+        "fila_excel": 105,
+        "id_anterior": "IMP-009"
+      }
+    },
+    {
+      "id": 83,
+      "propiedad": "externo",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Facundo Scavone",
+        "cargo": null
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "MacBook Air  M1",
+      "serie": null,
+      "nombre_dispositivo": null,
+      "mac_wifi": "46:56:C9:49:F6:A1",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Facundo Scavone",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "pc_externo",
+        "custodio_texto": "Facundo Scavone",
+        "numero_original": 1,
+        "estado_notas": null,
+        "seccion_origen": "PC Externos",
+        "fila_excel": 109,
+        "id_anterior": "EXT-001"
+      }
+    },
+    {
+      "id": 84,
+      "propiedad": "externo",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Oscar Ramirez",
+        "cargo": null
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "MacBook Air M2,2023",
+      "serie": null,
+      "nombre_dispositivo": null,
+      "mac_wifi": "42:1C:9E:E8:8E:C8",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Oscar Ramirez",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "pc_externo",
+        "custodio_texto": "Oscar Ramirez",
+        "numero_original": 2,
+        "estado_notas": null,
+        "seccion_origen": "PC Externos",
+        "fila_excel": 110,
+        "id_anterior": "EXT-002"
+      }
+    },
+    {
+      "id": 85,
+      "propiedad": "externo",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Luis Fernando Ochoa",
+        "cargo": null
+      },
+      "tipo": "Laptop",
+      "marca": "HP",
+      "modelo": "HP 348 G7",
+      "serie": "5CG1257XZ1",
+      "nombre_dispositivo": "DESKTOP-95DISA2",
+      "mac_wifi": "90:0F:0C:49:D3:C7",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": 8,
+      "disco_gb": 1000,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Luis Fernando Ochoa",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "pc_externo",
+        "custodio_texto": "Luis Fernando Ochoa",
+        "numero_original": 3,
+        "estado_notas": null,
+        "seccion_origen": "PC Externos",
+        "fila_excel": 111,
+        "id_anterior": "EXT-003"
+      }
+    },
+    {
+      "id": 86,
+      "propiedad": "externo",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Provexpo Rosa Zambrano",
+        "cargo": null
+      },
+      "tipo": "Laptop",
+      "marca": "Dell",
+      "modelo": "Inspiron 15",
+      "serie": null,
+      "nombre_dispositivo": "user",
+      "mac_wifi": "7C:70:DB:09:64:15",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Provexpo Rosa Zambrano",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "pc_externo",
+        "custodio_texto": "Provexpo Rosa Zambrano",
+        "numero_original": 4,
+        "estado_notas": null,
+        "seccion_origen": "PC Externos",
+        "fila_excel": 112,
+        "id_anterior": "EXT-004"
+      }
+    },
+    {
+      "id": 87,
+      "propiedad": "externo",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Rodrigo Castro",
+        "cargo": null
+      },
+      "tipo": "Laptop",
+      "marca": "Lenovo",
+      "modelo": null,
+      "serie": null,
+      "nombre_dispositivo": null,
+      "mac_wifi": "70:08:94:14:59:B1",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Rodrigo Castro",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "pc_externo",
+        "custodio_texto": "Rodrigo Castro",
+        "numero_original": 5,
+        "estado_notas": null,
+        "seccion_origen": "PC Externos",
+        "fila_excel": 113,
+        "id_anterior": "EXT-005"
+      }
+    },
+    {
+      "id": 88,
+      "propiedad": "externo",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Edwar Tulcan",
+        "cargo": null
+      },
+      "tipo": "Laptop",
+      "marca": "HP",
+      "modelo": "HP Laptop 15",
+      "serie": "5CD43049KB",
+      "nombre_dispositivo": "DESKTOP-E3IISB5",
+      "mac_wifi": "94:BB:43:D1:61:85",
+      "mac_ethernet": null,
+      "sistema_operativo": "Windows",
+      "ram_gb": null,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Edwar Tulcan",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "pc_externo",
+        "custodio_texto": "Edwar Tulcan",
+        "numero_original": 6,
+        "estado_notas": null,
+        "seccion_origen": "PC Externos",
+        "fila_excel": 114,
+        "id_anterior": "EXT-006"
+      }
+    },
+    {
+      "id": 89,
+      "propiedad": "externo",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Facundo Scavone",
+        "cargo": null
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "MacBook Pro",
+      "serie": null,
+      "nombre_dispositivo": "MacBook Pro (FSR)",
+      "mac_wifi": "4A:CD:C1:00:2E:8C",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 16,
+      "disco_gb": null,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Facundo Scavone",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "pc_externo",
+        "custodio_texto": "Facundo Scavone",
+        "numero_original": 7,
+        "estado_notas": null,
+        "seccion_origen": "PC Externos",
+        "fila_excel": 115,
+        "id_anterior": "EXT-007"
+      }
+    },
+    {
+      "id": 90,
+      "propiedad": "externo",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "David Molina",
+        "cargo": null
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "MacBook Pro Apple M3 Max",
+      "serie": "L6DHWXF7P6",
+      "nombre_dispositivo": "David's MacBook Pro",
+      "mac_wifi": "60:3E:5F:5C:55:5D",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 36,
+      "disco_gb": 1000,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "David Molina",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "pc_externo",
+        "custodio_texto": "David Molina",
+        "numero_original": 8,
+        "estado_notas": null,
+        "seccion_origen": "PC Externos",
+        "fila_excel": 116,
+        "id_anterior": "EXT-008"
+      }
+    },
+    {
+      "id": 91,
+      "propiedad": "externo",
+      "custodio": {
+        "tipo_custodio": "persona",
+        "nombre": "Mario Molina",
+        "cargo": null
+      },
+      "tipo": "Laptop",
+      "marca": "Apple",
+      "modelo": "MacBook Pro Apple M3 Max",
+      "serie": null,
+      "nombre_dispositivo": "Mario's MacBook Pro",
+      "mac_wifi": "F8:4D:89:99:33:AC",
+      "mac_ethernet": null,
+      "sistema_operativo": "Apple",
+      "ram_gb": 36,
+      "disco_gb": 1000,
+      "procesador": null,
+      "proveedor": null,
+      "fecha_adquisicion": null,
+      "celular": null,
+      "historial_custodia": [
+        {
+          "tipo_custodio": "persona",
+          "nombre": "Mario Molina",
+          "cargo": null,
+          "desde": "2026-08-05",
+          "hasta": null,
+          "tipo_devolucion": null,
+          "observacion": null
+        }
+      ],
+      "trazabilidad": {
+        "categoria": "pc_externo",
+        "custodio_texto": "Mario Molina",
+        "numero_original": 9,
+        "estado_notas": null,
+        "seccion_origen": "PC Externos",
+        "fila_excel": 117,
+        "id_anterior": "EXT-009"
+      }
+    }
+  ]
+}
