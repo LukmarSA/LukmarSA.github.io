@@ -4,6 +4,16 @@
    ============================================================ */
 const SUPABASE_URL = "https://tavyirvdfbetblprhtbo.supabase.co";
 const SUPABASE_KEY = "sb_publishable_-AXUgStuUjI8JENtt3BzUg_aDmlQPqX";
+// Si esto falla (CDN caído, bloqueador de anuncios, firewall corporativo
+// bloqueando cdn.jsdelivr.net, etc.), que se vea un mensaje claro en la
+// página en vez de quedar todo en blanco sin ninguna pista.
+if(!window.supabase){
+  const root = document.getElementById("app");
+  if(root) root.innerHTML = `<div class="login-wrap"><div class="login-card">
+    <div class="alert alert-error">No se pudo cargar la librería de Supabase desde cdn.jsdelivr.net.<br><br>Revisa tu conexión a internet, o si un bloqueador de anuncios / firewall está impidiendo la carga de ese dominio, y recarga la página.</div>
+  </div></div>`;
+  throw new Error("supabase-js no se cargó (revisa la etiqueta <script> de cdn.jsdelivr.net en index.html)");
+}
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // El login sigue pidiendo solo un "usuario" corto (admin/registrador/visitante,
