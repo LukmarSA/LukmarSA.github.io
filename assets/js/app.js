@@ -439,12 +439,15 @@ function renderAppShell(){
         </div>
       </div>
       <div class="topbar-right">
+        <button class="btn btn-ghost btn-sm" id="badge-portapapeles" title="Activos marcados para acta de entrega">🔖 0</button>
         <div class="userchip">${esc(s.nombre_completo)} <span class="rolebadge rol-${s.rol}">${s.rol}</span></div>
         <button class="btn btn-ghost btn-sm" id="btn-logout">Cerrar sesión</button>
       </div>
     </div>
     <main id="main"></main>
   `;
+  document.getElementById("badge-portapapeles").addEventListener("click", abrirPanelPortapapeles);
+  actualizarBadgePortapapeles();
   document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click", ()=>{
     state.vista = b.dataset.tab; renderMain();
   }));
@@ -1048,6 +1051,7 @@ document.addEventListener("click", (e)=>{
     const accion = btn.dataset.action;
     if(accion==="custodio") abrirCambioCustodio(id);
     if(accion==="baja") abrirConfirmarBaja(id);
+    if(accion==="marcar"){ toggleEnPortapapeles(id); actualizarTablaYResumen(); return; }
     return;
   }
   const sortLabel = e.target.closest("[data-sort]");
@@ -1229,6 +1233,7 @@ function celdaActivo(col, a){
     case "fecha": return a.fecha_adquisicion ? fmtFecha(a.fecha_adquisicion) : '<span class="cell-muted">—</span>';
     case "proveedor": return celdaTextoRecortado(a.proveedor);
     case "acciones": return `<div class="cell-actions">
+      ${a.custodio ? `<button class="btn btn-sm ${estaEnPortapapeles(a.id)?'btn-primary':''}" data-action="marcar" data-id="${a.id}" title="Marcar para acta de entrega unificada">${estaEnPortapapeles(a.id)?'🔖 Marcado':'🔖'}</button>` : ""}
       ${puede("cambiar_custodio") ? `<button class="btn btn-sm" data-action="custodio" data-id="${a.id}">Custodio</button>`:""}
       ${puede("dar_baja") ? `<button class="btn btn-sm btn-danger" data-action="baja" data-id="${a.id}">Baja</button>`:""}
     </div>`;
@@ -1287,12 +1292,14 @@ function abrirDetalle(id){
 
         <div class="section-title">Historial de custodia (más reciente primero)</div>
         <div class="timeline">
-          ${a.historial_custodia.map((t,i)=>tramoHtml(a,t,i)).join("") || '<div class="cell-muted">Sin historial registrado.</div>'}
+          ${renderTimelineHistorial(a) || '<div class="cell-muted">Sin historial registrado.</div>'}
         </div>
       </div>
       <div class="modal-footer">
         ${puede("editar_activo") ? `<button class="btn" id="btn-editar-activo">Editar datos base</button>` : ""}
         ${puede("cambiar_custodio") ? `<button class="btn btn-primary" id="btn-cambiar-custodio">Cambiar custodio</button>` : ""}
+        ${a.custodio ? `<button class="btn ${estaEnPortapapeles(a.id)?'btn-primary':''}" id="btn-marcar-portapapeles">${estaEnPortapapeles(a.id)?'🔖 Marcado para acta':'🔖 Marcar para acta'}</button>` : ""}
+        ${a.custodio ? `<button class="btn" id="btn-generar-acta">Generar acta de entrega</button>` : ""}
         ${puede("dar_baja") ? `<button class="btn btn-danger" id="btn-dar-baja">Dar de baja</button>` : ""}
       </div>
     </div>`;
@@ -1301,6 +1308,15 @@ function abrirDetalle(id){
     if(be) be.addEventListener("click", ()=>abrirFormActivo(a.id));
     const bc = document.getElementById("btn-cambiar-custodio");
     if(bc) bc.addEventListener("click", ()=>abrirCambioCustodio(a.id));
+    const bm = document.getElementById("btn-marcar-portapapeles");
+    if(bm) bm.addEventListener("click", ()=>{ toggleEnPortapapeles(a.id); abrirDetalle(a.id); });
+    const bg = document.getElementById("btn-generar-acta");
+    if(bg) bg.addEventListener("click", async ()=>{
+      bg.disabled = true; const textoOriginal = bg.textContent; bg.textContent = "Generando…";
+      try{ await generarActaEntrega(a); }
+      catch(err){ alert("No se pudo generar el acta: " + err.message); }
+      finally{ bg.disabled = false; bg.textContent = textoOriginal; }
+    });
     const bb = document.getElementById("btn-dar-baja");
     if(bb) bb.addEventListener("click", ()=>abrirConfirmarBaja(a.id));
     document.querySelectorAll("[data-editar-tramo]").forEach(b=>{
@@ -1309,6 +1325,24 @@ function abrirDetalle(id){
   });
 }
 
+// El historial se pinta más reciente primero (índice 0 = vigente). La
+// observación de un tramo describe la transición HACIA el tramo más nuevo
+// que viene justo antes en esta lista (cómo se devolvió + qué mantenimiento
+// se le dio + cómo se entregó al siguiente) — por eso se pinta como un
+// conector VISUALMENTE ENTRE las dos tarjetas, no adentro de ninguna, para
+// que se lea como lo que es: una nota sobre el paso de uno a otro, no un
+// atributo propio del custodio saliente.
+function renderTimelineHistorial(a){
+  const lista = a.historial_custodia;
+  return lista.map((t,i)=>{
+    let html = tramoHtml(a,t,i);
+    const siguiente = lista[i+1];
+    if(siguiente && siguiente.observacion){
+      html += `<div class="titem-conector"><div class="titem-conector-texto">${esc(siguiente.observacion)}</div></div>`;
+    }
+    return html;
+  }).join("");
+}
 function tramoHtml(a, t, i){
   const tipoLbl = t.tipo_custodio==="area" ? "Área / departamento" : "Persona";
   return `<div class="titem ${i===0?'current':''}">
@@ -1316,7 +1350,6 @@ function tramoHtml(a, t, i){
       <div>
         <div class="titem-name">${esc(t.nombre)} <span class="pill ${t.tipo_custodio==='area'?'pill-area':'pill-persona'}" style="margin-left:6px;">${tipoLbl}</span></div>
         <div class="titem-meta">${t.cargo?esc(t.cargo)+' · ':''}${fmtFecha(t.desde)} → ${t.hasta?fmtFecha(t.hasta):'presente'}${t.tipo_devolucion?' · '+labelTipoDevolucion(t.tipo_devolucion).split(' (')[0]:''}</div>
-        ${t.observacion ? `<div class="titem-observacion">“${esc(t.observacion)}”</div>` : ""}
       </div>
       <div class="titem-actions">
         ${puede("editar_historial") ? `<button class="btn btn-sm" data-editar-tramo="${i}">Editar</button>` : ""}
@@ -1410,13 +1443,18 @@ function abrirCambioCustodio(id){
   const datos = cargarActivos();
   const a = buscarActivo(datos, id);
   if(!a) return;
-  const tieneVigente = a.historial_custodia.length > 0;
+  const tieneVigente = a.custodio !== null;
+  // Si viene de "disponible", se prellena con la observación que quedó al
+  // devolverse — así se completa (mantenimiento hecho, estado actual) en vez
+  // de perderse. f_cambiar_custodio guarda esto en ese mismo tramo si no hay
+  // ningún tramo vigente que cerrar.
+  const observacionAnterior = (!tieneVigente && a.historial_custodia[0]) ? (a.historial_custodia[0].observacion || "") : "";
   const html = `
     <div class="modal">
       <div class="modal-header"><h3>Cambiar custodio — ${fmtTag(a.id)}</h3><button class="modal-close">✕</button></div>
       <div class="modal-body">
         ${tieneVigente ? `
-          <div class="alert alert-info">Custodio actual: <strong>${esc(a.custodio?a.custodio.nombre:'Disponible')}</strong>. Al confirmar, este tramo se cierra hoy.</div>
+          <div class="alert alert-info">Custodio actual: <strong>${esc(a.custodio.nombre)}</strong>. Al confirmar, este tramo se cierra hoy.</div>
           <div class="form-grid" style="margin-bottom:14px;">
             <div class="field"><label>Tipo de devolución del custodio saliente</label>
               <select id="cc-tipodev">
@@ -1428,8 +1466,14 @@ function abrirCambioCustodio(id){
             <div class="field span-2"><label>Observación de la entrega (opcional)</label><textarea id="cc-observacion" placeholder="Ej: equipo entregado con un rayón en la tapa, cargador incluido…"></textarea></div>
           </div>
         ` : `
+          <div class="alert alert-info">Este activo está disponible (sin custodio actual).</div>
           <div class="form-grid" style="margin-bottom:14px;">
             <div class="field"><label>Fecha del cambio</label><input type="date" id="cc-fecha" value="${hoyISO()}"></div>
+            <div class="field span-2">
+              <label>Observación${observacionAnterior ? "" : " (opcional)"}</label>
+              ${observacionAnterior ? `<div class="field hint" style="margin-bottom:6px;">Este texto quedó registrado cuando el activo pasó a disponible. Agrégale lo que corresponda a esta entrega (mantenimiento realizado, estado actual, etc.) — el texto completo queda disponible para el acta de entrega del nuevo custodio.</div>` : ""}
+              <textarea id="cc-observacion" placeholder="Ej: se realizó limpieza y cambio de pasta térmica antes de esta entrega…">${esc(observacionAnterior)}</textarea>
+            </div>
           </div>
         `}
         <fieldset>
@@ -1445,7 +1489,7 @@ function abrirCambioCustodio(id){
             <div class="field span-2"><label>Cargo (opcional)</label><input type="text" id="cc-cargo"></div>
           </div>
         </fieldset>
-        <div class="field hint" style="margin-top:10px;">Si el activo va a quedar sin custodio (disponible), déjalo así y usa el botón "Marcar disponible" en su lugar.</div>
+        ${tieneVigente ? `<div class="field hint" style="margin-top:10px;">Si el activo va a quedar sin custodio (disponible), déjalo así y usa el botón "Marcar disponible" en su lugar.</div>` : ""}
       </div>
       <div class="modal-footer">
         ${tieneVigente ? `<button class="btn btn-danger" id="btn-liberar">Marcar disponible</button>` : ""}
@@ -1460,7 +1504,7 @@ function abrirCambioCustodio(id){
       const tipoDev = tieneVigente ? document.getElementById("cc-tipodev").value : null;
       if(tieneVigente && !tipoDev){ alert("Selecciona el tipo de devolución del custodio saliente."); return; }
       const fecha = document.getElementById("cc-fecha").value || hoyISO();
-      const observacion = tieneVigente ? document.getElementById("cc-observacion").value.trim() : "";
+      const observacion = document.getElementById("cc-observacion").value.trim();
       await cambiarCustodio(id, {
         tipo_custodio: document.getElementById("cc-tipo").value,
         nombre, cargo: document.getElementById("cc-cargo").value.trim(),
@@ -1529,6 +1573,188 @@ function abrirEditarTramo(id, index){
       cerrarModal(); renderMain(); abrirDetalle(id);
     });
   });
+}
+
+/* ---------- Generar acta de entrega (TIC-FRM-003) ---------- */
+// Rellena la plantilla oficial real reemplazando marcadores de texto
+// ({{FECHA}}, {{NOMBRE}}, etc.) directamente en el XML interno del .xlsx —
+// a propósito NO se usa una librería que reconstruya el archivo completo
+// (como SheetJS leyendo+regrabando el libro), porque eso reemplaza la fuente
+// original (Helvetica) y pierde negrillas como la de "OBSERVACIONES". Al
+// tocar solo el texto entre <t>...</t>, el estilo de cada celda —que vive en
+// un atributo separado— nunca se toca. Verificado con un archivo real: 27
+// celdas combinadas y la fuente/negrilla originales sobreviven intactas.
+const MESES_ES = ["enero","febrero","marzo","abril","mayo","junio","julio",
+  "agosto","septiembre","octubre","noviembre","diciembre"];
+function fechaEnPalabras(iso){
+  if(!iso) return "";
+  const [y,m,d] = iso.split("-").map(Number);
+  if(!y||!m||!d) return iso;
+  return `${d} de ${MESES_ES[m-1]} de ${y}`;
+}
+function descripcionItemActa(a){
+  const partes = [];
+  const base = [a.tipo, a.marca].filter(Boolean).join(" ");
+  if(base) partes.push(base);
+  if(a.modelo) partes.push(`Modelo: ${a.modelo}`);
+  if(a.serie) partes.push(`Número de serie: ${a.serie}`);
+  return partes.join(" — ") || fmtTag(a.id);
+}
+/* ---------- Portapapeles de activos (para actas de entrega unificadas) ---------- */
+// Solamente frontend, respaldado en localStorage para que sobreviva recargas
+// mientras se van marcando activos dispersos entre distintos filtros/vistas.
+const CLAVE_PORTAPAPELES = "lukmar_portapapeles_acta";
+const MAX_PORTAPAPELES = 6; // igual al máximo de ítems que admite la plantilla TIC-FRM-003
+function cargarPortapapeles(){
+  try{ const g = JSON.parse(localStorage.getItem(CLAVE_PORTAPAPELES) || "[]"); return Array.isArray(g) ? g : []; }
+  catch(e){ return []; }
+}
+function guardarPortapapelesIds(ids){
+  localStorage.setItem(CLAVE_PORTAPAPELES, JSON.stringify(ids));
+}
+function estaEnPortapapeles(id){
+  return cargarPortapapeles().includes(id);
+}
+function toggleEnPortapapeles(id){
+  const datos = cargarActivos();
+  const a = buscarActivo(datos, id);
+  if(!a) return;
+  let ids = cargarPortapapeles();
+  if(ids.includes(id)){
+    ids = ids.filter(x=>x!==id);
+  } else {
+    if(!a.custodio){ alert("Solo se pueden marcar activos con custodio vigente."); return; }
+    if(ids.length >= MAX_PORTAPAPELES){
+      alert(`Ya tienes ${MAX_PORTAPAPELES} activos marcados — es el máximo por acta. Genera esta acta o quita alguno antes de agregar otro.`);
+      return;
+    }
+    ids.push(id);
+  }
+  guardarPortapapelesIds(ids);
+  actualizarBadgePortapapeles();
+}
+function vaciarPortapapeles(){
+  guardarPortapapelesIds([]);
+  actualizarBadgePortapapeles();
+}
+function actualizarBadgePortapapeles(){
+  const badge = document.getElementById("badge-portapapeles");
+  if(!badge) return;
+  const n = cargarPortapapeles().length;
+  badge.textContent = `🔖 ${n}`;
+  badge.classList.toggle("badge-activo", n>0);
+}
+function abrirPanelPortapapeles(){
+  const ids = cargarPortapapeles();
+  const datos = cargarActivos();
+  const items = ids.map(id=>buscarActivo(datos, id)).filter(Boolean);
+  const nombresDistintos = [...new Set(items.map(a=>a.custodio && a.custodio.nombre).filter(Boolean))];
+  const html = `
+    <div class="modal">
+      <div class="modal-header"><h3>Activos marcados para acta de entrega</h3><button class="modal-close">✕</button></div>
+      <div class="modal-body">
+        ${items.length===0 ? `
+          <div class="empty-state"><div class="big">🔖</div>No has marcado ningún activo todavía.<br>Márcalos desde la tabla o desde la ficha de detalle — hasta ${MAX_PORTAPAPELES} por acta.</div>
+        ` : `
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Tag</th><th>Tipo</th><th>Marca / Modelo</th><th>Custodio</th><th></th></tr></thead>
+            <tbody>
+              ${items.map(a=>`<tr>
+                <td class="mono">${fmtTag(a.id)}</td>
+                <td>${esc(a.tipo)||'<span class="cell-muted">—</span>'}</td>
+                <td>${esc([a.marca,a.modelo].filter(Boolean).join(" "))||'<span class="cell-muted">—</span>'}</td>
+                <td>${esc(a.custodio ? a.custodio.nombre : "—")}</td>
+                <td class="cell-actions"><button class="btn btn-sm btn-danger" data-quitar-portapapeles="${a.id}">Quitar</button></td>
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+        ${nombresDistintos.length > 1 ? `<div class="alert alert-error" style="margin-top:10px;">Los activos marcados no tienen todos el mismo custodio (${nombresDistintos.map(esc).join(", ")}). Un acta es para un solo custodio — quita los que no correspondan o genera actas separadas.</div>` : ""}
+        `}
+      </div>
+      <div class="modal-footer">
+        ${items.length>0 ? `<button class="btn btn-danger" id="btn-vaciar-portapapeles">Vaciar</button>` : ""}
+        <button class="btn modal-close">Cerrar</button>
+        ${items.length>0 ? `<button class="btn btn-primary" id="btn-generar-acta-multiple" ${nombresDistintos.length>1?"disabled":""}>Generar acta unificada</button>` : ""}
+      </div>
+    </div>`;
+  abrirModal(html, ()=>{
+    document.querySelectorAll("[data-quitar-portapapeles]").forEach(b=>{
+      b.addEventListener("click", ()=>{
+        toggleEnPortapapeles(Number(b.dataset.quitarPortapapeles));
+        cerrarModal(); abrirPanelPortapapeles();
+      });
+    });
+    const bv = document.getElementById("btn-vaciar-portapapeles");
+    if(bv) bv.addEventListener("click", ()=>{
+      vaciarPortapapeles(); cerrarModal(); abrirPanelPortapapeles();
+    });
+    const bg = document.getElementById("btn-generar-acta-multiple");
+    if(bg) bg.addEventListener("click", async ()=>{
+      bg.disabled = true; const txt = bg.textContent; bg.textContent = "Generando…";
+      try{
+        await generarActaEntregaDesdeLista(items);
+        vaciarPortapapeles();
+        cerrarModal();
+      } catch(err){ alert("No se pudo generar el acta: " + err.message); }
+      finally{ bg.disabled = false; bg.textContent = txt; }
+    });
+  });
+}
+
+
+async function generarActaEntregaDesdeLista(activos){
+  if(!activos || activos.length === 0) throw new Error("No hay ningún activo para generar el acta.");
+  if(activos.length > 6) throw new Error("Un acta admite hasta 6 activos — genera dos actas separadas.");
+  const sinCustodio = activos.find(a=>!a.custodio);
+  if(sinCustodio) throw new Error(`El activo ${fmtTag(sinCustodio.id)} no tiene custodio vigente.`);
+  const nombreRef = activos[0].custodio.nombre;
+  const distinto = activos.find(a=>a.custodio.nombre !== nombreRef);
+  if(distinto) throw new Error(`No todos los activos marcados tienen el mismo custodio ("${nombreRef}" vs "${distinto.custodio.nombre}"). Un acta es para un solo custodio — separa en dos actas.`);
+  const cargoRef = activos[0].custodio.cargo;
+  const fechasDesde = activos.map(a=>a.historial_custodia[0] && a.historial_custodia[0].desde).filter(Boolean).sort();
+  const fecha = fechaEnPalabras(fechasDesde.length ? fechasDesde[fechasDesde.length-1] : hoyISO());
+
+  const valores = {
+    FECHA: fecha,
+    NOMBRE: nombreRef || "",
+    CARGO: cargoRef || "",
+    FIRMA_USUARIO: `Usuario Responsable: ${nombreRef || ""}`,
+    FECHA_FIRMA: `Fecha: ${fecha}`,
+  };
+  for(let i=1; i<=6; i++){
+    const a = activos[i-1];
+    const anterior = a ? a.historial_custodia[1] : null;
+    valores["ITEM"+i] = a ? descripcionItemActa(a) : "";
+    valores["OBS"+i] = (anterior && anterior.observacion) || "";
+  }
+
+  const resp = await fetch("assets/plantillas/TIC-FRM-003.xlsx");
+  if(!resp.ok) throw new Error("No se pudo cargar la plantilla (assets/plantillas/TIC-FRM-003.xlsx).");
+  const buf = await resp.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+  const rutaHoja = "xl/worksheets/sheet1.xml";
+  const archivoHoja = zip.file(rutaHoja);
+  if(!archivoHoja) throw new Error("La plantilla no tiene la hoja esperada (" + rutaHoja + ").");
+  let xml = await archivoHoja.async("string");
+  for(const [marcador, valor] of Object.entries(valores)){
+    const escapado = String(valor)
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    xml = xml.split(`<t>{{${marcador}}}</t>`).join(`<t xml:space="preserve">${escapado}</t>`);
+  }
+  zip.file(rutaHoja, xml);
+  const salida = await zip.generateAsync({type:"blob"});
+  const url = URL.createObjectURL(salida);
+  const link = document.createElement("a");
+  const sufijoTags = activos.map(a=>fmtTag(a.id)).join("-");
+  const nombreArchivo = `Acta_Entrega_${(nombreRef||"").replace(/[^a-zA-Z0-9]+/g,"_")}_${sufijoTags}.xlsx`;
+  link.href = url; link.download = nombreArchivo;
+  document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+async function generarActaEntrega(a){
+  return generarActaEntregaDesdeLista([a]);
 }
 
 /* ---------- Dar de baja ---------- */
