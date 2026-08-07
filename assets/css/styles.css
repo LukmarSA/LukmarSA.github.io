@@ -228,6 +228,22 @@ th{
 }
 .th-text-filter:focus{outline:none;border-color:var(--accent);}
 .th-text-filter::placeholder{color:var(--ink-faint);}
+.th-row2-fecha{gap:4px;}
+.th-date-filter{
+  width:100%;min-width:0;border:1px solid var(--border);border-radius:5px;
+  padding:3px 4px;font-size:10.5px;font-weight:400;color:var(--ink);background:var(--surface);
+}
+.th-date-filter:focus{outline:none;border-color:var(--accent);}
+.dropdown-wrap{position:relative;display:inline-block;}
+.dropdown-menu{
+  position:absolute;top:calc(100% + 4px);right:0;z-index:20;min-width:190px;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  box-shadow:0 6px 18px rgba(0,0,0,0.12);padding:4px;
+}
+.dropdown-item{display:block;width:100%;text-align:left;background:none;border:none;
+  padding:8px 10px;font-size:13px;color:var(--ink);border-radius:5px;cursor:pointer;}
+.dropdown-item:hover{background:var(--surface-2);}
+.kpi-export-row{display:flex;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);flex-wrap:wrap;}
 .th-label{cursor:default;display:inline-flex;align-items:center;gap:5px;user-select:none;}
 .th-label.th-sortable{cursor:pointer;}
 .th-label.th-sortable:hover{color:var(--accent-ink);}
@@ -328,7 +344,7 @@ tr.rowclick:hover{background:var(--accent-soft);cursor:pointer;}
 }
 .modal-header h3{margin:0;font-size:16px;font-weight:600;color:#fff;}
 .modal-body{padding:18px 20px;max-height:70vh;overflow-y:auto;background:linear-gradient(180deg, #F5F9FC 0%, var(--surface) 90px);}
-.modal-footer{padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;}
+.modal-footer{padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
 .modal-close{border:none;background:transparent;font-size:18px;color:rgba(255,255,255,0.85);padding:2px 6px;border-radius:4px;}
 .modal-close:hover{background:rgba(255,255,255,0.16);color:#fff;}
 
@@ -488,6 +504,23 @@ fieldset legend{font-size:12px;font-weight:600;color:var(--ink-muted);padding:0 
   .summary-card .num{font-size:25px;}
 }
 
+/* ---- SmartTV / pantallas enormes: pensado para verse desde lejos, no desde
+   un escritorio — texto e íconos notablemente más grandes, más espacio de
+   respiro, sin volverse un mar de columnas angostas y letra chica. ---- */
+@media (min-width:2200px){
+  main{max-width:1900px;font-size:19px;}
+  .summary-card{padding:18px 20px;}
+  .summary-card .num{font-size:32px;}
+  .summary-card .lbl{font-size:14.5px;}
+  .kpi-icon svg{width:26px;height:26px;}
+  .tipo-icon svg{width:22px;height:22px;}
+  .btn{font-size:15px;padding:9px 16px;}
+  .modal{max-width:720px;}
+  .modal.modal-wide{max-width:980px;}
+  .modal-header h3{font-size:19px;}
+  th,td{padding:12px 14px;}
+}
+
 /* ---- Tablet: ajusta paddings, el grid de 2 columnas de formularios se mantiene ---- */
 @media (max-width:1024px){
   main{padding:18px 16px 50px;}
@@ -516,6 +549,9 @@ fieldset legend{font-size:12px;font-weight:600;color:var(--ink-muted);padding:0 
   .filterbar #btn-exportar{order:2;}
   .filterbar #btn-nuevo{order:1;width:100%;padding:11px 13px;font-size:14.5px;}
   .filterbar #btn-exportar{width:100%;}
+  .filterbar #dropdown-resumenes{order:3;width:100%;}
+  .filterbar #btn-exportar-resumenes{width:100%;}
+  .dropdown-menu{left:0;right:auto;}
 
   /* Tabla: solo Tipo y Custodio visibles; el resto se consulta abriendo el detalle */
   /* Cualquier columna que no sea Tipo o Custodio se oculta en celular, sin

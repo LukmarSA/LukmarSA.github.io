@@ -135,7 +135,7 @@ const state = {
   vista: "activos",   // activos | bajas | auditoria | config
   configSubtab: "permisos",
   // null en tipo/propiedad/custodioClase = "sin filtrar" (equivale a todas las opciones marcadas).
-  filtros: { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"", colSerie:"", colSo:"", colProveedor:"", colFecha:"", colModelo:"", colNombre:"" },
+  filtros: { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"", colSerie:"", colSo:"", colProveedor:"", colFechaDesde:"", colFechaHasta:"", colModelo:"", colNombre:"" },
   orden: { campo:"id", dir:"asc" },
   columnasVisibles: new Set(["tag","tipo","marca","custodio","propiedad","acciones"]),
   modal: null,         // función que renderiza el modal actual, o null
@@ -452,6 +452,13 @@ function renderAppShell(){
     state.vista = b.dataset.tab; renderMain();
   }));
   document.getElementById("btn-logout").addEventListener("click", cerrarSesion);
+  // Cierra cualquier menú desplegable tipo "Exportar resúmenes" al hacer clic
+  // fuera de él — se registra una sola vez aquí (no dentro de renderVistaActivos,
+  // que se re-ejecuta con cada renderMain() y duplicaría el listener).
+  document.addEventListener("click", ()=>{
+    const menu = document.getElementById("menu-exportar-resumenes");
+    if(menu) menu.hidden = true;
+  });
   renderMain();
 }
 
@@ -560,7 +567,7 @@ const DEFINICION_COLUMNAS = [
   { key:"propiedad",  label:"Propiedad",       core:false, weight:1.1, sortCampo:"propiedad",filterCampo:"propiedad",    campoTexto:"colPropiedad", placeholder:"Buscar propiedad…" },
   { key:"serie",      label:"Serie",           core:false, weight:1.4, sortCampo:"serie",    filterCampo:null,           campoTexto:"colSerie",     placeholder:"Buscar serie…" },
   { key:"so",         label:"Sist. operativo", core:false, weight:1.3, sortCampo:"so",       filterCampo:null,           campoTexto:"colSo",        placeholder:"Buscar SO…" },
-  { key:"fecha",      label:"Adquisición",     core:false, weight:1.3, sortCampo:"fecha",    filterCampo:null,           campoTexto:"colFecha",     placeholder:"Buscar fecha…" },
+  { key:"fecha",      label:"Adquisición",     core:false, weight:1.6, sortCampo:"fecha",    filterCampo:null,           campoTexto:null,           placeholder:null, filtroFecha:true },
   { key:"proveedor",  label:"Proveedor",       core:false, weight:1.3, sortCampo:"proveedor",filterCampo:null,           campoTexto:"colProveedor", placeholder:"Buscar proveedor…" },
   { key:"acciones",   label:"",                core:true,  weight:2.2, sortCampo:null,       filterCampo:null,           campoTexto:null,           placeholder:null },
 ];
@@ -683,7 +690,8 @@ function filtrarActivos(datos){
     if(f.colSerie && !(a.serie||"").toLowerCase().includes(f.colSerie.toLowerCase())) return false;
     if(f.colSo && !(a.sistema_operativo||"").toLowerCase().includes(f.colSo.toLowerCase())) return false;
     if(f.colProveedor && !(a.proveedor||"").toLowerCase().includes(f.colProveedor.toLowerCase())) return false;
-    if(f.colFecha && !fmtFecha(a.fecha_adquisicion).toLowerCase().includes(f.colFecha.toLowerCase())) return false;
+    if(f.colFechaDesde && (!a.fecha_adquisicion || a.fecha_adquisicion < f.colFechaDesde)) return false;
+    if(f.colFechaHasta && (!a.fecha_adquisicion || a.fecha_adquisicion > f.colFechaHasta)) return false;
     if(f.colModelo && !(a.modelo||"").toLowerCase().includes(f.colModelo.toLowerCase())) return false;
     if(f.colNombre && !(a.nombre_dispositivo||"").toLowerCase().includes(f.colNombre.toLowerCase())) return false;
     if(f.texto){
@@ -725,7 +733,7 @@ function listaOrdenadaFiltrada(datos){
 function estadoInicialFiltros(){
   return { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null,
     colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"",
-    colSerie:"", colSo:"", colProveedor:"", colFecha:"", colModelo:"", colNombre:"" };
+    colSerie:"", colSo:"", colProveedor:"", colFechaDesde:"", colFechaHasta:"", colModelo:"", colNombre:"" };
 }
 function aplicarFiltroKpi(valor){
   if(valor === null){
@@ -784,15 +792,93 @@ function actualizarAvisoColumnas(){
 
 /* ---------- Modal "Visualizar KPIs": el mismo desglose del filtro, con barras ---------- */
 const NOMBRE_COLUMNA_KPI = { tipo:"Tipo", marca:"Marca", custodioClase:"Custodio", propiedad:"Propiedad" };
-function abrirModalKpiColumna(campo){
+// Columnas que entran en el resumen GLOBAL (todas las categóricas menos
+// Custodio, que queda fuera a propósito por decisión explícita).
+const CAMPOS_RESUMEN_GLOBAL = ["tipo","marca","propiedad"];
+
+// Cálculo reutilizable: lo mismo que ya hacía abrirModalKpiColumna, factorizado
+// para que tanto el modal de una columna como el export global lo compartan.
+function calcularResumenColumna(campo){
   const nombre = NOMBRE_COLUMNA_KPI[campo] || campo;
   const opciones = opcionesFiltroCache[campo] || [];
   const lista = listaParaConteo(campo);
   const filas = opciones
-    .map(op=>({ op, n: contarValorEnLista(lista, campo, op) }))
+    .map(op=>({ label: labelOpcionFiltro(campo, op), n: contarValorEnLista(lista, campo, op) }))
     .sort((a,b)=>b.n-a.n);
-  const max = Math.max(1, ...filas.map(f=>f.n));
   const totalConteo = filas.reduce((s,f)=>s+f.n,0);
+  return { campo, nombre, filas, totalConteo };
+}
+
+function copiarAlPortapapelesTexto(texto){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(texto);
+  }
+  return Promise.reject(new Error("El navegador no permite copiar al portapapeles en este contexto."));
+}
+function descargarArchivoTexto(nombreArchivo, contenido, tipoMime){
+  const blob = new Blob([contenido], { type: tipoMime + ";charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url; link.download = nombreArchivo;
+  document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// --- Formatos de exportación: reciben SIEMPRE un arreglo de secciones
+// ({nombre, filas, totalConteo}), así el mismo formateador sirve para un
+// resumen individual (una sección) y para el global (varias).
+function resumenATextoWhatsApp(secciones){
+  return secciones.map(s=>{
+    const cuerpo = s.filas.map(f=>{
+      const pct = s.totalConteo ? Math.round(f.n/s.totalConteo*100) : 0;
+      return `• ${f.label}: ${f.n} (${pct}%)`;
+    }).join("\n");
+    return `*Resumen: ${s.nombre}* (${s.totalConteo} activos)\n${cuerpo}`;
+  }).join("\n\n");
+}
+function resumenACSV(secciones){
+  const filasCSV = [["Campo","Valor","Conteo"]];
+  secciones.forEach(s=>{
+    s.filas.forEach(f=>filasCSV.push([s.nombre, f.label, f.n]));
+  });
+  return filasCSV.map(fila=>fila.map(v=>{
+    const t = String(v);
+    return /[",\n]/.test(t) ? `"${t.replace(/"/g,'""')}"` : t;
+  }).join(",")).join("\n");
+}
+function resumenAHTML(secciones, titulo){
+  const bloques = secciones.map(s=>{
+    const max = Math.max(1, ...s.filas.map(f=>f.n));
+    const filasHtml = s.filas.map(f=>`
+      <div class="fila">
+        <div class="etiqueta">${esc(f.label)}</div>
+        <div class="pista"><div class="barra" style="width:${(f.n/max*100).toFixed(1)}%"></div></div>
+        <div class="num">${f.n}</div>
+      </div>`).join("");
+    return `<section><h2>${esc(s.nombre)}</h2><p class="sub">${s.totalConteo} activos</p>${filasHtml}</section>`;
+  }).join("");
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${esc(titulo)}</title><style>
+    body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f4f6f8;color:#1c2733;margin:0;padding:24px;}
+    h1{font-size:18px;margin:0 0 4px;}
+    .fecha{color:#6b7684;font-size:12px;margin-bottom:20px;}
+    section{background:#fff;border:1px solid #e2e6ea;border-radius:10px;padding:16px 18px;margin-bottom:16px;max-width:560px;}
+    h2{font-size:14px;margin:0 0 2px;color:#12324a;}
+    .sub{font-size:11.5px;color:#6b7684;margin:0 0 12px;}
+    .fila{display:flex;align-items:center;gap:10px;padding:4px 0;}
+    .etiqueta{width:38%;font-size:12.5px;color:#334;}
+    .pista{flex:1;height:8px;background:#eef1f4;border-radius:4px;overflow:hidden;}
+    .barra{height:100%;background:#007EB2;border-radius:4px;}
+    .num{width:34px;text-align:right;font-size:12px;font-weight:600;color:#12324a;}
+  </style></head><body>
+    <h1>${esc(titulo)}</h1>
+    <div class="fecha">Generado el ${fechaEnPalabras(hoyISO())}</div>
+    ${bloques}
+  </body></html>`;
+}
+
+function abrirModalKpiColumna(campo){
+  const { nombre, filas, totalConteo } = calcularResumenColumna(campo);
+  const max = Math.max(1, ...filas.map(f=>f.n));
   const html = `<div class="modal">
     <div class="modal-header"><h3>Resumen — ${esc(nombre)}</h3><button class="modal-close">✕</button></div>
     <div class="modal-body">
@@ -800,16 +886,34 @@ function abrirModalKpiColumna(campo){
       <div class="kpi-breakdown">
         ${filas.map(f=>`
           <div class="kpi-breakdown-row">
-            <div class="kpi-breakdown-label">${esc(labelOpcionFiltro(campo, f.op))}</div>
+            <div class="kpi-breakdown-label">${esc(f.label)}</div>
             <div class="kpi-breakdown-bar-track"><div class="kpi-breakdown-bar" style="width:${(f.n/max*100).toFixed(1)}%"></div></div>
             <div class="kpi-breakdown-num">${f.n}</div>
           </div>`).join("") || '<div class="empty-state"><div class="big">—</div>No hay datos para mostrar.</div>'}
       </div>
+      <div class="kpi-export-row">
+        <button class="btn btn-sm" id="kpi-export-wa">Copiar para WhatsApp</button>
+        <button class="btn btn-sm" id="kpi-export-csv">Descargar CSV</button>
+        <button class="btn btn-sm" id="kpi-export-html">Descargar HTML</button>
+      </div>
     </div>
     <div class="modal-footer"><button class="btn modal-close">Cerrar</button></div>
   </div>`;
-  abrirModal(html);
+  abrirModal(html, ()=>{
+    const seccion = [{ nombre, filas, totalConteo }];
+    document.getElementById("kpi-export-wa").addEventListener("click", async ()=>{
+      try{ await copiarAlPortapapelesTexto(resumenATextoWhatsApp(seccion)); alert("Copiado — pégalo directo en WhatsApp."); }
+      catch(err){ alert("No se pudo copiar: " + err.message); }
+    });
+    document.getElementById("kpi-export-csv").addEventListener("click", ()=>{
+      descargarArchivoTexto(`resumen_${campo}.csv`, resumenACSV(seccion), "text/csv");
+    });
+    document.getElementById("kpi-export-html").addEventListener("click", ()=>{
+      descargarArchivoTexto(`resumen_${campo}.html`, resumenAHTML(seccion, `Resumen — ${nombre}`), "text/html");
+    });
+  });
 }
+
 
 function renderVistaActivos(main){
   const datos = cargarActivos();
@@ -824,6 +928,14 @@ function renderVistaActivos(main){
       <div class="fb-spacer"></div>
       <button class="btn" id="btn-columnas">☰ Columnas</button>
       <button class="btn" id="btn-exportar">⭳ Exportar a Excel</button>
+      <div class="dropdown-wrap" id="dropdown-resumenes">
+        <button class="btn" id="btn-exportar-resumenes">📊 Exportar resúmenes ▾</button>
+        <div class="dropdown-menu" id="menu-exportar-resumenes" hidden>
+          <button type="button" class="dropdown-item" data-formato-global="wa">Copiar para WhatsApp</button>
+          <button type="button" class="dropdown-item" data-formato-global="csv">Descargar CSV</button>
+          <button type="button" class="dropdown-item" data-formato-global="html">Descargar HTML</button>
+        </div>
+      </div>
       ${puede("crear_activo") ? `<button class="btn btn-primary" id="btn-nuevo">+ Nuevo activo</button>` : ""}
     </div>
     <div class="tablewrap tablewrap-activos">
@@ -841,6 +953,12 @@ function renderVistaActivos(main){
       actualizarTablaYResumen();
     });
   });
+  document.querySelectorAll(".th-date-filter").forEach(inp=>{
+    inp.addEventListener("input", e=>{
+      state.filtros[e.target.dataset.colFecha] = e.target.value;
+      actualizarTablaYResumen();
+    });
+  });
   actualizarTablaYResumen();
 
   document.getElementById("f-texto").addEventListener("input", e=>{
@@ -851,6 +969,25 @@ function renderVistaActivos(main){
   if(btnNuevo) btnNuevo.addEventListener("click", ()=>abrirFormActivo(null));
   document.getElementById("btn-exportar").addEventListener("click", exportarActivosCSV);
   document.getElementById("btn-columnas").addEventListener("click", abrirGestorColumnas);
+  document.getElementById("btn-exportar-resumenes").addEventListener("click", (e)=>{
+    e.stopPropagation();
+    document.getElementById("menu-exportar-resumenes").hidden = !document.getElementById("menu-exportar-resumenes").hidden;
+  });
+  document.querySelectorAll("[data-formato-global]").forEach(b=>{
+    b.addEventListener("click", async ()=>{
+      document.getElementById("menu-exportar-resumenes").hidden = true;
+      const secciones = CAMPOS_RESUMEN_GLOBAL.map(calcularResumenColumna);
+      const formato = b.dataset.formatoGlobal;
+      if(formato==="wa"){
+        try{ await copiarAlPortapapelesTexto(resumenATextoWhatsApp(secciones)); alert("Copiado — pégalo directo en WhatsApp."); }
+        catch(err){ alert("No se pudo copiar: " + err.message); }
+      } else if(formato==="csv"){
+        descargarArchivoTexto("resumenes_activos.csv", resumenACSV(secciones), "text/csv");
+      } else if(formato==="html"){
+        descargarArchivoTexto("resumenes_activos.html", resumenAHTML(secciones, "Resúmenes de activos"), "text/html");
+      }
+    });
+  });
 }
 
 // Repinta solo las tarjetas de resumen y el cuerpo de la tabla — nunca el
@@ -959,7 +1096,7 @@ function contenidoBotonFiltro(campo, opciones){
   return `${seleccion.size}/${total}`;
 }
 function thColumna(o){
-  const { sortCampo, filterCampo, label, ordenable, opcionesChecklist, campoTexto, placeholderTexto, colClass, widthPct } = o;
+  const { sortCampo, filterCampo, label, ordenable, opcionesChecklist, campoTexto, placeholderTexto, filtroFecha, colClass, widthPct } = o;
   const filaLabel = ordenable
     ? `<span class="th-label th-sortable" data-sort="${sortCampo}">${label}${flechaOrden(sortCampo)}</span>`
     : `<span class="th-label">${label}</span>`;
@@ -973,7 +1110,12 @@ function thColumna(o){
       ${panelFiltroHtml(filterCampo, opcionesChecklist)}
     </div>`;
   }
-  const filaTexto = campoTexto
+  const filaTexto = filtroFecha
+    ? `<div class="th-row2 th-row2-fecha">
+        <input type="date" class="th-date-filter" data-col-fecha="colFechaDesde" title="Desde" value="${esc(state.filtros.colFechaDesde||'')}">
+        <input type="date" class="th-date-filter" data-col-fecha="colFechaHasta" title="Hasta" value="${esc(state.filtros.colFechaHasta||'')}">
+      </div>`
+    : campoTexto
     ? `<div class="th-row2"><input type="text" class="th-text-filter" data-col-texto="${campoTexto}" placeholder="${esc(placeholderTexto||'Buscar…')}" value="${esc(state.filtros[campoTexto]||'')}"></div>`
     : "";
   const estilo = widthPct ? ` style="width:${widthPct}"` : "";
@@ -995,7 +1137,7 @@ function filaEncabezados(){
       sortCampo:c.sortCampo, filterCampo:c.filterCampo, label:c.label,
       ordenable:!!c.sortCampo,
       opcionesChecklist:c.filterCampo ? opcionesFiltroCache[c.filterCampo] : null,
-      campoTexto:c.campoTexto, placeholderTexto:c.placeholder,
+      campoTexto:c.campoTexto, placeholderTexto:c.placeholder, filtroFecha:c.filtroFecha,
       colClass:`col-${c.key}`, widthPct,
     });
   }).join("");
@@ -1131,8 +1273,10 @@ function exportarActivosCSV(){
 // ---------- Iconos SVG por tipo de activo (línea, un color distintivo por tipo) ----------
 const ICONOS_TIPO = {
   laptop: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="1.4"/><path d="M2 19h20"/></svg>`,
-  // Desktop: monitor cuadrado sobre un cuello y una base ancha (silueta de "monitor con pie").
-  desktop: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="11" rx="1.3"/><path d="M10.3 14.5v3.3M13.7 14.5v3.3"/><path d="M8 20.3h8"/></svg>`,
+  // Desktop: torre vertical (case), con botón de encendido y ranuras — antes
+  // este ícono era el de un monitor; el monitor real ahora tiene su propio
+  // tipo (ver "monitor" abajo, que heredó la silueta que Desktop usaba).
+  desktop: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.3" width="10" height="19.4" rx="1.3"/><circle cx="12" cy="5.2" r="0.9" fill="currentColor" stroke="none"/><path d="M9 10h6M9 12.3h6"/></svg>`,
   celular: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="2" width="11" height="20" rx="2"/><path d="M10 18h4"/></svg>`,
   impresora: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9V3.5h11V9"/><rect x="4" y="9" width="16" height="7.5" rx="1"/><path d="M6.5 16.5V20h11v-3.5"/></svg>`,
   scanner: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="11" rx="1"/><path d="M3 10.5h18"/></svg>`,
@@ -1140,13 +1284,23 @@ const ICONOS_TIPO = {
   plotter: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="14.5" width="18" height="5.5" rx="1"/><path d="M6 14.5l2.6-8.5h2.4l1.8 4.6 1.8-2.6h2.2"/><circle cx="17.8" cy="7.5" r="1" fill="currentColor" stroke="none"/></svg>`,
   // SmartTV: pantalla ancha y plana en un pie centrado delgado, con un triángulo de "play" — se distingue del monitor de Desktop.
   smarttv: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.3" y="4.7" width="19.4" height="10.3" rx="1.3"/><path d="M9 19.7h6M12 15v4.7"/><path d="M10.2 7.6l4 2.1-4 2.1z" fill="currentColor" stroke="none"/></svg>`,
+  // Monitor: la silueta que antes usaba Desktop (pantalla + cuello + base ancha).
+  monitor: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="11" rx="1.3"/><path d="M10.3 14.5v3.3M13.7 14.5v3.3"/><path d="M8 20.3h8"/></svg>`,
+  // Mouse: cuerpo ovalado con la línea del botón/scroll central.
+  mouse: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.4c-3.2 0-5.4 2.5-5.4 6.3v5c0 3.5 2.1 5.3 5.4 5.3s5.4-1.8 5.4-5.3v-5c0-3.8-2.2-6.3-5.4-6.3z"/><path d="M12 3.4v5.2"/></svg>`,
+  // Cargador / fuente de poder: cuerpo rectangular con dos clavijas arriba y el cable hacia abajo — cubre ambos conceptos a propósito.
+  cargador: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="9" width="10" height="7.5" rx="1.2"/><path d="M9.5 9V5M14.5 9V5"/><path d="M12 16.5v3.8"/></svg>`,
+  // AP (punto de acceso): un punto con arcos de señal — bonus, no pedido explícitamente pero mencionado como futuro.
+  ap: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="17" r="1.3" fill="currentColor" stroke="none"/><path d="M8.3 14.2a5.2 5.2 0 0 1 7.4 0"/><path d="M5.5 11.4a9.2 9.2 0 0 1 13 0"/></svg>`,
   generico: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2.2"/><path d="M12 16.2v.01"/><path d="M9.6 9.4a2.4 2.4 0 1 1 3.6 2.1c-.7.5-1.2 1-1.2 2"/></svg>`,
 };
 // Un color propio por tipo, para que se distingan de un vistazo en la columna.
 // Los tres tipos más comunes usan colores reales de la marca Lukmar.
 const COLOR_TIPO = {
   laptop: "#57697C", desktop: "#004DAB", celular: "#007EB2", impresora: "#EC741D",
-  scanner: "#74883D", plotter: "#5B4B8A", smarttv: "#2E93C7", generico: "#8B9AAA",
+  scanner: "#74883D", plotter: "#5B4B8A", smarttv: "#2E93C7",
+  monitor: "#1F6FA8", mouse: "#8A6D3B", cargador: "#B0651C", ap: "#2E7D5B",
+  generico: "#8B9AAA",
 };
 function claveTipo(tipo){
   return (tipo||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"");
@@ -1369,7 +1523,7 @@ function abrirFormActivo(id){
       <div class="modal-body">
         <form id="form-activo">
           <div class="form-grid">
-            <div class="field"><label>Tipo</label><input type="text" id="fa-tipo" value="${esc(a?a.tipo:'')}" placeholder="Laptop, Desktop, Celular…"></div>
+            <div class="field"><label>Tipo</label><input type="text" id="fa-tipo" value="${esc(a?a.tipo:'')}" placeholder="Laptop, Desktop, Celular, Mouse, Monitor, Cargador…"></div>
             <div class="field"><label>Propiedad</label>
               <select id="fa-propiedad" required>
                 <option value="propio" ${(!a||a.propiedad==='propio')?'selected':''}>Propio</option>
@@ -1683,12 +1837,13 @@ function abrirPanelPortapapeles(){
     document.querySelectorAll("[data-quitar-portapapeles]").forEach(b=>{
       b.addEventListener("click", ()=>{
         toggleEnPortapapeles(Number(b.dataset.quitarPortapapeles));
+        renderMain();
         cerrarModal(); abrirPanelPortapapeles();
       });
     });
     const bv = document.getElementById("btn-vaciar-portapapeles");
     if(bv) bv.addEventListener("click", ()=>{
-      vaciarPortapapeles(); cerrarModal(); abrirPanelPortapapeles();
+      vaciarPortapapeles(); renderMain(); cerrarModal(); abrirPanelPortapapeles();
     });
     const bg = document.getElementById("btn-generar-acta-multiple");
     if(bg) bg.addEventListener("click", async ()=>{
@@ -1696,6 +1851,7 @@ function abrirPanelPortapapeles(){
       try{
         await generarActaEntregaDesdeLista(items);
         vaciarPortapapeles();
+        renderMain();
         cerrarModal();
       } catch(err){ alert("No se pudo generar el acta: " + err.message); }
       finally{ bg.disabled = false; bg.textContent = txt; }
@@ -1713,8 +1869,7 @@ async function generarActaEntregaDesdeLista(activos){
   const distinto = activos.find(a=>a.custodio.nombre !== nombreRef);
   if(distinto) throw new Error(`No todos los activos marcados tienen el mismo custodio ("${nombreRef}" vs "${distinto.custodio.nombre}"). Un acta es para un solo custodio — separa en dos actas.`);
   const cargoRef = activos[0].custodio.cargo;
-  const fechasDesde = activos.map(a=>a.historial_custodia[0] && a.historial_custodia[0].desde).filter(Boolean).sort();
-  const fecha = fechaEnPalabras(fechasDesde.length ? fechasDesde[fechasDesde.length-1] : hoyISO());
+  const fecha = fechaEnPalabras(hoyISO());
 
   const valores = {
     FECHA: fecha,
