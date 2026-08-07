@@ -14,7 +14,7 @@ if(!window.supabase){
   </div></div>`;
   throw new Error("supabase-js no se cargó (revisa la etiqueta <script> de cdn.jsdelivr.net en index.html)");
 }
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // El login sigue pidiendo solo un "usuario" corto (admin/registrador/visitante,
 // o los que se agreguen a futuro); por dentro se completa a un correo interno
@@ -56,8 +56,8 @@ const ROL_ADMIN = "administrador";
 
 async function refrescarDatos(){
   const [{ data: activosRaw, error: e1 }, { data: historialRaw, error: e2 }] = await Promise.all([
-    supabase.from("activos").select("*").order("id"),
-    supabase.from("historial_custodia").select("*").order("activo_id").order("orden"),
+    sb.from("activos").select("*").order("id"),
+    sb.from("historial_custodia").select("*").order("activo_id").order("orden"),
   ]);
   if(e1) throw e1;
   if(e2) throw e2;
@@ -86,7 +86,7 @@ async function refrescarDatos(){
   });
   state.datos = { version: 8, generado_en: new Date().toISOString(), activos };
 
-  const { data: bajasRaw, error: e3 } = await supabase.from("bajas").select("*").order("fecha_baja", { ascending:false });
+  const { data: bajasRaw, error: e3 } = await sb.from("bajas").select("*").order("fecha_baja", { ascending:false });
   if(e3) throw e3;
   state.bajas = (bajasRaw||[]).map(b=>({ id: b.id, activo: b.activo, fecha_baja: b.fecha_baja, motivo: b.motivo, dado_de_baja_por: b.dado_de_baja_por }));
 
@@ -95,15 +95,15 @@ async function refrescarDatos(){
   // en la versión anterior con LocalStorage, donde tampoco había esa
   // restricción. La tabla permisos permite SELECT a cualquier autenticado
   // (ver política sel_permisos) — solo INSERT/UPDATE/DELETE quedan admin-only.
-  const { data: permisosRaw } = await supabase.from("permisos").select("*");
+  const { data: permisosRaw } = await sb.from("permisos").select("*");
   const matriz = {};
   (permisosRaw||[]).forEach(p=>{ (matriz[p.rol] ||= {})[p.accion] = p.permitido; });
   state.permisos = matriz;
 
   if(state.sesion && state.sesion.rol === ROL_ADMIN){
-    const { data: perfilesRaw } = await supabase.from("perfiles").select("*");
+    const { data: perfilesRaw } = await sb.from("perfiles").select("*");
     state.perfiles = perfilesRaw || [];
-    const { data: logRaw } = await supabase.from("auditoria").select("*").order("fecha", { ascending:false }).limit(500);
+    const { data: logRaw } = await sb.from("auditoria").select("*").order("fecha", { ascending:false }).limit(500);
     state.log = (logRaw||[]).map(l=>({ fecha: l.fecha, usuario: l.usuario_id, nombre_completo: (state.perfiles.find(p=>p.id===l.usuario_id)||{}).nombre_completo || l.usuario_id, accion: l.accion, detalle: l.detalle }));
   }
 }
@@ -121,7 +121,7 @@ async function guardarPermisos(matriz){
       filas.push({ rol, accion, permitido: !!matriz[rol][accion] });
     });
   });
-  const { error } = await supabase.from("permisos").upsert(filas, { onConflict: "rol,accion" });
+  const { error } = await sb.from("permisos").upsert(filas, { onConflict: "rol,accion" });
   if(error) throw error;
   await refrescarDatos();
 }
@@ -146,12 +146,12 @@ const state = {
 // state.sesion = {usuario, rol, nombre_completo} a partir de esa sesión,
 // leyendo el perfil (rol) desde la tabla perfiles.
 async function iniciarSesionGuardada(){
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await sb.auth.getSession();
   if(!session) { state.sesion = null; return; }
   await cargarSesionDesdePerfil(session.user);
 }
 async function cargarSesionDesdePerfil(user){
-  const { data: perfil, error } = await supabase.from("perfiles").select("rol, nombre_completo").eq("id", user.id).single();
+  const { data: perfil, error } = await sb.from("perfiles").select("rol, nombre_completo").eq("id", user.id).single();
   if(error || !perfil){ state.sesion = null; state.sesionUid = null; return; }
   state.sesionUid = user.id;
   state.sesion = {
@@ -161,7 +161,7 @@ async function cargarSesionDesdePerfil(user){
   };
 }
 async function cerrarSesion(){
-  await supabase.auth.signOut();
+  await sb.auth.signOut();
   state.sesion = null;
   state.vista = "activos";
   render();
@@ -235,7 +235,7 @@ function calcularAgregados(activos){
 
 async function crearActivo(campos){
   const esCelular = campos.tipo === "Celular" && (campos.gmail || campos.password);
-  const { data, error } = await supabase.from("activos").insert({
+  const { data, error } = await sb.from("activos").insert({
     propiedad: campos.propiedad,
     tipo: campos.tipo || null,
     marca: campos.marca || null,
@@ -273,7 +273,7 @@ async function editarActivoBase(id, campos){
   } else {
     patch.celular_gmail = null; patch.celular_password = null;
   }
-  const { error } = await supabase.from("activos").update(patch).eq("id", id);
+  const { error } = await sb.from("activos").update(patch).eq("id", id);
   if(error) throw error;
   await refrescarDatos();
 }
@@ -281,7 +281,7 @@ async function editarActivoBase(id, campos){
 // Registrar cambio de custodio: vía RPC (cierra el tramo vigente + abre uno
 // nuevo en una sola transacción atómica en Postgres — ver f_cambiar_custodio).
 async function cambiarCustodio(id, nuevoCustodio, tipoDevolucionSaliente, fechaHasta, observacionSaliente){
-  const { error } = await supabase.rpc("f_cambiar_custodio", {
+  const { error } = await sb.rpc("f_cambiar_custodio", {
     p_activo_id: id, p_tipo_custodio: nuevoCustodio.tipo_custodio, p_nombre: nuevoCustodio.nombre,
     p_cargo: nuevoCustodio.cargo || null, p_fecha: fechaHasta || hoyISO(),
     p_tipo_devolucion: tipoDevolucionSaliente || null, p_observacion: observacionSaliente || null,
@@ -292,7 +292,7 @@ async function cambiarCustodio(id, nuevoCustodio, tipoDevolucionSaliente, fechaH
 
 // Marcar el activo como disponible (sin custodio) — vía RPC (f_liberar_custodio).
 async function liberarCustodio(id, tipoDevolucion, fechaHasta, observacion){
-  const { error } = await supabase.rpc("f_liberar_custodio", {
+  const { error } = await sb.rpc("f_liberar_custodio", {
     p_activo_id: id, p_fecha: fechaHasta || hoyISO(),
     p_tipo_devolucion: tipoDevolucion || null, p_observacion: observacion || null,
   });
@@ -310,7 +310,7 @@ async function editarTramoHistorial(id, index, campos){
   ["tipo_custodio","nombre","cargo","desde","hasta","tipo_devolucion","observacion"].forEach(k=>{
     if(k in campos) patch[k] = campos[k] || null;
   });
-  const { error } = await supabase.from("historial_custodia").update(patch).eq("id", tramo._id);
+  const { error } = await sb.from("historial_custodia").update(patch).eq("id", tramo._id);
   if(error) throw error;
   await refrescarDatos();
 }
@@ -318,7 +318,7 @@ async function editarTramoHistorial(id, index, campos){
 // Dar de baja: vía RPC (f_dar_baja) — archiva el snapshot completo y borra el
 // activo en una sola transacción atómica.
 async function darDeBaja(id, motivo){
-  const { error } = await supabase.rpc("f_dar_baja", { p_activo_id: id, p_motivo: motivo || null });
+  const { error } = await sb.rpc("f_dar_baja", { p_activo_id: id, p_motivo: motivo || null });
   if(error) throw error;
   await refrescarDatos();
 }
@@ -327,7 +327,7 @@ async function restaurarBaja(indexBaja){
   const bajas = cargarBajas();
   const registro = bajas[indexBaja];
   if(!registro) return;
-  const { error } = await supabase.rpc("f_restaurar_baja", { p_baja_id: registro.id });
+  const { error } = await sb.rpc("f_restaurar_baja", { p_baja_id: registro.id });
   if(error) throw error;
   await refrescarDatos();
 }
@@ -370,13 +370,13 @@ function renderLogin(errorMsg){
     const p = document.getElementById("login-password").value;
     const btn = document.getElementById("btn-login-submit");
     btn.disabled = true; btn.textContent = "Ingresando…";
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await sb.auth.signInWithPassword({
       email: u.includes("@") ? u : u + DOMINIO_USUARIO_INTERNO,
       password: p,
     });
     if(error || !data.user){ renderLogin("Usuario o contraseña incorrectos."); return; }
     await cargarSesionDesdePerfil(data.user);
-    if(!state.sesion){ await supabase.auth.signOut(); renderLogin("Tu cuenta no tiene un perfil asignado. Contacta a un administrador."); return; }
+    if(!state.sesion){ await sb.auth.signOut(); renderLogin("Tu cuenta no tiene un perfil asignado. Contacta a un administrador."); return; }
     await refrescarDatos();
     // El toast vive fuera de #app (se agrega directo a document.body), así que
     // render() no lo reemplaza solo — hay que quitarlo explícitamente al entrar,
@@ -1714,7 +1714,7 @@ function renderConfigUsuarios(content){
     </fieldset>`;
   content.querySelectorAll("[data-cambiar-rol]").forEach(sel=>{
     sel.addEventListener("change", async ()=>{
-      const { error } = await supabase.from("perfiles").update({ rol: sel.value }).eq("id", sel.dataset.cambiarRol);
+      const { error } = await sb.from("perfiles").update({ rol: sel.value }).eq("id", sel.dataset.cambiarRol);
       if(error){ alert("No se pudo cambiar el rol: " + error.message); return; }
       await refrescarDatos();
       renderVistaConfig(document.getElementById("main"));
@@ -1725,9 +1725,9 @@ function renderConfigUsuarios(content){
     const nombre_completo = document.getElementById("nu-nombre").value.trim();
     const rol = document.getElementById("nu-rol").value;
     if(!email || !nombre_completo){ alert("Completa correo y nombre."); return; }
-    const { data: uid, error: e1 } = await supabase.rpc("buscar_uid_por_email", { p_email: email });
+    const { data: uid, error: e1 } = await sb.rpc("buscar_uid_por_email", { p_email: email });
     if(e1 || !uid){ alert("No se encontró ninguna cuenta con ese correo. Crea la cuenta primero en el panel de Supabase (Authentication → Add user)."); return; }
-    const { error: e2 } = await supabase.from("perfiles").insert({ id: uid, rol, nombre_completo });
+    const { error: e2 } = await sb.from("perfiles").insert({ id: uid, rol, nombre_completo });
     if(e2){ alert("No se pudo vincular: " + e2.message); return; }
     await refrescarDatos();
     renderVistaConfig(document.getElementById("main"));
@@ -1776,7 +1776,7 @@ window.addEventListener("resize", ()=>{
   // Si la sesión cambia en otra pestaña (o expira), refleja el cambio aquí
   // también — sin esto, esta pestaña seguiría mostrando la app ya cerrada la
   // sesión en otra parte hasta el siguiente refresco manual.
-  supabase.auth.onAuthStateChange((_evento, session)=>{
+  sb.auth.onAuthStateChange((_evento, session)=>{
     if(!session && state.sesion){ state.sesion = null; state.vista = "activos"; render(); }
   });
 })();
