@@ -1323,9 +1323,9 @@ const ICONOS_TIPO = {
   // AP (punto de acceso): un punto con arcos de señal — bonus, no pedido explícitamente pero mencionado como futuro.
   ap: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="17" r="1.3" fill="currentColor" stroke="none"/><path d="M8.3 14.2a5.2 5.2 0 0 1 7.4 0"/><path d="M5.5 11.4a9.2 9.2 0 0 1 13 0"/></svg>`,
   // Cable HDMI visto desde arriba, en vertical (punta arriba, cable abajo),
-  // largo comprimido ~30%. La punta (lengüeta + 2 orejas) usa un trazo más
-  // fino (1.3) que el resto del conector (1.7) — a pedido explícito.
-  cablehdmi: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="11.2" y="16.05" width="1.6" height="2.1" rx="0.5"/><rect x="10" y="14.3" width="4" height="1.75" rx="0.4"/><rect x="7.8" y="9.75" width="8.4" height="4.55" rx="1.1"/><rect x="8.3" y="5.9" width="1" height="3.5" rx="0.3" stroke-width="1.3"/><rect x="9.6" y="4.85" width="4.8" height="4.55" rx="0.35" stroke-width="1.3"/><rect x="14.7" y="5.9" width="1" height="3.5" rx="0.3" stroke-width="1.3"/></svg>`,
+  // largo comprimido ~30%. Cable fino y algo más largo; punta (lengüeta +
+  // 2 orejas) angosta y con trazo más fino (1.3) que el resto (1.7).
+  cablehdmi: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="11.4" y="16.05" width="1.2" height="2.6" rx="0.4"/><rect x="10" y="14.3" width="4" height="1.75" rx="0.4"/><rect x="7.8" y="9.75" width="8.4" height="4.55" rx="1.1"/><rect x="8.7" y="5.9" width="0.9" height="3.5" rx="0.3" stroke-width="1.3"/><rect x="9.9" y="4.85" width="4.2" height="4.55" rx="0.35" stroke-width="1.3"/><rect x="14.4" y="5.9" width="0.9" height="3.5" rx="0.3" stroke-width="1.3"/></svg>`,
   generico: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2.2"/><path d="M12 16.2v.01"/><path d="M9.6 9.4a2.4 2.4 0 1 1 3.6 2.1c-.7.5-1.2 1-1.2 2"/></svg>`,
 };
 // Un color propio por tipo, para que se distingan de un vistazo en la columna.
