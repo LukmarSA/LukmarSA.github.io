@@ -857,22 +857,36 @@ function resumenAHTML(secciones, titulo){
       </div>`).join("");
     return `<section><h2>${esc(s.nombre)}</h2><p class="sub">${s.totalConteo} activos</p>${filasHtml}</section>`;
   }).join("");
-  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>${esc(titulo)}</title><style>
-    body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f4f6f8;color:#1c2733;margin:0;padding:24px;}
-    h1{font-size:18px;margin:0 0 4px;}
-    .fecha{color:#6b7684;font-size:12px;margin-bottom:20px;}
-    section{background:#fff;border:1px solid #e2e6ea;border-radius:10px;padding:16px 18px;margin-bottom:16px;max-width:560px;}
-    h2{font-size:14px;margin:0 0 2px;color:#12324a;}
-    .sub{font-size:11.5px;color:#6b7684;margin:0 0 12px;}
-    .fila{display:flex;align-items:center;gap:10px;padding:4px 0;}
-    .etiqueta{width:38%;font-size:12.5px;color:#334;}
-    .pista{flex:1;height:8px;background:#eef1f4;border-radius:4px;overflow:hidden;}
-    .barra{height:100%;background:#007EB2;border-radius:4px;}
-    .num{width:34px;text-align:right;font-size:12px;font-weight:600;color:#12324a;}
+  // Todo el tamaño (texto, relleno, alto de barra) usa clamp() — escala de
+  // forma continua entre celular y TV sin depender de un puñado de breakpoints
+  // fijos que dejarían huecos en los tamaños intermedios (tablet, laptop). La
+  // cuadrícula de secciones usa auto-fit, así que se reorganiza sola en más
+  // columnas cuando hay espacio, sin necesitar su propia media query.
+  return `<!DOCTYPE html><html lang="es"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${esc(titulo)}</title>
+  <style>
+    *{box-sizing:border-box;}
+    body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f4f6f8;color:#1c2733;margin:0;padding:clamp(16px,4vw,40px);}
+    .envoltorio{max-width:1400px;margin:0 auto;}
+    h1{font-size:clamp(19px,2.6vw,28px);margin:0 0 4px;}
+    .fecha{color:#6b7684;font-size:clamp(12px,1.4vw,15px);margin-bottom:clamp(16px,3vw,28px);}
+    .secciones{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:clamp(12px,2vw,20px);}
+    section{background:#fff;border:1px solid #e2e6ea;border-radius:12px;padding:clamp(16px,2.4vw,26px);min-width:0;}
+    h2{font-size:clamp(15px,1.8vw,19px);margin:0 0 2px;color:#12324a;}
+    .sub{font-size:clamp(11.5px,1.3vw,14px);color:#6b7684;margin:0 0 14px;}
+    .fila{display:flex;align-items:center;gap:clamp(8px,1.4vw,14px);padding:clamp(4px,0.7vw,7px) 0;min-width:0;}
+    .etiqueta{flex:0 1 40%;min-width:0;font-size:clamp(12px,1.3vw,15px);color:#334;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .pista{flex:1;min-width:24px;height:clamp(7px,1vw,12px);background:#eef1f4;border-radius:5px;overflow:hidden;}
+    .barra{height:100%;background:#007EB2;border-radius:5px;}
+    .num{flex:0 0 auto;min-width:2.4em;text-align:right;font-size:clamp(12px,1.3vw,15px);font-weight:600;color:#12324a;}
   </style></head><body>
-    <h1>${esc(titulo)}</h1>
-    <div class="fecha">Generado el ${fechaEnPalabras(hoyISO())}</div>
-    ${bloques}
+    <div class="envoltorio">
+      <h1>${esc(titulo)}</h1>
+      <div class="fecha">Generado el ${fechaEnPalabras(hoyISO())}</div>
+      <div class="secciones">${bloques}</div>
+    </div>
   </body></html>`;
 }
 
@@ -1098,8 +1112,8 @@ function contenidoBotonFiltro(campo, opciones){
 function thColumna(o){
   const { sortCampo, filterCampo, label, ordenable, opcionesChecklist, campoTexto, placeholderTexto, filtroFecha, colClass, widthPct } = o;
   const filaLabel = ordenable
-    ? `<span class="th-label th-sortable" data-sort="${sortCampo}">${label}${flechaOrden(sortCampo)}</span>`
-    : `<span class="th-label">${label}</span>`;
+    ? `<span class="th-label th-sortable" data-sort="${sortCampo}"><span class="th-label-text">${label}</span>${flechaOrden(sortCampo)}</span>`
+    : `<span class="th-label"><span class="th-label-text">${label}</span></span>`;
   let filtroBtn = "";
   if(opcionesChecklist){
     const seleccion = seleccionActiva(filterCampo);
@@ -1290,6 +1304,8 @@ const ICONOS_TIPO = {
   mouse: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.4c-3.2 0-5.4 2.5-5.4 6.3v5c0 3.5 2.1 5.3 5.4 5.3s5.4-1.8 5.4-5.3v-5c0-3.8-2.2-6.3-5.4-6.3z"/><path d="M12 3.4v5.2"/></svg>`,
   // Cargador / fuente de poder: cuerpo rectangular con dos clavijas arriba y el cable hacia abajo — cubre ambos conceptos a propósito.
   cargador: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="9" width="10" height="7.5" rx="1.2"/><path d="M9.5 9V5M14.5 9V5"/><path d="M12 16.5v3.8"/></svg>`,
+  // Teclado: cuerpo rectangular bajo con una cuadrícula de teclas.
+  teclado: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6.5" width="19" height="11" rx="1.3"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 14h9"/></svg>`,
   // AP (punto de acceso): un punto con arcos de señal — bonus, no pedido explícitamente pero mencionado como futuro.
   ap: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="17" r="1.3" fill="currentColor" stroke="none"/><path d="M8.3 14.2a5.2 5.2 0 0 1 7.4 0"/><path d="M5.5 11.4a9.2 9.2 0 0 1 13 0"/></svg>`,
   generico: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2.2"/><path d="M12 16.2v.01"/><path d="M9.6 9.4a2.4 2.4 0 1 1 3.6 2.1c-.7.5-1.2 1-1.2 2"/></svg>`,
@@ -1299,11 +1315,28 @@ const ICONOS_TIPO = {
 const COLOR_TIPO = {
   laptop: "#57697C", desktop: "#004DAB", celular: "#007EB2", impresora: "#EC741D",
   scanner: "#74883D", plotter: "#5B4B8A", smarttv: "#2E93C7",
-  monitor: "#1F6FA8", mouse: "#8A6D3B", cargador: "#B0651C", ap: "#2E7D5B",
+  monitor: "#1F6FA8", mouse: "#8A6D3B", cargador: "#B0651C", ap: "#2E7D5B", teclado: "#6B7C93",
   generico: "#8B9AAA",
 };
 function claveTipo(tipo){
   return (tipo||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"");
+}
+// Qué campos NO son relevantes para cada tipo — usado ÚNICAMENTE por la ficha
+// de detalle (abrirDetalle), para no mostrar "MAC WiFi: —" en un mouse. A
+// propósito NO se usa en la tabla (sus columnas visibles son estáticas, vía
+// el menú "Columnas") ni en el formulario de alta/edición (siempre pide
+// todos los campos). Solo cubre tipos NUEVOS sin datos históricos en riesgo —
+// los tipos ya existentes (laptop/desktop/impresora/etc.) siguen mostrando
+// todo, porque hay activos reales con datos en esos campos (ej. MAC en impresoras).
+const CAMPOS_NO_RELEVANTES_DETALLE = {
+  mouse:    ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
+  teclado:  ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
+  monitor:  ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
+  cargador: ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
+  ap:       ["so","procesador","ram_gb","disco_gb"], // sí conserva las MAC — un AP real las usa
+};
+function camposNoRelevantesParaDetalle(tipo){
+  return CAMPOS_NO_RELEVANTES_DETALLE[claveTipo(tipo)] || [];
 }
 function iconoTipo(tipo){
   const key = claveTipo(tipo);
@@ -1327,9 +1360,9 @@ const ICONO_KPI_PERSONA = `<svg viewBox="0 0 24 24" width="20" height="20" fill=
 const ICONO_KPI_AREA = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10.5L12 4l8 6.5V20"/><path d="M9.5 20v-6h5v6"/></svg>`;
 
 function pillCustodio(a){
-  if(a.custodio===null) return `<span class="pill pill-good"><span class="pill-dot"></span>Disponible</span>`;
-  if(a.custodio.tipo_custodio==="area") return `<span class="pill pill-area"><span class="pill-dot"></span>${esc(a.custodio.nombre)}</span>`;
-  return `<span class="pill pill-persona"><span class="pill-dot"></span>${esc(a.custodio.nombre)}</span>`;
+  if(a.custodio===null) return `<span class="pill pill-cell pill-good"><span class="pill-dot"></span>Disponible</span>`;
+  if(a.custodio.tipo_custodio==="area") return `<span class="pill pill-cell pill-area"><span class="pill-dot"></span><span class="cell-clip">${esc(a.custodio.nombre)}</span></span>`;
+  return `<span class="pill pill-cell pill-persona"><span class="pill-dot"></span><span class="cell-clip">${esc(a.custodio.nombre)}</span></span>`;
 }
 function colorCustodioActual(a){
   if(a.custodio===null) return "#3E7D4F";
@@ -1375,7 +1408,7 @@ function celdaTextoRecortado(valor, claseExtra){
 function celdaActivo(col, a){
   switch(col.key){
     case "tag": return `<span class="tag">${fmtTag(a.id)}</span>`;
-    case "tipo": return `<span class="tipo-cell"><span class="tipo-icon" style="color:${colorTipo(a.tipo)}">${iconoTipo(a.tipo)}</span>${esc(a.tipo)||'<span class="cell-muted">—</span>'}</span>`;
+    case "tipo": return `<span class="tipo-cell"><span class="tipo-icon" style="color:${colorTipo(a.tipo)}">${iconoTipo(a.tipo)}</span><span class="cell-clip">${esc(a.tipo)||'<span class="cell-muted">—</span>'}</span></span>`;
     case "marca": return celdaTextoRecortado(a.marca);
     case "modelo": return celdaTextoRecortado(a.modelo);
     case "nombre": return celdaTextoRecortado(a.nombre_dispositivo);
@@ -1410,6 +1443,7 @@ function abrirDetalle(id){
   const datos = cargarActivos();
   const a = buscarActivo(datos, id);
   if(!a) return;
+  const camposNoRelevantes = camposNoRelevantesParaDetalle(a.tipo);
   const html = `
     <div class="modal modal-wide">
       <div class="modal-header">
@@ -1433,13 +1467,13 @@ function abrirDetalle(id){
         <div class="kv-grid">
           <div class="kv"><div class="k">Marca</div><div class="v">${esc(a.marca)||'—'}</div></div>
           <div class="kv"><div class="k">Serie</div><div class="v mono">${esc(a.serie)||'—'}</div></div>
-          <div class="kv"><div class="k">Sistema operativo</div><div class="v">${esc(a.sistema_operativo)||'—'}</div></div>
-          <div class="kv"><div class="k">RAM</div><div class="v">${a.ram_gb?a.ram_gb+' GB':'—'}</div></div>
-          <div class="kv"><div class="k">Almacenamiento</div><div class="v">${a.disco_gb?a.disco_gb+' GB':'—'}</div></div>
-          <div class="kv"><div class="k">Procesador</div><div class="v">${esc(a.procesador)||'—'}</div></div>
+          ${!camposNoRelevantes.includes("so") ? `<div class="kv"><div class="k">Sistema operativo</div><div class="v">${esc(a.sistema_operativo)||'—'}</div></div>` : ""}
+          ${!camposNoRelevantes.includes("ram_gb") ? `<div class="kv"><div class="k">RAM</div><div class="v">${a.ram_gb?a.ram_gb+' GB':'—'}</div></div>` : ""}
+          ${!camposNoRelevantes.includes("disco_gb") ? `<div class="kv"><div class="k">Almacenamiento</div><div class="v">${a.disco_gb?a.disco_gb+' GB':'—'}</div></div>` : ""}
+          ${!camposNoRelevantes.includes("procesador") ? `<div class="kv"><div class="k">Procesador</div><div class="v">${esc(a.procesador)||'—'}</div></div>` : ""}
           <div class="kv"><div class="k">Proveedor</div><div class="v">${esc(a.proveedor)||'—'}</div></div>
-          <div class="kv"><div class="k">MAC WiFi</div><div class="v mono">${esc(a.mac_wifi)||'—'}</div></div>
-          <div class="kv"><div class="k">MAC Ethernet</div><div class="v mono">${esc(a.mac_ethernet)||'—'}</div></div>
+          ${!camposNoRelevantes.includes("mac_wifi") ? `<div class="kv"><div class="k">MAC WiFi</div><div class="v mono">${esc(a.mac_wifi)||'—'}</div></div>` : ""}
+          ${!camposNoRelevantes.includes("mac_ethernet") ? `<div class="kv"><div class="k">MAC Ethernet</div><div class="v mono">${esc(a.mac_ethernet)||'—'}</div></div>` : ""}
           <div class="kv"><div class="k">Fecha de adquisición</div><div class="v">${fmtFecha(a.fecha_adquisicion)}</div></div>
           ${a.celular ? `<div class="kv"><div class="k">Gmail asociado</div><div class="v mono">${esc(a.celular.gmail)||'—'}</div></div>` : ""}
         </div>
