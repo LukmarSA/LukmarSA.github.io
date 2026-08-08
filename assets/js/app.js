@@ -1325,7 +1325,7 @@ const ICONOS_TIPO = {
   // Cable HDMI visto desde arriba, en vertical (punta arriba, cable abajo),
   // largo comprimido ~30%. Cable fino y algo más largo; punta (lengüeta +
   // 2 orejas) angosta y con trazo más fino (1.3) que el resto (1.7).
-  cablehdmi: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="13" width="12" height="8" rx="2"/><rect x="6.5" y="8" width="3" height="5" rx="1"/><rect x="14.5" y="8" width="3" height="5" rx="1"/><rect x="9.5" y="7" width="5" height="6" rx="0.8"/><path d="M9 16.5h6M9 18.8h6"/></svg>`,
+  cablehdmi: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="13" width="12" height="8" rx="2"/><rect x="6.5" y="8" width="3" height="5" rx="1"/><rect x="14.5" y="8" width="3" height="5" rx="1"/><rect x="9.5" y="7" width="5" height="6" rx="0.8"/><path d="M9 16.5h6M9 18.8h6"/><rect x="11.3" y="21" width="1.4" height="1.5" rx="0.4"/></svg>`,
   generico: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2.2"/><path d="M12 16.2v.01"/><path d="M9.6 9.4a2.4 2.4 0 1 1 3.6 2.1c-.7.5-1.2 1-1.2 2"/></svg>`,
 };
 // Un color propio por tipo, para que se distingan de un vistazo en la columna.
