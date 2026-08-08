@@ -78,6 +78,7 @@ async function refrescarDatos(){
       mac_ethernet: a.mac_ethernet, sistema_operativo: a.sistema_operativo,
       ram_gb: a.ram_gb, disco_gb: a.disco_gb, procesador: a.procesador,
       proveedor: a.proveedor, fecha_adquisicion: a.fecha_adquisicion,
+      color: a.color, longitud_m: a.longitud_m,
       celular: (a.celular_gmail || a.celular_password) ? { gmail: a.celular_gmail, password: a.celular_password } : null,
       custodio: vigente ? { tipo_custodio: vigente.tipo_custodio, nombre: vigente.nombre, cargo: vigente.cargo } : null,
       historial_custodia,
@@ -250,6 +251,8 @@ async function crearActivo(campos){
     procesador: campos.procesador || null,
     proveedor: campos.proveedor || null,
     fecha_adquisicion: campos.fecha_adquisicion || null,
+    color: campos.color || null,
+    longitud_m: campos.longitud_m ? Number(campos.longitud_m) : null,
     celular_gmail: esCelular ? (campos.gmail || null) : null,
     celular_password: esCelular ? (campos.password || null) : null,
     trazabilidad: { categoria:null, custodio_texto:null, numero_original:null, estado_notas:null, seccion_origen:"Alta manual (app)", fila_excel:null, id_anterior:null },
@@ -262,10 +265,11 @@ async function crearActivo(campos){
 async function editarActivoBase(id, campos){
   const patch = {};
   const editables = ["propiedad","tipo","marca","modelo","serie","nombre_dispositivo",
-    "mac_wifi","mac_ethernet","sistema_operativo","procesador","proveedor","fecha_adquisicion"];
+    "mac_wifi","mac_ethernet","sistema_operativo","procesador","proveedor","fecha_adquisicion","color"];
   editables.forEach(k=>{ if(k in campos) patch[k] = campos[k] || null; });
   if("ram_gb" in campos) patch.ram_gb = campos.ram_gb ? Number(campos.ram_gb) : null;
   if("disco_gb" in campos) patch.disco_gb = campos.disco_gb ? Number(campos.disco_gb) : null;
+  if("longitud_m" in campos) patch.longitud_m = campos.longitud_m ? Number(campos.longitud_m) : null;
   const esCelular = (campos.tipo || (buscarActivo(cargarActivos(), id)||{}).tipo) === "Celular";
   if(esCelular){
     if("gmail" in campos) patch.celular_gmail = campos.gmail || null;
@@ -311,6 +315,16 @@ async function editarTramoHistorial(id, index, campos){
     if(k in campos) patch[k] = campos[k] || null;
   });
   const { error } = await sb.from("historial_custodia").update(patch).eq("id", tramo._id);
+  if(error) throw error;
+  await refrescarDatos();
+}
+
+// Borrar un tramo del historial que se considere erróneo. Solo administrador
+// (la política RLS lo exige del lado del servidor, no solo aquí), y nunca el
+// tramo vigente (hasta is null) — eso se hace con "Marcar disponible" o
+// "Cambiar custodio", nunca borrándolo.
+async function eliminarTramoHistorial(tramoId){
+  const { error } = await sb.from("historial_custodia").delete().eq("id", tramoId);
   if(error) throw error;
   await refrescarDatos();
 }
@@ -1302,12 +1316,16 @@ const ICONOS_TIPO = {
   monitor: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="11" rx="1.3"/><path d="M10.3 14.5v3.3M13.7 14.5v3.3"/><path d="M8 20.3h8"/></svg>`,
   // Mouse: cuerpo ovalado con la línea del botón/scroll central.
   mouse: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.4c-3.2 0-5.4 2.5-5.4 6.3v5c0 3.5 2.1 5.3 5.4 5.3s5.4-1.8 5.4-5.3v-5c0-3.8-2.2-6.3-5.4-6.3z"/><path d="M12 3.4v5.2"/></svg>`,
-  // Cargador / fuente de poder: cuerpo rectangular con dos clavijas arriba y el cable hacia abajo — cubre ambos conceptos a propósito.
-  cargador: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="9" width="10" height="7.5" rx="1.2"/><path d="M9.5 9V5M14.5 9V5"/><path d="M12 16.5v3.8"/></svg>`,
+  // Fuente de alimentación (antes "Cargador"): cuerpo rectangular con dos clavijas arriba y el cable hacia abajo — cubre cargadores y fuentes de poder de monitores/desktops a propósito, ya desde el diseño original del ícono.
+  fuentedealimentacion: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="9" width="10" height="7.5" rx="1.2"/><path d="M9.5 9V5M14.5 9V5"/><path d="M12 16.5v3.8"/></svg>`,
   // Teclado: cuerpo rectangular bajo con una cuadrícula de teclas.
   teclado: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6.5" width="19" height="11" rx="1.3"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 14h9"/></svg>`,
   // AP (punto de acceso): un punto con arcos de señal — bonus, no pedido explícitamente pero mencionado como futuro.
   ap: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="17" r="1.3" fill="currentColor" stroke="none"/><path d="M8.3 14.2a5.2 5.2 0 0 1 7.4 0"/><path d="M5.5 11.4a9.2 9.2 0 0 1 13 0"/></svg>`,
+  // Cable HDMI visto desde arriba, en vertical (punta arriba, cable abajo),
+  // largo comprimido ~30%. La punta (lengüeta + 2 orejas) usa un trazo más
+  // fino (1.3) que el resto del conector (1.7) — a pedido explícito.
+  cablehdmi: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="11.2" y="16.05" width="1.6" height="2.1" rx="0.5"/><rect x="10" y="14.3" width="4" height="1.75" rx="0.4"/><rect x="7.8" y="9.75" width="8.4" height="4.55" rx="1.1"/><rect x="8.3" y="5.9" width="1" height="3.5" rx="0.3" stroke-width="1.3"/><rect x="9.6" y="4.85" width="4.8" height="4.55" rx="0.35" stroke-width="1.3"/><rect x="14.7" y="5.9" width="1" height="3.5" rx="0.3" stroke-width="1.3"/></svg>`,
   generico: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2.2"/><path d="M12 16.2v.01"/><path d="M9.6 9.4a2.4 2.4 0 1 1 3.6 2.1c-.7.5-1.2 1-1.2 2"/></svg>`,
 };
 // Un color propio por tipo, para que se distingan de un vistazo en la columna.
@@ -1315,7 +1333,8 @@ const ICONOS_TIPO = {
 const COLOR_TIPO = {
   laptop: "#57697C", desktop: "#004DAB", celular: "#007EB2", impresora: "#EC741D",
   scanner: "#74883D", plotter: "#5B4B8A", smarttv: "#2E93C7",
-  monitor: "#1F6FA8", mouse: "#8A6D3B", cargador: "#B0651C", ap: "#2E7D5B", teclado: "#6B7C93",
+  monitor: "#1F6FA8", mouse: "#8A6D3B", fuentedealimentacion: "#B0651C", ap: "#2E7D5B", teclado: "#6B7C93",
+  cablehdmi: "#B23A6B",
   generico: "#8B9AAA",
 };
 function claveTipo(tipo){
@@ -1329,14 +1348,25 @@ function claveTipo(tipo){
 // los tipos ya existentes (laptop/desktop/impresora/etc.) siguen mostrando
 // todo, porque hay activos reales con datos en esos campos (ej. MAC en impresoras).
 const CAMPOS_NO_RELEVANTES_DETALLE = {
-  mouse:    ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
-  teclado:  ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
-  monitor:  ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
-  cargador: ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
-  ap:       ["so","procesador","ram_gb","disco_gb"], // sí conserva las MAC — un AP real las usa
+  mouse:               ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
+  teclado:             ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
+  monitor:             ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
+  fuentedealimentacion:["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
+  ap:                  ["so","procesador","ram_gb","disco_gb"], // sí conserva las MAC — un AP real las usa
+  cablehdmi:           ["serie","so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
 };
 function camposNoRelevantesParaDetalle(tipo){
   return CAMPOS_NO_RELEVANTES_DETALLE[claveTipo(tipo)] || [];
+}
+// Lo opuesto de lo anterior: campos que NO son genéricos (no existen para
+// casi ningún tipo) y que solo se muestran en el detalle para los tipos que
+// sí los usan. Se parte de "nada visible" en vez de "todo visible, se oculta
+// lo que no aplica" — porque estos campos ni siquiera aparecen en la tabla.
+const CAMPOS_EXTRA_TIPO = {
+  cablehdmi: ["color","longitud_m"],
+};
+function camposExtraParaTipo(tipo){
+  return CAMPOS_EXTRA_TIPO[claveTipo(tipo)] || [];
 }
 function iconoTipo(tipo){
   const key = claveTipo(tipo);
@@ -1466,12 +1496,14 @@ function abrirDetalle(id){
 
         <div class="kv-grid">
           <div class="kv"><div class="k">Marca</div><div class="v">${esc(a.marca)||'—'}</div></div>
-          <div class="kv"><div class="k">Serie</div><div class="v mono">${esc(a.serie)||'—'}</div></div>
+          ${!camposNoRelevantes.includes("serie") ? `<div class="kv"><div class="k">Serie</div><div class="v mono">${esc(a.serie)||'—'}</div></div>` : ""}
           ${!camposNoRelevantes.includes("so") ? `<div class="kv"><div class="k">Sistema operativo</div><div class="v">${esc(a.sistema_operativo)||'—'}</div></div>` : ""}
           ${!camposNoRelevantes.includes("ram_gb") ? `<div class="kv"><div class="k">RAM</div><div class="v">${a.ram_gb?a.ram_gb+' GB':'—'}</div></div>` : ""}
           ${!camposNoRelevantes.includes("disco_gb") ? `<div class="kv"><div class="k">Almacenamiento</div><div class="v">${a.disco_gb?a.disco_gb+' GB':'—'}</div></div>` : ""}
           ${!camposNoRelevantes.includes("procesador") ? `<div class="kv"><div class="k">Procesador</div><div class="v">${esc(a.procesador)||'—'}</div></div>` : ""}
           <div class="kv"><div class="k">Proveedor</div><div class="v">${esc(a.proveedor)||'—'}</div></div>
+          ${camposExtraParaTipo(a.tipo).includes("color") ? `<div class="kv"><div class="k">Color</div><div class="v">${esc(a.color)||'—'}</div></div>` : ""}
+          ${camposExtraParaTipo(a.tipo).includes("longitud_m") ? `<div class="kv"><div class="k">Longitud</div><div class="v">${a.longitud_m?a.longitud_m+' m':'—'}</div></div>` : ""}
           ${!camposNoRelevantes.includes("mac_wifi") ? `<div class="kv"><div class="k">MAC WiFi</div><div class="v mono">${esc(a.mac_wifi)||'—'}</div></div>` : ""}
           ${!camposNoRelevantes.includes("mac_ethernet") ? `<div class="kv"><div class="k">MAC Ethernet</div><div class="v mono">${esc(a.mac_ethernet)||'—'}</div></div>` : ""}
           <div class="kv"><div class="k">Fecha de adquisición</div><div class="v">${fmtFecha(a.fecha_adquisicion)}</div></div>
@@ -1487,7 +1519,6 @@ function abrirDetalle(id){
         ${puede("editar_activo") ? `<button class="btn" id="btn-editar-activo">Editar datos base</button>` : ""}
         ${puede("cambiar_custodio") ? `<button class="btn btn-primary" id="btn-cambiar-custodio">Cambiar custodio</button>` : ""}
         ${a.custodio ? `<button class="btn ${estaEnPortapapeles(a.id)?'btn-primary':''}" id="btn-marcar-portapapeles">${estaEnPortapapeles(a.id)?'🔖 Marcado para acta':'🔖 Marcar para acta'}</button>` : ""}
-        ${a.custodio ? `<button class="btn" id="btn-generar-acta">Generar acta de entrega</button>` : ""}
         ${puede("dar_baja") ? `<button class="btn btn-danger" id="btn-dar-baja">Dar de baja</button>` : ""}
       </div>
     </div>`;
@@ -1498,17 +1529,17 @@ function abrirDetalle(id){
     if(bc) bc.addEventListener("click", ()=>abrirCambioCustodio(a.id));
     const bm = document.getElementById("btn-marcar-portapapeles");
     if(bm) bm.addEventListener("click", ()=>{ toggleEnPortapapeles(a.id); abrirDetalle(a.id); });
-    const bg = document.getElementById("btn-generar-acta");
-    if(bg) bg.addEventListener("click", async ()=>{
-      bg.disabled = true; const textoOriginal = bg.textContent; bg.textContent = "Generando…";
-      try{ await generarActaEntrega(a); }
-      catch(err){ alert("No se pudo generar el acta: " + err.message); }
-      finally{ bg.disabled = false; bg.textContent = textoOriginal; }
-    });
     const bb = document.getElementById("btn-dar-baja");
     if(bb) bb.addEventListener("click", ()=>abrirConfirmarBaja(a.id));
     document.querySelectorAll("[data-editar-tramo]").forEach(b=>{
       b.addEventListener("click", ()=>abrirEditarTramo(a.id, Number(b.dataset.editarTramo)));
+    });
+    document.querySelectorAll("[data-borrar-tramo]").forEach(b=>{
+      b.addEventListener("click", async ()=>{
+        if(!confirm("¿Borrar este registro del historial? Esta acción no se puede deshacer.")) return;
+        try{ await eliminarTramoHistorial(Number(b.dataset.borrarTramo)); cerrarModal(); abrirDetalle(a.id); }
+        catch(err){ alert("No se pudo borrar: " + err.message); }
+      });
     });
   });
 }
@@ -1541,6 +1572,7 @@ function tramoHtml(a, t, i){
       </div>
       <div class="titem-actions">
         ${puede("editar_historial") ? `<button class="btn btn-sm" data-editar-tramo="${i}">Editar</button>` : ""}
+        ${i!==0 && state.sesion.rol===ROL_ADMIN ? `<button class="btn btn-sm btn-danger" data-borrar-tramo="${t._id}">Borrar</button>` : ""}
       </div>
     </div>
   </div>`;
@@ -1557,7 +1589,7 @@ function abrirFormActivo(id){
       <div class="modal-body">
         <form id="form-activo">
           <div class="form-grid">
-            <div class="field"><label>Tipo</label><input type="text" id="fa-tipo" value="${esc(a?a.tipo:'')}" placeholder="Laptop, Desktop, Celular, Mouse, Monitor, Cargador…"></div>
+            <div class="field"><label>Tipo</label><input type="text" id="fa-tipo" value="${esc(a?a.tipo:'')}" placeholder="Laptop, Desktop, Celular, Mouse, Monitor, Fuente de alimentación, Cable HDMI…"></div>
             <div class="field"><label>Propiedad</label>
               <select id="fa-propiedad" required>
                 <option value="propio" ${(!a||a.propiedad==='propio')?'selected':''}>Propio</option>
@@ -1576,6 +1608,8 @@ function abrirFormActivo(id){
             <div class="field"><label>MAC WiFi</label><input type="text" id="fa-macwifi" class="mono" value="${esc(a?a.mac_wifi:'')}" placeholder="AA:BB:CC:DD:EE:FF"></div>
             <div class="field"><label>MAC Ethernet</label><input type="text" id="fa-maceth" class="mono" value="${esc(a?a.mac_ethernet:'')}" placeholder="AA:BB:CC:DD:EE:FF"></div>
             <div class="field"><label>Proveedor</label><input type="text" id="fa-proveedor" value="${esc(a?a.proveedor:'')}"></div>
+            <div class="field"><label>Color</label><input type="text" id="fa-color" value="${esc(a?a.color:'')}"></div>
+            <div class="field"><label>Longitud (m)</label><input type="number" step="0.1" min="0" id="fa-longitud" value="${a&&a.longitud_m?a.longitud_m:''}"></div>
             <div class="field"><label>Fecha de adquisición</label><input type="date" id="fa-fecha" value="${a&&a.fecha_adquisicion?a.fecha_adquisicion:''}"></div>
           </div>
           <fieldset style="margin-top:14px;" id="fs-celular">
@@ -1591,7 +1625,6 @@ function abrirFormActivo(id){
         </form>
       </div>
       <div class="modal-footer">
-        <button class="btn modal-close">Cancelar</button>
         <button class="btn btn-primary" id="btn-guardar-activo">${esNuevo?'Crear activo':'Guardar cambios'}</button>
       </div>
     </div>`;
@@ -1611,6 +1644,8 @@ function abrirFormActivo(id){
         mac_wifi: document.getElementById("fa-macwifi").value.trim(),
         mac_ethernet: document.getElementById("fa-maceth").value.trim(),
         proveedor: document.getElementById("fa-proveedor").value.trim(),
+        color: document.getElementById("fa-color").value.trim(),
+        longitud_m: document.getElementById("fa-longitud").value,
         fecha_adquisicion: document.getElementById("fa-fecha").value,
         gmail: document.getElementById("fa-gmail").value.trim(),
         password: document.getElementById("fa-password").value.trim(),
@@ -1681,7 +1716,6 @@ function abrirCambioCustodio(id){
       </div>
       <div class="modal-footer">
         ${tieneVigente ? `<button class="btn btn-danger" id="btn-liberar">Marcar disponible</button>` : ""}
-        <button class="btn modal-close">Cancelar</button>
         <button class="btn btn-primary" id="btn-confirmar-custodio">Confirmar cambio</button>
       </div>
     </div>`;
@@ -1743,7 +1777,6 @@ function abrirEditarTramo(id, index){
         ${index===0 ? `<div class="field hint" style="margin-top:8px;">Este es el tramo vigente: "Hasta", "Tipo de devolución" y "Observación" quedan bloqueados porque aún no ha terminado.</div>` : ""}
       </div>
       <div class="modal-footer">
-        <button class="btn modal-close">Cancelar</button>
         <button class="btn btn-primary" id="btn-guardar-tramo">Guardar</button>
       </div>
     </div>`;
@@ -1942,9 +1975,7 @@ async function generarActaEntregaDesdeLista(activos){
   document.body.appendChild(link); link.click(); document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
-async function generarActaEntrega(a){
-  return generarActaEntregaDesdeLista([a]);
-}
+
 
 /* ---------- Dar de baja ---------- */
 function abrirConfirmarBaja(id){
@@ -1959,7 +1990,6 @@ function abrirConfirmarBaja(id){
         <div class="field"><label>Motivo</label><textarea id="baja-motivo" placeholder="Ej: equipo dañado sin reparación posible, obsoleto, robado…"></textarea></div>
       </div>
       <div class="modal-footer">
-        <button class="btn modal-close">Cancelar</button>
         <button class="btn btn-danger" id="btn-confirmar-baja">Dar de baja</button>
       </div>
     </div>`;
