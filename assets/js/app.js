@@ -66,7 +66,7 @@ async function refrescarDatos(){
     (historialPorActivo[t.activo_id] ||= []).push({
       _id: t.id, tipo_custodio: t.tipo_custodio, nombre: t.nombre, cargo: t.cargo,
       desde: t.desde, hasta: t.hasta, tipo_devolucion: t.tipo_devolucion,
-      observacion: t.observacion,
+      observacion: t.observacion, orden: t.orden,
     });
   });
   const activos = (activosRaw||[]).map(a=>{
@@ -79,6 +79,7 @@ async function refrescarDatos(){
       ram_gb: a.ram_gb, disco_gb: a.disco_gb, procesador: a.procesador,
       proveedor: a.proveedor, fecha_adquisicion: a.fecha_adquisicion,
       color: a.color, longitud_m: a.longitud_m,
+      empresa: a.empresa, valor_compra: a.valor_compra, vida_util_anios: a.vida_util_anios,
       celular: (a.celular_gmail || a.celular_password) ? { gmail: a.celular_gmail, password: a.celular_password } : null,
       custodio: vigente ? { tipo_custodio: vigente.tipo_custodio, nombre: vigente.nombre, cargo: vigente.cargo } : null,
       historial_custodia,
@@ -182,7 +183,28 @@ function puede(accion){
 /* ============================================================
    5. HELPERS DE DOMINIO
    ============================================================ */
-function fmtTag(id){ return "ACT-" + String(id).padStart(3,"0"); }
+// Antes devolvía "ACT-XXX" para todos. Ahora el prefijo depende de la
+// empresa dueña del activo (Lukmar vs. EQ Soluciones) — el id de fondo en
+// Supabase sigue siendo puramente numérico y no cambia, esto es solo la
+// etiqueta visual. Acepta el objeto activo completo (no solo el id) para
+// poder leer `.empresa`; si llega un id suelto por error, no rompe —
+// simplemente no puede mostrar el prefijo correcto y usa LKM por defecto.
+function fmtTag(a){
+  if(a===null || typeof a!=="object") a = {id:a};
+  const prefijo = a.empresa==="eq" ? "EQS" : "LKM";
+  return prefijo + "-" + String(a.id).padStart(3,"0");
+}
+// Depreciación en línea recta, valor residual $0 (igual al ejemplo típico
+// del SRI para equipos de cómputo: 33%/3 años). Requiere valor_compra,
+// fecha_adquisicion y vida_util_anios — si falta cualquiera, no se puede
+// calcular y se devuelve null (la ficha de detalle muestra "—" en ese caso).
+function valorActualActivo(a){
+  if(!a.valor_compra || !a.fecha_adquisicion || !a.vida_util_anios) return null;
+  const mesesTranscurridos = (Date.now() - new Date(a.fecha_adquisicion).getTime()) / (1000*60*60*24*30.44);
+  const mesesVidaUtil = a.vida_util_anios * 12;
+  const fraccionRestante = Math.max(0, 1 - (mesesTranscurridos / mesesVidaUtil));
+  return Math.round(a.valor_compra * fraccionRestante * 100) / 100;
+}
 function fmtFecha(iso){
   if(!iso) return "—";
   const d = new Date(iso);
@@ -253,6 +275,9 @@ async function crearActivo(campos){
     fecha_adquisicion: campos.fecha_adquisicion || null,
     color: campos.color || null,
     longitud_m: campos.longitud_m ? Number(campos.longitud_m) : null,
+    empresa: campos.empresa || "lukmar",
+    valor_compra: campos.valor_compra ? Number(campos.valor_compra) : null,
+    vida_util_anios: campos.vida_util_anios ? Number(campos.vida_util_anios) : null,
     celular_gmail: esCelular ? (campos.gmail || null) : null,
     celular_password: esCelular ? (campos.password || null) : null,
     trazabilidad: { categoria:null, custodio_texto:null, numero_original:null, estado_notas:null, seccion_origen:"Alta manual (app)", fila_excel:null, id_anterior:null },
@@ -265,11 +290,13 @@ async function crearActivo(campos){
 async function editarActivoBase(id, campos){
   const patch = {};
   const editables = ["propiedad","tipo","marca","modelo","serie","nombre_dispositivo",
-    "mac_wifi","mac_ethernet","sistema_operativo","procesador","proveedor","fecha_adquisicion","color"];
+    "mac_wifi","mac_ethernet","sistema_operativo","procesador","proveedor","fecha_adquisicion","color","empresa"];
   editables.forEach(k=>{ if(k in campos) patch[k] = campos[k] || null; });
   if("ram_gb" in campos) patch.ram_gb = campos.ram_gb ? Number(campos.ram_gb) : null;
   if("disco_gb" in campos) patch.disco_gb = campos.disco_gb ? Number(campos.disco_gb) : null;
   if("longitud_m" in campos) patch.longitud_m = campos.longitud_m ? Number(campos.longitud_m) : null;
+  if("valor_compra" in campos) patch.valor_compra = campos.valor_compra ? Number(campos.valor_compra) : null;
+  if("vida_util_anios" in campos) patch.vida_util_anios = campos.vida_util_anios ? Number(campos.vida_util_anios) : null;
   const esCelular = (campos.tipo || (buscarActivo(cargarActivos(), id)||{}).tipo) === "Celular";
   if(esCelular){
     if("gmail" in campos) patch.celular_gmail = campos.gmail || null;
@@ -651,6 +678,11 @@ const COLOR_PROPIEDAD = {
   rentado: { fg:"#B35A17", bg:"#FCE3D0" },
   externo: { fg:"#4A3F73", bg:"#E9E4F3" },
 };
+// eq usa el "Marino" real de la paleta de marca EQ Soluciones (Logos_EQ_LUKMAR_v1.zip/LEEME.txt).
+const COLOR_EMPRESA = {
+  lukmar: { fg:"#3A5068", bg:"#E7ECF1" },
+  eq:     { fg:"#1A3756", bg:"#DCE6EC" },
+};
 function pillPropiedad(valor){
   const c = COLOR_PROPIEDAD[valor] || { fg:"#57697C", bg:"#EEF1F4" };
   return `<span class="pill" style="background:${c.bg};color:${c.fg};"><span class="pill-dot"></span>${esc(capitalizar(valor))}</span>`;
@@ -673,7 +705,7 @@ function camposBusquedaGeneral(a){
   if(columnasColapsadas()){
     return [a.tipo, a.custodio ? a.custodio.nombre : "Disponible"];
   }
-  return [fmtTag(a.id), a.marca, a.modelo, a.serie, a.nombre_dispositivo,
+  return [fmtTag(a), a.marca, a.modelo, a.serie, a.nombre_dispositivo,
     a.custodio?a.custodio.nombre:"Disponible", a.tipo, a.propiedad, a.sistema_operativo, a.proveedor];
 }
 
@@ -684,7 +716,7 @@ function filtrarActivos(datos){
     if(f.propiedad !== null && !f.propiedad.has(a.propiedad)) return false;
     if(f.custodioClase !== null && !f.custodioClase.has(claseCustodio(a))) return false;
     if(f.marca !== null && a.marca && !f.marca.has(a.marca)) return false;
-    if(f.colTag && !fmtTag(a.id).toLowerCase().includes(f.colTag.toLowerCase())) return false;
+    if(f.colTag && !fmtTag(a).toLowerCase().includes(f.colTag.toLowerCase())) return false;
     if(f.colTipo && !(a.tipo||"").toLowerCase().includes(f.colTipo.toLowerCase())) return false;
     if(f.colMarca){
       const t = f.colMarca.toLowerCase();
@@ -995,7 +1027,10 @@ function renderVistaActivos(main){
   });
   const btnNuevo = document.getElementById("btn-nuevo");
   if(btnNuevo) btnNuevo.addEventListener("click", ()=>abrirFormActivo(null));
-  document.getElementById("btn-exportar").addEventListener("click", exportarActivosCSV);
+  document.getElementById("btn-exportar").addEventListener("click", async ()=>{
+    try{ await exportarActivosExcel(); }
+    catch(err){ alert("No se pudo generar el Excel: " + err.message); }
+  });
   document.getElementById("btn-columnas").addEventListener("click", abrirGestorColumnas);
   document.getElementById("btn-exportar-resumenes").addEventListener("click", (e)=>{
     e.stopPropagation();
@@ -1275,58 +1310,131 @@ document.addEventListener("dblclick", (e)=>{
 });
 
 /* ---------- Exportar a Excel (CSV compatible, con BOM para acentos) ---------- */
-function exportarActivosCSV(){
+// ---------- Exportar listado filtrado a Excel real (plantilla + filas duplicadas) ----------
+// A diferencia del acta (que tiene 6 juegos de marcadores fijos, ITEM1..ITEM6),
+// aquí el número de filas es variable (tantas como activos pasen el filtro),
+// así que hay que construir renglones <row> nuevos en vez de solo reemplazar
+// texto en marcadores existentes. Los marcadores de ActivosTecnologicos.xlsx
+// viven en xl/sharedStrings.xml y ADEMÁS se comparten entre hoja 1 y hoja 2
+// (mismo índice de shared string para CUSTODIO_NOMBRE/TIPO/CARGO en ambas) —
+// por eso cada celda inyectada usa un inline string (t="inlineStr") propio en
+// vez de reutilizar/editar el shared string original: si se reusara, todas
+// las filas duplicadas (y las de la otra hoja) quedarían con el mismo valor.
+function celdaInline(colLetra, fila, styleIdx, valor){
+  const texto = (valor===null||valor===undefined||valor==="") ? "" :
+    String(valor).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  return `<c r="${colLetra}${fila}" s="${styleIdx}" t="inlineStr"><is><t xml:space="preserve">${texto}</t></is></c>`;
+}
+const COLS_LISTADO_ACTIVOS = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W"];
+const COLS_LISTADO_HISTORIAL = ["A","B","C","D","E","F","G"];
+function filaXML(fila, styleIdx, columnas, valores){
+  const celdas = columnas.map((col,i)=>celdaInline(col, fila, styleIdx, valores[i])).join("");
+  return `<row r="${fila}" spans="1:${columnas.length}" ht="18" customHeight="1" x14ac:dyDescent="0.25">${celdas}</row>`;
+}
+function etiquetaCustodioTipo(tipo){
+  if(tipo==="area") return "Área / departamento";
+  if(tipo==="mantenimiento") return "Mantenimiento";
+  if(tipo==="persona") return "Persona";
+  return "";
+}
+
+async function exportarActivosExcel(){
   const datos = cargarActivos();
   const lista = listaOrdenadaFiltrada(datos);
-  const headers = ["Tag","Tipo","Marca","Modelo","Serie","Nombre dispositivo","Propiedad",
-    "Custodio","Tipo de custodio","Cargo","Sistema operativo","RAM (GB)","Disco (GB)",
-    "Procesador","Proveedor","Fecha adquisición","MAC WiFi","MAC Ethernet"];
-  const filas = lista.map(a=>[
-    fmtTag(a.id), a.tipo||"", a.marca||"", a.modelo||"", a.serie||"", a.nombre_dispositivo||"",
-    a.propiedad||"", a.custodio?a.custodio.nombre:"Disponible", a.custodio?a.custodio.tipo_custodio:"",
-    a.custodio?(a.custodio.cargo||""):"", a.sistema_operativo||"", a.ram_gb??"", a.disco_gb??"",
-    a.procesador||"", a.proveedor||"", a.fecha_adquisicion||"", a.mac_wifi||"", a.mac_ethernet||"",
-  ]);
-  const csvEscape = v => { const s=String(v); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; };
-  const lineas = [headers, ...filas].map(fila=>fila.map(csvEscape).join(","));
-  const csv = "\uFEFF" + lineas.join("\r\n");
-  const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = "activos_lukmar_" + hoyISO() + ".csv";
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  if(lista.length===0){ alert("No hay activos que coincidan con los filtros actuales."); return; }
+
+  const resp = await fetch("assets/plantillas/ActivosTecnologicos.xlsx");
+  if(!resp.ok) throw new Error("No se pudo cargar la plantilla (assets/plantillas/ActivosTecnologicos.xlsx).");
+  const buf = await resp.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+
+  // Hoja 1 "Computadores": un renglón por activo filtrado.
+  let xml1 = await zip.file("xl/worksheets/sheet1.xml").async("string");
+  // La fila 8 (nota amarilla "Fila de plantilla — no borrar…") es para quien
+  // abra la plantilla en crudo, no para un reporte ya generado — se quita acá.
+  xml1 = xml1.replace(/<row r="8"[^>]*>.*?<\/row>/s, "");
+  const filas1 = lista.map((a,i)=>{
+    const valores = [
+      fmtTag(a), a.empresa==="eq"?"EQ Soluciones":"Lukmar", a.tipo||"", a.marca||"", a.modelo||"",
+      a.serie||"", a.nombre_dispositivo||"", capitalizar(a.propiedad)||"",
+      a.custodio?a.custodio.nombre:"Disponible", a.custodio?etiquetaCustodioTipo(a.custodio.tipo_custodio):"",
+      a.custodio?(a.custodio.cargo||""):"", a.sistema_operativo||"", a.ram_gb??"", a.disco_gb??"",
+      a.procesador||"", a.mac_wifi||"", a.mac_ethernet||"", a.proveedor||"", a.fecha_adquisicion||"",
+      a.valor_compra??"", valorActualActivo(a)??"", a.color||"", a.longitud_m??"",
+    ];
+    return filaXML(10+i, 19, COLS_LISTADO_ACTIVOS, valores);
+  }).join("");
+  xml1 = xml1.replace(/<row r="10"[^>]*>.*?<\/row>/s, filas1);
+  xml1 = xml1.replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:W${9+lista.length}"/>`);
+  zip.file("xl/worksheets/sheet1.xml", xml1);
+
+  // Hoja 2 "historial_custodia": un renglón por tramo de cada activo filtrado,
+  // en orden cronológico (1 = más antiguo) — el array en memoria viene más
+  // reciente primero, así que se invierte por activo antes de numerar.
+  let xml2 = await zip.file("xl/worksheets/sheet2.xml").async("string");
+  const filas2 = [];
+  let filaActual = 4;
+  lista.forEach(a=>{
+    const cronologico = [...a.historial_custodia].reverse();
+    cronologico.forEach((t,idx)=>{
+      const valores = [fmtTag(a), t.nombre||"", etiquetaCustodioTipo(t.tipo_custodio), t.cargo||"", t.desde||"", t.hasta||"", idx+1];
+      filas2.push(filaXML(filaActual, 22, COLS_LISTADO_HISTORIAL, valores));
+      filaActual++;
+    });
+  });
+  const totalFilasHist = filaActual - 4;
+  xml2 = xml2.replace(/<row r="4"[^>]*>.*?<\/row>/s, filas2.join(""));
+  xml2 = xml2.replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:G${Math.max(4,3+totalFilasHist)}"/>`);
+  zip.file("xl/worksheets/sheet2.xml", xml2);
+
+  // {{FECHA_ACTUALIZACION}} es un marcador único (P7), no uno que se duplique
+  // por fila — este sí se puede reemplazar in-place en sharedStrings.xml.
+  let shared = await zip.file("xl/sharedStrings.xml").async("string");
+  shared = shared.split("{{FECHA_ACTUALIZACION}}").join(fechaEnPalabras(hoyISO()));
+  zip.file("xl/sharedStrings.xml", shared);
+
+  const salida = await zip.generateAsync({type:"blob"});
+  const url = URL.createObjectURL(salida);
+  const link = document.createElement("a");
+  link.href = url; link.download = `Listado_Activos_${hoyISO()}.xlsx`;
+  document.body.appendChild(link); link.click(); document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
 
-// ---------- Iconos SVG por tipo de activo (línea, un color distintivo por tipo) ----------
+// ---------- Iconos SVG por tipo de activo ----------
+// Reemplazados por los SVG reales de Bootstrap Icons (twbs/icons, MIT
+// license) a pedido explícito — bajados directo del repo de GitHub, sin
+// modificar los `path`. Todos usan fill="currentColor" (relleno, no trazo)
+// y viewBox nativo 16x16 — quedan consistentes ENTRE ELLOS, aunque distinto
+// del estilo de línea fina que tenía este set antes.
+// "plotter" es la única excepción: Bootstrap Icons no tiene un ícono de
+// plotter/impresora de gran formato, así que se dejó el diseño original.
 const ICONOS_TIPO = {
-  laptop: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="1.4"/><path d="M2 19h20"/></svg>`,
-  // Desktop: torre vertical (case), con botón de encendido y ranuras — antes
-  // este ícono era el de un monitor; el monitor real ahora tiene su propio
-  // tipo (ver "monitor" abajo, que heredó la silueta que Desktop usaba).
-  desktop: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.3" width="10" height="19.4" rx="1.3"/><circle cx="12" cy="5.2" r="0.9" fill="currentColor" stroke="none"/><path d="M9 10h6M9 12.3h6"/></svg>`,
-  celular: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="2" width="11" height="20" rx="2"/><path d="M10 18h4"/></svg>`,
-  impresora: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9V3.5h11V9"/><rect x="4" y="9" width="16" height="7.5" rx="1"/><path d="M6.5 16.5V20h11v-3.5"/></svg>`,
-  scanner: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="11" rx="1"/><path d="M3 10.5h18"/></svg>`,
-  // Plotter: bandeja/base ancha con una línea de trazo en zigzag y la punta del lápiz marcada.
+  laptop: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M13.5 3a.5.5 0 0 1 .5.5V11H2V3.5a.5.5 0 0 1 .5-.5zm-11-1A1.5 1.5 0 0 0 1 3.5V12h14V3.5A1.5 1.5 0 0 0 13.5 2zM0 12.5h16a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 12.5"/></svg>`,
+  // Desktop: bi-pc-display (torre + pantalla, el ícono canónico de "PC de escritorio" en Bootstrap Icons).
+  desktop: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1zm1 13.5a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0m2 0a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0M9.5 1a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1zM9 3.5a.5.5 0 0 0 .5.5h5a.5.5 0 0 0 0-1h-5a.5.5 0 0 0-.5.5M1.5 2A1.5 1.5 0 0 0 0 3.5v7A1.5 1.5 0 0 0 1.5 12H6v2h-.5a.5.5 0 0 0 0 1H7v-4H1.5a.5.5 0 0 1-.5-.5v-7a.5.5 0 0 1 .5-.5H7V2z"/></svg>`,
+  celular: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M11 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM5 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/><path d="M8 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2"/></svg>`,
+  impresora: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1"/><path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1"/></svg>`,
+  // Scanner: bi-upc-scan — Bootstrap Icons no tiene un escáner plano/documental, este es el más cercano (escáner de código de barras).
+  scanner: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1zM11 .5a.5.5 0 0 1 .5-.5h3A1.5 1.5 0 0 1 16 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 1-.5-.5M.5 11a.5.5 0 0 1 .5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 .5-.5m15 0a.5.5 0 0 1 .5.5v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 1 .5-.5M3 4.5a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0zm2 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0zm2 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0zm2 0a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v7a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5zm3 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0z"/></svg>`,
+  // Plotter: sin equivalente en Bootstrap Icons — se conserva el diseño original (bandeja + trazo en zigzag + punta del lápiz).
   plotter: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="14.5" width="18" height="5.5" rx="1"/><path d="M6 14.5l2.6-8.5h2.4l1.8 4.6 1.8-2.6h2.2"/><circle cx="17.8" cy="7.5" r="1" fill="currentColor" stroke="none"/></svg>`,
-  // SmartTV: pantalla ancha y plana en un pie centrado delgado, con un triángulo de "play" — se distingue del monitor de Desktop.
-  smarttv: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.3" y="4.7" width="19.4" height="10.3" rx="1.3"/><path d="M9 19.7h6M12 15v4.7"/><path d="M10.2 7.6l4 2.1-4 2.1z" fill="currentColor" stroke="none"/></svg>`,
-  // Monitor: la silueta que antes usaba Desktop (pantalla + cuello + base ancha).
-  monitor: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="11" rx="1.3"/><path d="M10.3 14.5v3.3M13.7 14.5v3.3"/><path d="M8 20.3h8"/></svg>`,
-  // Mouse: cuerpo ovalado con la línea del botón/scroll central.
-  mouse: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.4c-3.2 0-5.4 2.5-5.4 6.3v5c0 3.5 2.1 5.3 5.4 5.3s5.4-1.8 5.4-5.3v-5c0-3.8-2.2-6.3-5.4-6.3z"/><path d="M12 3.4v5.2"/></svg>`,
-  // Fuente de alimentación (antes "Cargador"): cuerpo rectangular con dos clavijas arriba y el cable hacia abajo — cubre cargadores y fuentes de poder de monitores/desktops a propósito, ya desde el diseño original del ícono.
-  fuentedealimentacion: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="9" width="10" height="7.5" rx="1.2"/><path d="M9.5 9V5M14.5 9V5"/><path d="M12 16.5v3.8"/></svg>`,
-  // Teclado: cuerpo rectangular bajo con una cuadrícula de teclas.
-  teclado: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6.5" width="19" height="11" rx="1.3"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 14h9"/></svg>`,
-  // AP (punto de acceso): un punto con arcos de señal — bonus, no pedido explícitamente pero mencionado como futuro.
-  ap: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="17" r="1.3" fill="currentColor" stroke="none"/><path d="M8.3 14.2a5.2 5.2 0 0 1 7.4 0"/><path d="M5.5 11.4a9.2 9.2 0 0 1 13 0"/></svg>`,
-  // Cable HDMI visto desde arriba, en vertical (punta arriba, cable abajo),
-  // largo comprimido ~30%. Cable fino y algo más largo; punta (lengüeta +
-  // 2 orejas) angosta y con trazo más fino (1.3) que el resto (1.7).
-  cablehdmi: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="13" width="12" height="8" rx="2"/><rect x="6" y="8" width="2" height="5" rx="0.7" stroke-width="1"/><rect x="16" y="8" width="2" height="5" rx="0.7" stroke-width="1"/><rect x="8" y="7" width="8" height="6" rx="0.8" stroke-width="1"/><path d="M9 16.5h6M9 18.8h6"/><rect x="11.3" y="21" width="1.4" height="1.5" rx="0.4"/></svg>`,
-  generico: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2.2"/><path d="M12 16.2v.01"/><path d="M9.6 9.4a2.4 2.4 0 1 1 3.6 2.1c-.7.5-1.2 1-1.2 2"/></svg>`,
+  smarttv: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M2.5 13.5A.5.5 0 0 1 3 13h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5M13.991 3l.024.001a1.5 1.5 0 0 1 .538.143.76.76 0 0 1 .302.254c.067.1.145.277.145.602v5.991l-.001.024a1.5 1.5 0 0 1-.143.538.76.76 0 0 1-.254.302c-.1.067-.277.145-.602.145H2.009l-.024-.001a1.5 1.5 0 0 1-.538-.143.76.76 0 0 1-.302-.254C1.078 10.502 1 10.325 1 10V4.009l.001-.024a1.5 1.5 0 0 1 .143-.538.76.76 0 0 1 .254-.302C1.498 3.078 1.675 3 2 3zM14 2H2C0 2 0 4 0 4v6c0 2 2 2 2 2h12c2 0 2-2 2-2V4c0-2-2-2-2-2"/></svg>`,
+  monitor: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M0 4s0-2 2-2h12s2 0 2 2v6s0 2-2 2h-4q0 1 .25 1.5H11a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1h.75Q6 13 6 12H2s-2 0-2-2zm1.398-.855a.76.76 0 0 0-.254.302A1.5 1.5 0 0 0 1 4.01V10c0 .325.078.502.145.602q.105.156.302.254a1.5 1.5 0 0 0 .538.143L2.01 11H14c.325 0 .502-.078.602-.145a.76.76 0 0 0 .254-.302 1.5 1.5 0 0 0 .143-.538L15 9.99V4c0-.325-.078-.502-.145-.602a.76.76 0 0 0-.302-.254A1.5 1.5 0 0 0 13.99 3H2c-.325 0-.502.078-.602.145"/></svg>`,
+  mouse: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 3a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 3m4 8a4 4 0 0 1-8 0V5a4 4 0 1 1 8 0zM8 0a5 5 0 0 0-5 5v6a5 5 0 0 0 10 0V5a5 5 0 0 0-5-5"/></svg>`,
+  // Fuente de alimentación: bi-plug — reemplaza el rectángulo con clavijas dibujado a mano.
+  fuentedealimentacion: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M6 0a.5.5 0 0 1 .5.5V3h3V.5a.5.5 0 0 1 1 0V3h1a.5.5 0 0 1 .5.5v3A3.5 3.5 0 0 1 8.5 10c-.002.434-.01.845-.04 1.22-.041.514-.126 1.003-.317 1.424a2.08 2.08 0 0 1-.97 1.028C6.725 13.9 6.169 14 5.5 14c-.998 0-1.61.33-1.974.718A1.92 1.92 0 0 0 3 16H2c0-.616.232-1.367.797-1.968C3.374 13.42 4.261 13 5.5 13c.581 0 .962-.088 1.218-.219.241-.123.4-.3.514-.55.121-.266.193-.621.23-1.09.027-.34.035-.718.037-1.141A3.5 3.5 0 0 1 4 6.5v-3a.5.5 0 0 1 .5-.5h1V.5A.5.5 0 0 1 6 0M5 4v2.5A2.5 2.5 0 0 0 7.5 9h1A2.5 2.5 0 0 0 11 6.5V4z"/></svg>`,
+  teclado: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M14 5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM2 4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><path d="M13 10.25a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zm0-2a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zm-5 0A.25.25 0 0 1 8.25 8h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 8 8.75zm2 0a.25.25 0 0 1 .25-.25h1.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-1.5a.25.25 0 0 1-.25-.25zm1 2a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zm-5-2A.25.25 0 0 1 6.25 8h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 6 8.75zm-2 0A.25.25 0 0 1 4.25 8h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 4 8.75zm-2 0A.25.25 0 0 1 2.25 8h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 2 8.75zm11-2a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zm-2 0a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zm-2 0A.25.25 0 0 1 9.25 6h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 9 6.75zm-2 0A.25.25 0 0 1 7.25 6h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 7 6.75zm-2 0A.25.25 0 0 1 5.25 6h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 5 6.75zm-3 0A.25.25 0 0 1 2.25 6h1.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-1.5A.25.25 0 0 1 2 6.75zm0 4a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zm2 0a.25.25 0 0 1 .25-.25h5.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-5.5a.25.25 0 0 1-.25-.25z"/></svg>`,
+  ap: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M15.384 6.115a.485.485 0 0 0-.047-.736A12.44 12.44 0 0 0 8 3C5.259 3 2.723 3.882.663 5.379a.485.485 0 0 0-.048.736.52.52 0 0 0 .668.05A11.45 11.45 0 0 1 8 4c2.507 0 4.827.802 6.716 2.164.205.148.49.13.668-.049"/><path d="M13.229 8.271a.482.482 0 0 0-.063-.745A9.46 9.46 0 0 0 8 6c-1.905 0-3.68.56-5.166 1.526a.48.48 0 0 0-.063.745.525.525 0 0 0 .652.065A8.46 8.46 0 0 1 8 7a8.46 8.46 0 0 1 4.576 1.336c.206.132.48.108.653-.065m-2.183 2.183c.226-.226.185-.605-.1-.75A6.5 6.5 0 0 0 8 9c-1.06 0-2.062.254-2.946.704-.285.145-.326.524-.1.75l.015.015c.16.16.407.19.611.09A5.5 5.5 0 0 1 8 10c.868 0 1.69.201 2.42.56.203.1.45.07.61-.091zM9.06 12.44c.196-.196.198-.52-.04-.66A2 2 0 0 0 8 11.5a2 2 0 0 0-1.02.28c-.238.14-.236.464-.04.66l.706.706a.5.5 0 0 0 .707 0l.707-.707z"/></svg>`,
+  // Cable HDMI: bi-hdmi — reemplaza toda la exploración anterior (culebra/bolita, punta de 3 piezas, etc.) por el conector real de Bootstrap Icons.
+  cablehdmi: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M2.5 7a.5.5 0 0 0 0 1h11a.5.5 0 0 0 0-1z"/><path d="M1 5a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h.293l.707.707a1 1 0 0 0 .707.293h10.586a1 1 0 0 0 .707-.293l.707-.707H15a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1zm0 1h14v3h-.293a1 1 0 0 0-.707.293l-.707.707H2.707L2 9.293A1 1 0 0 0 1.293 9H1z"/></svg>`,
+  // Biométrico: huella dactilar de Bootstrap Icons (bi-fingerprint), a pedido explícito.
+  biometrico: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8.06 6.5a.5.5 0 0 1 .5.5v.776a11.5 11.5 0 0 1-.552 3.519l-1.331 4.14a.5.5 0 0 1-.952-.305l1.33-4.141a10.5 10.5 0 0 0 .504-3.213V7a.5.5 0 0 1 .5-.5Z"/><path d="M6.06 7a2 2 0 1 1 4 0 .5.5 0 1 1-1 0 1 1 0 1 0-2 0v.332q0 .613-.066 1.221A.5.5 0 0 1 6 8.447q.06-.555.06-1.115zm3.509 1a.5.5 0 0 1 .487.513 11.5 11.5 0 0 1-.587 3.339l-1.266 3.8a.5.5 0 0 1-.949-.317l1.267-3.8a10.5 10.5 0 0 0 .535-3.048A.5.5 0 0 1 9.569 8m-3.356 2.115a.5.5 0 0 1 .33.626L5.24 14.939a.5.5 0 1 1-.955-.296l1.303-4.199a.5.5 0 0 1 .625-.329"/><path d="M4.759 5.833A3.501 3.501 0 0 1 11.559 7a.5.5 0 0 1-1 0 2.5 2.5 0 0 0-4.857-.833.5.5 0 1 1-.943-.334m.3 1.67a.5.5 0 0 1 .449.546 10.7 10.7 0 0 1-.4 2.031l-1.222 4.072a.5.5 0 1 1-.958-.287L4.15 9.793a9.7 9.7 0 0 0 .363-1.842.5.5 0 0 1 .546-.449Zm6 .647a.5.5 0 0 1 .5.5c0 1.28-.213 2.552-.632 3.762l-1.09 3.145a.5.5 0 0 1-.944-.327l1.089-3.145c.382-1.105.578-2.266.578-3.435a.5.5 0 0 1 .5-.5Z"/><path d="M3.902 4.222a5 5 0 0 1 5.202-2.113.5.5 0 0 1-.208.979 4 4 0 0 0-4.163 1.69.5.5 0 0 1-.831-.556m6.72-.955a.5.5 0 0 1 .705-.052A4.99 4.99 0 0 1 13.059 7v1.5a.5.5 0 1 1-1 0V7a3.99 3.99 0 0 0-1.386-3.028.5.5 0 0 1-.051-.705M3.68 5.842a.5.5 0 0 1 .422.568q-.044.289-.044.59c0 .71-.1 1.417-.298 2.1l-1.14 3.923a.5.5 0 1 1-.96-.279L2.8 8.821A6.5 6.5 0 0 0 3.058 7q0-.375.054-.736a.5.5 0 0 1 .568-.422m8.882 3.66a.5.5 0 0 1 .456.54c-.084 1-.298 1.986-.64 2.934l-.744 2.068a.5.5 0 0 1-.941-.338l.745-2.07a10.5 10.5 0 0 0 .584-2.678.5.5 0 0 1 .54-.456"/><path d="M4.81 1.37A6.5 6.5 0 0 1 14.56 7a.5.5 0 1 1-1 0 5.5 5.5 0 0 0-8.25-4.765.5.5 0 0 1-.5-.865m-.89 1.257a.5.5 0 0 1 .04.706A5.48 5.48 0 0 0 2.56 7a.5.5 0 0 1-1 0c0-1.664.626-3.184 1.655-4.333a.5.5 0 0 1 .706-.04ZM1.915 8.02a.5.5 0 0 1 .346.616l-.779 2.767a.5.5 0 1 1-.962-.27l.778-2.767a.5.5 0 0 1 .617-.346m12.15.481a.5.5 0 0 1 .49.51c-.03 1.499-.161 3.025-.727 4.533l-.07.187a.5.5 0 0 1-.936-.351l.07-.187c.506-1.35.634-2.74.663-4.202a.5.5 0 0 1 .51-.49"/></svg>`,
+  // Cable USB: bi-usb-plug.
+  cableusb: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M6 .5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5v4H6zM7 1v1h1V1zm2 0v1h1V1zM6 5a1 1 0 0 0-1 1v4.394c0 .494.146.976.42 1.387l1.038 1.558c.354.53.542 1.152.542 1.789 0 .481.39.872.872.872h1.256c.481 0 .872-.39.872-.872 0-.637.188-1.26.541-1.789l1.04-1.558A2.5 2.5 0 0 0 12 10.394V6a1 1 0 0 0-1-1zm0 1h5v4.394a1.5 1.5 0 0 1-.252.832L9.71 12.784A4.2 4.2 0 0 0 9.002 15H7.998a4.2 4.2 0 0 0-.707-2.216l-1.04-1.558A1.5 1.5 0 0 1 6 10.394z"/></svg>`,
+  // Router: bi-router — reemplaza la caja+antenas dibujada a mano.
+  router: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M5.525 3.025a3.5 3.5 0 0 1 4.95 0 .5.5 0 1 0 .707-.707 4.5 4.5 0 0 0-6.364 0 .5.5 0 0 0 .707.707"/><path d="M6.94 4.44a1.5 1.5 0 0 1 2.12 0 .5.5 0 0 0 .708-.708 2.5 2.5 0 0 0-3.536 0 .5.5 0 0 0 .707.707ZM2.5 11a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1m4.5-.5a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0m2.5.5a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1m1.5-.5a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0m2 0a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0"/><path d="M2.974 2.342a.5.5 0 1 0-.948.316L3.806 8H1.5A1.5 1.5 0 0 0 0 9.5v2A1.5 1.5 0 0 0 1.5 13H2a.5.5 0 0 0 .5.5h2A.5.5 0 0 0 5 13h6a.5.5 0 0 0 .5.5h2a.5.5 0 0 0 .5-.5h.5a1.5 1.5 0 0 0 1.5-1.5v-2A1.5 1.5 0 0 0 14.5 8h-2.306l1.78-5.342a.5.5 0 1 0-.948-.316L11.14 8H4.86zM14.5 9a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-2a.5.5 0 0 1 .5-.5z"/><path d="M8.5 5.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0"/></svg>`,
+  generico: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5 8 5.961 14.154 3.5zM15 4.239l-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.662a1 1 0 0 1-.629.928l-7.185 2.874a.5.5 0 0 1-.372 0L.63 13.09a1 1 0 0 1-.63-.928V3.5a.5.5 0 0 1 .314-.464z"/></svg>`,
 };
 // Un color propio por tipo, para que se distingan de un vistazo en la columna.
 // Los tres tipos más comunes usan colores reales de la marca Lukmar.
@@ -1335,6 +1443,7 @@ const COLOR_TIPO = {
   scanner: "#74883D", plotter: "#5B4B8A", smarttv: "#2E93C7",
   monitor: "#1F6FA8", mouse: "#8A6D3B", fuentedealimentacion: "#B0651C", ap: "#2E7D5B", teclado: "#6B7C93",
   cablehdmi: "#B23A6B",
+  biometrico: "#1F8C7A", cableusb: "#4A5A9E", router: "#A67C27",
   generico: "#8B9AAA",
 };
 function claveTipo(tipo){
@@ -1353,7 +1462,10 @@ const CAMPOS_NO_RELEVANTES_DETALLE = {
   monitor:             ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
   fuentedealimentacion:["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
   ap:                  ["so","procesador","ram_gb","disco_gb"], // sí conserva las MAC — un AP real las usa
+  router:              ["so","procesador","ram_gb","disco_gb"], // mismo criterio que AP — MAC sí, cómputo no
   cablehdmi:           ["serie","so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
+  cableusb:            ["serie","so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
+  biometrico:          ["so","procesador","ram_gb","disco_gb"], // sí conserva las MAC, igual que AP — se conecta a red para sincronizar asistencia
 };
 function camposNoRelevantesParaDetalle(tipo){
   return CAMPOS_NO_RELEVANTES_DETALLE[claveTipo(tipo)] || [];
@@ -1364,6 +1476,7 @@ function camposNoRelevantesParaDetalle(tipo){
 // lo que no aplica" — porque estos campos ni siquiera aparecen en la tabla.
 const CAMPOS_EXTRA_TIPO = {
   cablehdmi: ["color","longitud_m"],
+  cableusb: ["color","longitud_m"],
 };
 function camposExtraParaTipo(tipo){
   return CAMPOS_EXTRA_TIPO[claveTipo(tipo)] || [];
@@ -1391,11 +1504,13 @@ const ICONO_KPI_AREA = `<svg viewBox="0 0 24 24" width="20" height="20" fill="no
 
 function pillCustodio(a){
   if(a.custodio===null) return `<span class="pill pill-cell pill-good"><span class="pill-dot"></span>Disponible</span>`;
+  if(a.custodio.tipo_custodio==="mantenimiento") return `<span class="pill pill-cell pill-mantenimiento"><span class="pill-dot"></span><span class="cell-clip">${esc(a.custodio.nombre)}</span></span>`;
   if(a.custodio.tipo_custodio==="area") return `<span class="pill pill-cell pill-area"><span class="pill-dot"></span><span class="cell-clip">${esc(a.custodio.nombre)}</span></span>`;
   return `<span class="pill pill-cell pill-persona"><span class="pill-dot"></span><span class="cell-clip">${esc(a.custodio.nombre)}</span></span>`;
 }
 function colorCustodioActual(a){
   if(a.custodio===null) return "#3E7D4F";
+  if(a.custodio.tipo_custodio==="mantenimiento") return "#A6710B";
   if(a.custodio.tipo_custodio==="area") return "#5B4B8A";
   return "#004DAB";
 }
@@ -1415,9 +1530,10 @@ function bloquePerfilCustodio(a){
     </div>`;
   }
   const esArea = a.custodio.tipo_custodio==="area";
+  const esMantenimiento = a.custodio.tipo_custodio==="mantenimiento";
   const linea2 = a.custodio.cargo
     ? esc(a.custodio.cargo)
-    : (esArea ? "Área / departamento sin especificar" : "Sin cargo registrado");
+    : (esMantenimiento ? "En mantenimiento" : (esArea ? "Área / departamento sin especificar" : "Sin cargo registrado"));
   return `<div class="detail-profile-info">
     <div class="detail-profile-name">${esc(a.custodio.nombre)}</div>
     <div class="detail-profile-cargo">${linea2}</div>
@@ -1437,7 +1553,7 @@ function celdaTextoRecortado(valor, claseExtra){
 }
 function celdaActivo(col, a){
   switch(col.key){
-    case "tag": return `<span class="tag">${fmtTag(a.id)}</span>`;
+    case "tag": return `<span class="tag">${fmtTag(a)}</span>`;
     case "tipo": return `<span class="tipo-cell"><span class="tipo-icon" style="color:${colorTipo(a.tipo)}">${iconoTipo(a.tipo)}</span><span class="cell-clip">${esc(a.tipo)||'<span class="cell-muted">—</span>'}</span></span>`;
     case "marca": return celdaTextoRecortado(a.marca);
     case "modelo": return celdaTextoRecortado(a.modelo);
@@ -1477,7 +1593,7 @@ function abrirDetalle(id){
   const html = `
     <div class="modal modal-wide">
       <div class="modal-header">
-        <h3><span class="tag tag-lg">${fmtTag(a.id)}</span></h3>
+        <h3><span class="tag tag-lg">${fmtTag(a)}</span></h3>
         <button class="modal-close">✕</button>
       </div>
       <div class="modal-body">
@@ -1490,6 +1606,7 @@ function abrirDetalle(id){
             ${tarjetaBadge("Modelo", esc(a.modelo)||'—', "#004DAB")}
             ${tarjetaBadge("Nombre", esc(a.nombre_dispositivo)||'—', "#007EB2")}
             ${tarjetaBadge("Propiedad", `<span style="color:${(COLOR_PROPIEDAD[a.propiedad]||{fg:'#57697C'}).fg}">${esc(capitalizar(a.propiedad))}</span>`, (COLOR_PROPIEDAD[a.propiedad]||{fg:"#57697C"}).fg)}
+            ${tarjetaBadge("Empresa", `<span style="color:${(COLOR_EMPRESA[a.empresa]||COLOR_EMPRESA.lukmar).fg}">${a.empresa==='eq'?'EQ Soluciones':'Lukmar'}</span>`, (COLOR_EMPRESA[a.empresa]||COLOR_EMPRESA.lukmar).fg)}
             ${tarjetaBadge("Tipo", esc(a.tipo)||'—', colorTipo(a.tipo))}
           </div>
         </div>
@@ -1502,6 +1619,8 @@ function abrirDetalle(id){
           ${!camposNoRelevantes.includes("disco_gb") ? `<div class="kv"><div class="k">Almacenamiento</div><div class="v">${a.disco_gb?a.disco_gb+' GB':'—'}</div></div>` : ""}
           ${!camposNoRelevantes.includes("procesador") ? `<div class="kv"><div class="k">Procesador</div><div class="v">${esc(a.procesador)||'—'}</div></div>` : ""}
           <div class="kv"><div class="k">Proveedor</div><div class="v">${esc(a.proveedor)||'—'}</div></div>
+          <div class="kv"><div class="k">Valor de compra</div><div class="v">${a.valor_compra?'$'+Number(a.valor_compra).toFixed(2):'—'}</div></div>
+          <div class="kv"><div class="k">Valor actual</div><div class="v">${valorActualActivo(a)!==null?'$'+valorActualActivo(a).toFixed(2):'—'}</div></div>
           ${camposExtraParaTipo(a.tipo).includes("color") ? `<div class="kv"><div class="k">Color</div><div class="v">${esc(a.color)||'—'}</div></div>` : ""}
           ${camposExtraParaTipo(a.tipo).includes("longitud_m") ? `<div class="kv"><div class="k">Longitud</div><div class="v">${a.longitud_m?a.longitud_m+' m':'—'}</div></div>` : ""}
           ${!camposNoRelevantes.includes("mac_wifi") ? `<div class="kv"><div class="k">MAC WiFi</div><div class="v mono">${esc(a.mac_wifi)||'—'}</div></div>` : ""}
@@ -1528,7 +1647,7 @@ function abrirDetalle(id){
     const bc = document.getElementById("btn-cambiar-custodio");
     if(bc) bc.addEventListener("click", ()=>abrirCambioCustodio(a.id));
     const bm = document.getElementById("btn-marcar-portapapeles");
-    if(bm) bm.addEventListener("click", ()=>{ toggleEnPortapapeles(a.id); abrirDetalle(a.id); });
+    if(bm) bm.addEventListener("click", ()=>{ toggleEnPortapapeles(a.id); actualizarTablaYResumen(); abrirDetalle(a.id); });
     const bb = document.getElementById("btn-dar-baja");
     if(bb) bb.addEventListener("click", ()=>abrirConfirmarBaja(a.id));
     document.querySelectorAll("[data-editar-tramo]").forEach(b=>{
@@ -1563,11 +1682,11 @@ function renderTimelineHistorial(a){
   }).join("");
 }
 function tramoHtml(a, t, i){
-  const tipoLbl = t.tipo_custodio==="area" ? "Área / departamento" : "Persona";
+  const tipoLbl = t.tipo_custodio==="mantenimiento" ? "Mantenimiento" : (t.tipo_custodio==="area" ? "Área / departamento" : "Persona");
   return `<div class="titem ${i===0?'current':''}">
     <div class="titem-row">
       <div>
-        <div class="titem-name">${esc(t.nombre)} <span class="pill ${t.tipo_custodio==='area'?'pill-area':'pill-persona'}" style="margin-left:6px;">${tipoLbl}</span></div>
+        <div class="titem-name">${esc(t.nombre)} <span class="pill ${t.tipo_custodio==='mantenimiento'?'pill-mantenimiento':(t.tipo_custodio==='area'?'pill-area':'pill-persona')}" style="margin-left:6px;">${tipoLbl}</span></div>
         <div class="titem-meta">${t.cargo?esc(t.cargo)+' · ':''}${fmtFecha(t.desde)} → ${t.hasta?fmtFecha(t.hasta):'presente'}${t.tipo_devolucion?' · '+labelTipoDevolucion(t.tipo_devolucion).split(' (')[0]:''}</div>
       </div>
       <div class="titem-actions">
@@ -1585,16 +1704,22 @@ function abrirFormActivo(id){
   const esNuevo = !a;
   const html = `
     <div class="modal modal-wide">
-      <div class="modal-header"><h3>${esNuevo?'Nuevo activo':'Editar ' + fmtTag(a.id)}</h3><button class="modal-close">✕</button></div>
+      <div class="modal-header"><h3>${esNuevo?'Nuevo activo':'Editar ' + fmtTag(a)}</h3><button class="modal-close">✕</button></div>
       <div class="modal-body">
         <form id="form-activo">
           <div class="form-grid">
-            <div class="field"><label>Tipo</label><input type="text" id="fa-tipo" value="${esc(a?a.tipo:'')}" placeholder="Laptop, Desktop, Celular, Mouse, Monitor, Fuente de alimentación, Cable HDMI…"></div>
+            <div class="field"><label>Tipo</label><input type="text" id="fa-tipo" value="${esc(a?a.tipo:'')}" placeholder="Laptop, Desktop, Celular, Mouse, Monitor, Fuente de alimentación, Cable HDMI, Cable USB, Biométrico, Router…"></div>
             <div class="field"><label>Propiedad</label>
               <select id="fa-propiedad" required>
                 <option value="propio" ${(!a||a.propiedad==='propio')?'selected':''}>Propio</option>
                 <option value="rentado" ${a&&a.propiedad==='rentado'?'selected':''}>Rentado</option>
                 <option value="externo" ${a&&a.propiedad==='externo'?'selected':''}>Externo</option>
+              </select>
+            </div>
+            <div class="field"><label>Empresa</label>
+              <select id="fa-empresa">
+                <option value="lukmar" ${(!a||!a.empresa||a.empresa==='lukmar')?'selected':''}>Lukmar</option>
+                <option value="eq" ${a&&a.empresa==='eq'?'selected':''}>EQ Soluciones</option>
               </select>
             </div>
             <div class="field"><label>Marca</label><input type="text" id="fa-marca" value="${esc(a?a.marca:'')}"></div>
@@ -1611,6 +1736,8 @@ function abrirFormActivo(id){
             <div class="field"><label>Color</label><input type="text" id="fa-color" value="${esc(a?a.color:'')}"></div>
             <div class="field"><label>Longitud (m)</label><input type="number" step="0.1" min="0" id="fa-longitud" value="${a&&a.longitud_m?a.longitud_m:''}"></div>
             <div class="field"><label>Fecha de adquisición</label><input type="date" id="fa-fecha" value="${a&&a.fecha_adquisicion?a.fecha_adquisicion:''}"></div>
+            <div class="field"><label>Valor de compra (USD)</label><input type="number" step="0.01" min="0" id="fa-valorcompra" value="${a&&a.valor_compra?a.valor_compra:''}"></div>
+            <div class="field"><label>Vida útil (años)</label><input type="number" step="1" min="1" id="fa-vidautil" value="${a ? (a.vida_util_anios||'') : 3}"></div>
           </div>
           <fieldset style="margin-top:14px;" id="fs-celular">
             <legend>Datos de celular (solo si tipo = Celular)</legend>
@@ -1633,6 +1760,7 @@ function abrirFormActivo(id){
       const campos = {
         tipo: document.getElementById("fa-tipo").value.trim(),
         propiedad: document.getElementById("fa-propiedad").value,
+        empresa: document.getElementById("fa-empresa").value,
         marca: document.getElementById("fa-marca").value.trim(),
         modelo: document.getElementById("fa-modelo").value.trim(),
         serie: document.getElementById("fa-serie").value.trim(),
@@ -1647,6 +1775,8 @@ function abrirFormActivo(id){
         color: document.getElementById("fa-color").value.trim(),
         longitud_m: document.getElementById("fa-longitud").value,
         fecha_adquisicion: document.getElementById("fa-fecha").value,
+        valor_compra: document.getElementById("fa-valorcompra").value,
+        vida_util_anios: document.getElementById("fa-vidautil").value,
         gmail: document.getElementById("fa-gmail").value.trim(),
         password: document.getElementById("fa-password").value.trim(),
       };
@@ -1674,7 +1804,7 @@ function abrirCambioCustodio(id){
   const observacionAnterior = (!tieneVigente && a.historial_custodia[0]) ? (a.historial_custodia[0].observacion || "") : "";
   const html = `
     <div class="modal">
-      <div class="modal-header"><h3>Cambiar custodio — ${fmtTag(a.id)}</h3><button class="modal-close">✕</button></div>
+      <div class="modal-header"><h3>Cambiar custodio — ${fmtTag(a)}</h3><button class="modal-close">✕</button></div>
       <div class="modal-body">
         ${tieneVigente ? `
           <div class="alert alert-info">Custodio actual: <strong>${esc(a.custodio.nombre)}</strong>. Al confirmar, este tramo se cierra hoy.</div>
@@ -1706,9 +1836,10 @@ function abrirCambioCustodio(id){
               <select id="cc-tipo">
                 <option value="persona">Persona</option>
                 <option value="area">Área / departamento</option>
+                <option value="mantenimiento">Mantenimiento</option>
               </select>
             </div>
-            <div class="field"><label>Nombre</label><input type="text" id="cc-nombre" placeholder="Nombre de la persona o del área"></div>
+            <div class="field"><label>Nombre</label><input type="text" id="cc-nombre" placeholder="Nombre de la persona, del área, o motivo del mantenimiento"></div>
             <div class="field span-2"><label>Cargo (opcional)</label><input type="text" id="cc-cargo"></div>
           </div>
         </fieldset>
@@ -1753,13 +1884,14 @@ function abrirEditarTramo(id, index){
   if(!t) return;
   const html = `
     <div class="modal">
-      <div class="modal-header"><h3>Editar tramo #${index+1} — ${fmtTag(id)}</h3><button class="modal-close">✕</button></div>
+      <div class="modal-header"><h3>Editar tramo #${index+1} — ${fmtTag(a)}</h3><button class="modal-close">✕</button></div>
       <div class="modal-body">
         <div class="form-grid">
           <div class="field"><label>Tipo</label>
             <select id="et-tipo">
               <option value="persona" ${t.tipo_custodio==='persona'?'selected':''}>Persona</option>
               <option value="area" ${t.tipo_custodio==='area'?'selected':''}>Área / departamento</option>
+              <option value="mantenimiento" ${t.tipo_custodio==='mantenimiento'?'selected':''}>Mantenimiento</option>
             </select>
           </div>
           <div class="field"><label>Nombre</label><input type="text" id="et-nombre" value="${esc(t.nombre)}"></div>
@@ -1819,7 +1951,7 @@ function descripcionItemActa(a){
   if(base) partes.push(base);
   if(a.modelo) partes.push(`Modelo: ${a.modelo}`);
   if(a.serie) partes.push(`Número de serie: ${a.serie}`);
-  return partes.join(" — ") || fmtTag(a.id);
+  return partes.join(" — ") || fmtTag(a);
 }
 /* ---------- Portapapeles de activos (para actas de entrega unificadas) ---------- */
 // Solamente frontend, respaldado en localStorage para que sobreviva recargas
@@ -1882,7 +2014,7 @@ function abrirPanelPortapapeles(){
             <thead><tr><th>Tag</th><th>Tipo</th><th>Marca / Modelo</th><th>Custodio</th><th></th></tr></thead>
             <tbody>
               ${items.map(a=>`<tr>
-                <td class="mono">${fmtTag(a.id)}</td>
+                <td class="mono">${fmtTag(a)}</td>
                 <td>${esc(a.tipo)||'<span class="cell-muted">—</span>'}</td>
                 <td>${esc([a.marca,a.modelo].filter(Boolean).join(" "))||'<span class="cell-muted">—</span>'}</td>
                 <td>${esc(a.custodio ? a.custodio.nombre : "—")}</td>
@@ -1931,7 +2063,7 @@ async function generarActaEntregaDesdeLista(activos){
   if(!activos || activos.length === 0) throw new Error("No hay ningún activo para generar el acta.");
   if(activos.length > 6) throw new Error("Un acta admite hasta 6 activos — genera dos actas separadas.");
   const sinCustodio = activos.find(a=>!a.custodio);
-  if(sinCustodio) throw new Error(`El activo ${fmtTag(sinCustodio.id)} no tiene custodio vigente.`);
+  if(sinCustodio) throw new Error(`El activo ${fmtTag(sinCustodio)} no tiene custodio vigente.`);
   const nombreRef = activos[0].custodio.nombre;
   const distinto = activos.find(a=>a.custodio.nombre !== nombreRef);
   if(distinto) throw new Error(`No todos los activos marcados tienen el mismo custodio ("${nombreRef}" vs "${distinto.custodio.nombre}"). Un acta es para un solo custodio — separa en dos actas.`);
@@ -1969,7 +2101,7 @@ async function generarActaEntregaDesdeLista(activos){
   const salida = await zip.generateAsync({type:"blob"});
   const url = URL.createObjectURL(salida);
   const link = document.createElement("a");
-  const sufijoTags = activos.map(a=>fmtTag(a.id)).join("-");
+  const sufijoTags = activos.map(a=>fmtTag(a)).join("-");
   const nombreArchivo = `Acta_Entrega_${(nombreRef||"").replace(/[^a-zA-Z0-9]+/g,"_")}_${sufijoTags}.xlsx`;
   link.href = url; link.download = nombreArchivo;
   document.body.appendChild(link); link.click(); document.body.removeChild(link);
@@ -1984,7 +2116,7 @@ function abrirConfirmarBaja(id){
   if(!a) return;
   const html = `
     <div class="modal">
-      <div class="modal-header"><h3>Dar de baja — ${fmtTag(id)}</h3><button class="modal-close">✕</button></div>
+      <div class="modal-header"><h3>Dar de baja — ${fmtTag(a)}</h3><button class="modal-close">✕</button></div>
       <div class="modal-body">
         <div class="alert alert-error">Esta acción retira el activo del inventario activo. Queda archivado en la bitácora de bajas, desde donde se puede restaurar si es necesario.</div>
         <div class="field"><label>Motivo</label><textarea id="baja-motivo" placeholder="Ej: equipo dañado sin reparación posible, obsoleto, robado…"></textarea></div>
@@ -2014,7 +2146,7 @@ function renderVistaBajas(main){
         <tbody>
           ${bajas.map((b,i)=>`
             <tr>
-              <td><span class="tag tag-baja">${fmtTag(b.activo.id)}</span></td>
+              <td><span class="tag tag-baja">${fmtTag(b.activo)}</span></td>
               <td>${esc(b.activo.tipo)||'—'}</td>
               <td>${esc(b.activo.marca)||''} ${esc(b.activo.modelo)||''}</td>
               <td class="cell-muted">${fmtFechaHora(b.fecha_baja)}</td>

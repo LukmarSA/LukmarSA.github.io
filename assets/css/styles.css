@@ -27,6 +27,8 @@
   --good-soft:#E1EFE3;
   --area:#5B4B8A;
   --area-soft:#E9E4F3;
+  --mantenimiento:#A6710B;
+  --mantenimiento-soft:#F5E6C8;
   --radius:10px;
   --radius-sm:6px;
   --shadow:0 1px 2px rgba(20,30,40,0.06), 0 8px 24px -8px rgba(20,30,40,0.10);
@@ -183,6 +185,7 @@ main{flex:1;padding:22px 26px 60px;max-width:1280px;width:100%;margin:0 auto;}
 .kpi-persona .lbl{color:rgba(255,255,255,0.85);}
 
 .kpi-area{background:linear-gradient(135deg, #3B3159 0%, var(--area) 100%);color:#fff;}
+.kpi-mantenimiento{background:linear-gradient(135deg, #6E4D06 0%, var(--mantenimiento) 100%);color:#fff;}
 .kpi-area .kpi-icon{background:rgba(255,255,255,0.18);color:#fff;}
 .kpi-area .num{color:#fff;}
 .kpi-area .lbl{color:rgba(255,255,255,0.85);}
@@ -322,6 +325,7 @@ tr.rowclick:hover{background:var(--accent-soft);cursor:pointer;}
 .pill.pill-cell{display:flex;min-width:0;}
 .pill-good{background:var(--good-soft);color:var(--good);}
 .pill-area{background:var(--area-soft);color:var(--area);}
+.pill-mantenimiento{background:var(--mantenimiento-soft);color:var(--mantenimiento);}
 .pill-persona{background:var(--surface-2);color:var(--ink-muted);border:1px solid var(--border);}
 .pill-dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
 
