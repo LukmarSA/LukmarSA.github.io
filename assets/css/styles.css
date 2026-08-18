@@ -412,6 +412,21 @@ fieldset legend{font-size:12px;font-weight:600;color:var(--ink-muted);padding:0 
 .foto-borrar{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,0.55);color:#fff;font-size:11px;line-height:20px;text-align:center;padding:0;cursor:pointer;}
 .foto-agregar{width:84px;height:84px;border-radius:8px;border:1.5px dashed var(--border-strong);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--ink-muted);cursor:pointer;text-align:center;}
 .foto-agregar:hover{border-color:var(--accent);color:var(--accent);}
+
+/* ---------- Carrusel de fotos (modal grande, no el thumbnail chico) ---------- */
+.modal-carrusel{max-width:680px;}
+.carrusel-body{display:flex;align-items:center;justify-content:center;gap:14px;}
+.carrusel-img{max-width:100%;max-height:60vh;width:auto;height:auto;object-fit:contain;border-radius:8px;background:var(--surface-2);}
+.carrusel-flecha{
+  flex-shrink:0;width:40px;height:40px;border-radius:50%;border:none;
+  background:var(--surface-2);color:var(--ink);font-size:22px;line-height:1;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+}
+.carrusel-flecha:hover{background:var(--accent-soft);color:var(--accent-ink);}
+.carrusel-flecha:disabled{opacity:0.3;cursor:default;}
+.carrusel-flecha:disabled:hover{background:var(--surface-2);color:var(--ink);}
+.carrusel-footer{justify-content:center;}
+.carrusel-contador{font-size:13px;font-weight:600;color:var(--ink-muted);}
 .kv{display:flex;flex-direction:column;gap:2px;padding:8px 0;border-bottom:1px solid var(--border);}
 .kv .k{font-size:11px;text-transform:uppercase;letter-spacing:0.03em;color:var(--ink-faint);}
 .kv .v{font-size:13.5px;}

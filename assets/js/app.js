@@ -138,7 +138,7 @@ const state = {
   vista: "activos",   // activos | bajas | auditoria | config
   configSubtab: "permisos",
   // null en tipo/propiedad/custodioClase = "sin filtrar" (equivale a todas las opciones marcadas).
-  filtros: { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"", colSerie:"", colSo:"", colProveedor:"", colFechaDesde:"", colFechaHasta:"", colModelo:"", colNombre:"" },
+  filtros: { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, empresa:null, colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"", colSerie:"", colSo:"", colProveedor:"", colFechaDesde:"", colFechaHasta:"", colModelo:"", colNombre:"" },
   orden: { campo:"id", dir:"asc" },
   columnasVisibles: new Set(["tag","tipo","marca","custodio","propiedad","acciones"]),
   modal: null,         // función que renderiza el modal actual, o null
@@ -205,6 +205,15 @@ function valorActualActivo(a){
   const mesesVidaUtil = a.vida_util_anios * 12;
   const fraccionRestante = Math.max(0, 1 - (mesesTranscurridos / mesesVidaUtil));
   return Math.round(a.valor_compra * fraccionRestante * 100) / 100;
+}
+// "Valor actual" siempre se muestra junto al % que representa sobre el valor
+// de compra (ej. "$126.42 (14%)"), para leer de un vistazo qué tan depreciado
+// está el equipo — usado tanto en la tabla como en el detalle.
+function fmtValorActualConPorcentaje(a){
+  const actual = valorActualActivo(a);
+  if(actual===null) return null;
+  const pct = Math.round((actual / a.valor_compra) * 100);
+  return `$${actual.toFixed(2)} (${pct}%)`;
 }
 function fmtFecha(iso){
   if(!iso) return "—";
@@ -591,7 +600,15 @@ function primerFocoDelModal(){
   const focusables = obtenerFocusablesModal();
   return focusables.length ? focusables[0] : null;
 }
+// Normalmente cerrarModal() vacía el host y listo. El carrusel de fotos es la
+// única excepción: quiere "volver" a la pantalla que lo abrió (detalle o
+// formulario) en vez de cerrarse a secas, sin importar si el cierre vino del
+// botón ✕, del backdrop o de Esc — los tres caminos pasan por cerrarModal().
+// abrirModal() lo resetea siempre a null primero; quien quiera ese
+// comportamiento lo asigna DESPUÉS de llamar a abrirModal (ver abrirCarruselFotos).
+let modalVolver = null;
 function abrirModal(html, onMount){
+  modalVolver = null;
   let host = document.getElementById("modal-host");
   if(!host){
     host = document.createElement("div");
@@ -638,10 +655,56 @@ function atraparTabModal(e){
   }
 }
 function cerrarModal(){
+  document.removeEventListener("keydown", navegarCarruselTeclado);
+  if(modalVolver){ const volver = modalVolver; modalVolver = null; volver(); return; }
   const host = document.getElementById("modal-host");
   if(host) host.innerHTML = "";
   document.removeEventListener("keydown", escCierraModal);
   document.removeEventListener("keydown", atraparTabModal);
+}
+
+/* ---------- Carrusel de fotos (modal grande, con flechas/contador/teclado) ---------- */
+// `fotos` ya son URLs resueltas (urlFoto ya aplicado por quien llama).
+// `alCerrar` es a dónde "volver" al cerrar este modal (típicamente
+// ()=>abrirDetalle(id) o ()=>abrirFormActivo(id)) — ver modalVolver.
+function abrirCarruselFotos(fotos, indiceInicial, alCerrar){
+  const varias = fotos.length > 1;
+  const html = `<div class="modal modal-carrusel">
+    <div class="modal-header"><h3>Fotos del activo</h3><button class="modal-close">✕</button></div>
+    <div class="modal-body carrusel-body">
+      <button class="carrusel-flecha" data-carrusel-nav="-1" aria-label="Foto anterior" ${varias?'':'disabled'}>‹</button>
+      <img class="carrusel-img" data-carrusel-modal-img data-fotos='${esc(JSON.stringify(fotos))}' data-indice="${indiceInicial}" src="${fotos[indiceInicial]}" alt="Foto del activo">
+      <button class="carrusel-flecha" data-carrusel-nav="1" aria-label="Foto siguiente" ${varias?'':'disabled'}>›</button>
+    </div>
+    <div class="modal-footer carrusel-footer">
+      <span class="carrusel-contador" data-carrusel-contador>${indiceInicial+1} / ${fotos.length}</span>
+    </div>
+  </div>`;
+  abrirModal(html, ()=>{
+    const img = document.querySelector("[data-carrusel-modal-img]");
+    document.querySelectorAll("[data-carrusel-nav]").forEach(btn=>{
+      btn.addEventListener("click", ()=>avanzarCarrusel(img, Number(btn.dataset.carruselNav)));
+    });
+    document.removeEventListener("keydown", navegarCarruselTeclado);
+    document.addEventListener("keydown", navegarCarruselTeclado);
+  });
+  modalVolver = alCerrar;
+}
+function avanzarCarrusel(img, delta){
+  const fotos = JSON.parse(img.dataset.fotos);
+  const total = fotos.length;
+  if(total < 2) return;
+  const nuevo = ((Number(img.dataset.indice) + delta) % total + total) % total;
+  img.src = fotos[nuevo];
+  img.dataset.indice = nuevo;
+  const contador = document.querySelector("[data-carrusel-contador]");
+  if(contador) contador.textContent = `${nuevo+1} / ${total}`;
+}
+function navegarCarruselTeclado(e){
+  const img = document.querySelector("[data-carrusel-modal-img]");
+  if(!img) return;
+  if(e.key==="ArrowLeft") avanzarCarrusel(img, -1);
+  else if(e.key==="ArrowRight") avanzarCarrusel(img, 1);
 }
 
 /* ============================================================
@@ -652,7 +715,8 @@ function cerrarModal(){
 // ancho relativo de cada columna, normalizado sobre las que estén activas
 // (así la tabla se reparte bien sin importar cuántas columnas elijas).
 const DEFINICION_COLUMNAS = [
-  { key:"tag",       label:"Tag",             core:true,  weight:1.0, sortCampo:"id",       filterCampo:null,           campoTexto:"colTag",       placeholder:"Ej: 012" },
+  { key:"tag",        label:"Tag",             core:true,  weight:1.0, sortCampo:"id",       filterCampo:null,           campoTexto:"colTag",       placeholder:"Ej: 012" },
+  { key:"empresa",    label:"Empresa",         core:false, weight:1.3, sortCampo:"empresa",  filterCampo:"empresa",      campoTexto:null,           placeholder:null },
   { key:"tipo",       label:"Tipo",            core:false, weight:1.9, sortCampo:"tipo",     filterCampo:"tipo",         campoTexto:"colTipo",      placeholder:"Buscar tipo…" },
   { key:"marca",      label:"Marca",           core:false, weight:1.5, sortCampo:"marca",    filterCampo:"marca",        campoTexto:"colMarca",     placeholder:"Buscar marca…" },
   { key:"modelo",     label:"Modelo",          core:false, weight:1.6, sortCampo:"modelo",   filterCampo:null,           campoTexto:"colModelo",    placeholder:"Buscar modelo…" },
@@ -662,8 +726,18 @@ const DEFINICION_COLUMNAS = [
   { key:"propiedad",  label:"Propiedad",       core:false, weight:1.1, sortCampo:"propiedad",filterCampo:"propiedad",    campoTexto:"colPropiedad", placeholder:"Buscar propiedad…" },
   { key:"serie",      label:"Serie",           core:false, weight:1.4, sortCampo:"serie",    filterCampo:null,           campoTexto:"colSerie",     placeholder:"Buscar serie…" },
   { key:"so",         label:"Sist. operativo", core:false, weight:1.3, sortCampo:"so",       filterCampo:null,           campoTexto:"colSo",        placeholder:"Buscar SO…" },
+  { key:"ram",        label:"RAM (GB)",        core:false, weight:0.8, sortCampo:"ram",      filterCampo:null,           campoTexto:null,           placeholder:null },
+  { key:"disco",      label:"Disco (GB)",      core:false, weight:0.8, sortCampo:"disco",    filterCampo:null,           campoTexto:null,           placeholder:null },
+  { key:"procesador", label:"Procesador",      core:false, weight:1.5, sortCampo:"procesador",filterCampo:null,          campoTexto:null,           placeholder:null },
+  { key:"macwifi",    label:"MAC WiFi",        core:false, weight:1.4, sortCampo:"macwifi",  filterCampo:null,           campoTexto:null,           placeholder:null },
+  { key:"maceth",     label:"MAC Ethernet",    core:false, weight:1.4, sortCampo:"maceth",   filterCampo:null,           campoTexto:null,           placeholder:null },
   { key:"fecha",      label:"Adquisición",     core:false, weight:1.6, sortCampo:"fecha",    filterCampo:null,           campoTexto:null,           placeholder:null, filtroFecha:true },
   { key:"proveedor",  label:"Proveedor",       core:false, weight:1.3, sortCampo:"proveedor",filterCampo:null,           campoTexto:"colProveedor", placeholder:"Buscar proveedor…" },
+  { key:"valorcompra",label:"Valor compra",    core:false, weight:1.1, sortCampo:"valorcompra",filterCampo:null,         campoTexto:null,           placeholder:null },
+  { key:"valoractual",label:"Valor actual",    core:false, weight:1.3, sortCampo:"valoractual",filterCampo:null,         campoTexto:null,           placeholder:null },
+  { key:"vidautil",   label:"Vida útil",       core:false, weight:0.8, sortCampo:"vidautil", filterCampo:null,           campoTexto:null,           placeholder:null },
+  { key:"color",      label:"Color",           core:false, weight:0.8, sortCampo:"color",    filterCampo:null,           campoTexto:null,           placeholder:null },
+  { key:"longitud",   label:"Longitud (m)",    core:false, weight:0.8, sortCampo:"longitud", filterCampo:null,           campoTexto:null,           placeholder:null },
   { key:"acciones",   label:"",                core:true,  weight:2.2, sortCampo:null,       filterCampo:null,           campoTexto:null,           placeholder:null },
 ];
 const COLUMNAS_VISIBLES_DEFAULT = ["tag","tipo","marca","custodio","propiedad","acciones"];
@@ -677,12 +751,13 @@ const LIMITE_COLUMNAS_RECOMENDADO = 7;
 // caché de módulo para que los manejadores de eventos (delegados a nivel de
 // documento) sepan qué significa "seleccionar todo" para cada columna sin
 // tener que releer el DOM.
-let opcionesFiltroCache = { tipo:[], propiedad:[], custodioClase:[], marca:[] };
+let opcionesFiltroCache = { tipo:[], propiedad:[], custodioClase:[], marca:[], empresa:[] };
 function recalcularOpcionesFiltro(datos){
   opcionesFiltroCache.tipo = [...new Set(datos.activos.map(a=>a.tipo).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
   opcionesFiltroCache.propiedad = [...new Set(datos.activos.map(a=>a.propiedad).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
   opcionesFiltroCache.custodioClase = [...new Set(datos.activos.map(a=>claseCustodio(a)))].sort((a,b)=>a.localeCompare(b,'es'));
   opcionesFiltroCache.marca = [...new Set(datos.activos.map(a=>a.marca).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+  opcionesFiltroCache.empresa = [...new Set(datos.activos.map(a=>a.empresa).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
 }
 // Cuántos activos (del total, sin aplicar otros filtros) tienen ese valor en
 // esa columna — es la info que se muestra junto a cada opción del checklist.
@@ -723,6 +798,9 @@ function labelOpcionFiltro(campo, valor){
   if(campo==="custodioClase"){
     return { disponible:"Disponible", persona:"Persona", area:"Área / depto." }[valor] || valor;
   }
+  if(campo==="empresa"){
+    return { lukmar:"Lukmar", eq:"EQ Soluciones" }[valor] || valor;
+  }
   return valor.charAt(0).toUpperCase() + valor.slice(1);
 }
 function capitalizar(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
@@ -740,6 +818,10 @@ const COLOR_EMPRESA = {
 function pillPropiedad(valor){
   const c = COLOR_PROPIEDAD[valor] || { fg:"#57697C", bg:"#EEF1F4" };
   return `<span class="pill" style="background:${c.bg};color:${c.fg};"><span class="pill-dot"></span>${esc(capitalizar(valor))}</span>`;
+}
+function pillEmpresa(valor){
+  const c = COLOR_EMPRESA[valor] || COLOR_EMPRESA.lukmar;
+  return `<span class="pill" style="background:${c.bg};color:${c.fg};"><span class="pill-dot"></span>${valor==='eq'?'EQ Soluciones':'Lukmar'}</span>`;
 }
 // Selección efectiva para una columna: null significa "todavía no se tocó
 // el filtro", lo que equivale a "todas las opciones seleccionadas" (sin filtrar).
@@ -770,6 +852,7 @@ function filtrarActivos(datos){
     if(f.propiedad !== null && !f.propiedad.has(a.propiedad)) return false;
     if(f.custodioClase !== null && !f.custodioClase.has(claseCustodio(a))) return false;
     if(f.marca !== null && a.marca && !f.marca.has(a.marca)) return false;
+    if(f.empresa !== null && !f.empresa.has(a.empresa)) return false;
     if(f.colTag && !fmtTag(a).toLowerCase().includes(f.colTag.toLowerCase())) return false;
     if(f.colTipo && !(a.tipo||"").toLowerCase().includes(f.colTipo.toLowerCase())) return false;
     if(f.colMarca){
@@ -807,6 +890,7 @@ function compararActivos(a,b,campo,dir){
   let va, vb;
   switch(campo){
     case "id": va=a.id; vb=b.id; break;
+    case "empresa": va=a.empresa||""; vb=b.empresa||""; break;
     case "tipo": va=a.tipo||""; vb=b.tipo||""; break;
     case "marca": va=((a.marca||"")+" "+(a.modelo||"")).trim(); vb=((b.marca||"")+" "+(b.modelo||"")).trim(); break;
     case "custodio": va=(a.custodio?a.custodio.nombre:"") ; vb=(b.custodio?b.custodio.nombre:""); break;
@@ -814,10 +898,20 @@ function compararActivos(a,b,campo,dir){
     case "propiedad": va=a.propiedad||""; vb=b.propiedad||""; break;
     case "serie": va=a.serie||""; vb=b.serie||""; break;
     case "so": va=a.sistema_operativo||""; vb=b.sistema_operativo||""; break;
+    case "ram": va=a.ram_gb??0; vb=b.ram_gb??0; break;
+    case "disco": va=a.disco_gb??0; vb=b.disco_gb??0; break;
+    case "procesador": va=a.procesador||""; vb=b.procesador||""; break;
+    case "macwifi": va=a.mac_wifi||""; vb=b.mac_wifi||""; break;
+    case "maceth": va=a.mac_ethernet||""; vb=b.mac_ethernet||""; break;
     case "proveedor": va=a.proveedor||""; vb=b.proveedor||""; break;
     case "fecha": va=a.fecha_adquisicion||""; vb=b.fecha_adquisicion||""; break;
     case "modelo": va=a.modelo||""; vb=b.modelo||""; break;
     case "nombre": va=a.nombre_dispositivo||""; vb=b.nombre_dispositivo||""; break;
+    case "valorcompra": va=a.valor_compra??0; vb=b.valor_compra??0; break;
+    case "valoractual": va=valorActualActivo(a)??0; vb=valorActualActivo(b)??0; break;
+    case "vidautil": va=a.vida_util_anios??0; vb=b.vida_util_anios??0; break;
+    case "color": va=a.color||""; vb=b.color||""; break;
+    case "longitud": va=a.longitud_m??0; vb=b.longitud_m??0; break;
     default: va=a.id; vb=b.id;
   }
   let cmp = (typeof va === "number" && typeof vb === "number") ? (va-vb) : String(va).localeCompare(String(vb),'es',{sensitivity:'base'});
@@ -891,7 +985,7 @@ function actualizarAvisoColumnas(){
 }
 
 /* ---------- Modal "Visualizar KPIs": el mismo desglose del filtro, con barras ---------- */
-const NOMBRE_COLUMNA_KPI = { tipo:"Tipo", marca:"Marca", custodioClase:"Custodio", propiedad:"Propiedad" };
+const NOMBRE_COLUMNA_KPI = { tipo:"Tipo", marca:"Marca", custodioClase:"Custodio", propiedad:"Propiedad", empresa:"Empresa" };
 // Columnas que entran en el resumen GLOBAL (todas las categóricas menos
 // Custodio, que queda fuera a propósito por decisión explícita).
 const CAMPOS_RESUMEN_GLOBAL = ["tipo","marca","propiedad"];
@@ -1510,6 +1604,12 @@ const ICONOS_TIPO = {
   cableusb: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M6 .5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5v4H6zM7 1v1h1V1zm2 0v1h1V1zM6 5a1 1 0 0 0-1 1v4.394c0 .494.146.976.42 1.387l1.038 1.558c.354.53.542 1.152.542 1.789 0 .481.39.872.872.872h1.256c.481 0 .872-.39.872-.872 0-.637.188-1.26.541-1.789l1.04-1.558A2.5 2.5 0 0 0 12 10.394V6a1 1 0 0 0-1-1zm0 1h5v4.394a1.5 1.5 0 0 1-.252.832L9.71 12.784A4.2 4.2 0 0 0 9.002 15H7.998a4.2 4.2 0 0 0-.707-2.216l-1.04-1.558A1.5 1.5 0 0 1 6 10.394z"/></svg>`,
   // Router: bi-router — reemplaza la caja+antenas dibujada a mano.
   router: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M5.525 3.025a3.5 3.5 0 0 1 4.95 0 .5.5 0 1 0 .707-.707 4.5 4.5 0 0 0-6.364 0 .5.5 0 0 0 .707.707"/><path d="M6.94 4.44a1.5 1.5 0 0 1 2.12 0 .5.5 0 0 0 .708-.708 2.5 2.5 0 0 0-3.536 0 .5.5 0 0 0 .707.707ZM2.5 11a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1m4.5-.5a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0m2.5.5a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1m1.5-.5a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0m2 0a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0"/><path d="M2.974 2.342a.5.5 0 1 0-.948.316L3.806 8H1.5A1.5 1.5 0 0 0 0 9.5v2A1.5 1.5 0 0 0 1.5 13H2a.5.5 0 0 0 .5.5h2A.5.5 0 0 0 5 13h6a.5.5 0 0 0 .5.5h2a.5.5 0 0 0 .5-.5h.5a1.5 1.5 0 0 0 1.5-1.5v-2A1.5 1.5 0 0 0 14.5 8h-2.306l1.78-5.342a.5.5 0 1 0-.948-.316L11.14 8H4.86zM14.5 9a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-2a.5.5 0 0 1 .5-.5z"/><path d="M8.5 5.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0"/></svg>`,
+  // Switch de red: bi-hdd-network — Bootstrap Icons no tiene un ícono
+  // dedicado a "switch"; este es el más cercano semánticamente (hardware de
+  // red genérico), bajado sin modificar de icons.getbootstrap.com.
+  switch: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M4.5 5a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1M3 4.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0"/><path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2H8.5v3a1.5 1.5 0 0 1 1.5 1.5h5.5a.5.5 0 0 1 0 1H10A1.5 1.5 0 0 1 8.5 14h-1A1.5 1.5 0 0 1 6 12.5H.5a.5.5 0 0 1 0-1H6A1.5 1.5 0 0 1 7.5 10V7H2a2 2 0 0 1-2-2zm1 0v1a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H2a1 1 0 0 0-1 1m6 7.5v1a.5.5 0 0 0 .5.5h1a.5.5 0 0 0 .5-.5v-1a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5"/></svg>`,
+  // UPS (batería de respaldo): bi-battery-charging, sin modificar.
+  ups: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M9.585 2.568a.5.5 0 0 1 .226.58L8.677 6.832h1.99a.5.5 0 0 1 .364.843l-5.334 5.667a.5.5 0 0 1-.842-.49L5.99 9.167H4a.5.5 0 0 1-.364-.843l5.333-5.667a.5.5 0 0 1 .616-.09z"/><path d="M2 4h4.332l-.94 1H2a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2.38l-.308 1H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2"/><path d="M2 6h2.45L2.908 7.639A1.5 1.5 0 0 0 3.313 10H2zm8.595-2-.308 1H12a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H9.276l-.942 1H12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><path d="M12 10h-1.783l1.542-1.639q.146-.156.241-.34zm0-3.354V6h-.646a1.5 1.5 0 0 1 .646.646M16 8a1.5 1.5 0 0 1-1.5 1.5v-3A1.5 1.5 0 0 1 16 8"/></svg>`,
   generico: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5 8 5.961 14.154 3.5zM15 4.239l-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.662a1 1 0 0 1-.629.928l-7.185 2.874a.5.5 0 0 1-.372 0L.63 13.09a1 1 0 0 1-.63-.928V3.5a.5.5 0 0 1 .314-.464z"/></svg>`,
 };
 // Un color propio por tipo, para que se distingan de un vistazo en la columna.
@@ -1520,6 +1620,7 @@ const COLOR_TIPO = {
   monitor: "#1F6FA8", mouse: "#8A6D3B", fuentedealimentacion: "#B0651C", ap: "#2E7D5B", teclado: "#6B7C93",
   cablehdmi: "#B23A6B",
   biometrico: "#1F8C7A", cableusb: "#4A5A9E", router: "#A67C27",
+  switch: "#3E5C6B", ups: "#D4A017",
   generico: "#8B9AAA",
 };
 function claveTipo(tipo){
@@ -1542,6 +1643,8 @@ const CAMPOS_NO_RELEVANTES_DETALLE = {
   cablehdmi:           ["serie","so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
   cableusb:            ["serie","so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
   biometrico:          ["so","procesador","ram_gb","disco_gb"], // sí conserva las MAC, igual que AP — se conecta a red para sincronizar asistencia
+  switch:              ["so","procesador","ram_gb","disco_gb","mac_wifi"], // mismo criterio que AP/router, pero sin wifi — un switch no tiene radio
+  ups:                 ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"], // mismo criterio que fuentedealimentacion — solo batería, sin cómputo ni red
 };
 function camposNoRelevantesParaDetalle(tipo){
   return CAMPOS_NO_RELEVANTES_DETALLE[claveTipo(tipo)] || [];
@@ -1627,9 +1730,16 @@ function celdaTextoRecortado(valor, claseExtra){
   const v = esc(valor);
   return `<span class="cell-clip ${claseExtra||''}" title="${v}">${v}</span>`;
 }
+function celdaMoneda(valor){
+  return (valor===null||valor===undefined) ? '<span class="cell-muted">—</span>' : '$'+Number(valor).toFixed(2);
+}
+function celdaNumeroUnidad(valor, unidad){
+  return (valor===null||valor===undefined||valor==="") ? '<span class="cell-muted">—</span>' : `${valor} ${unidad}`;
+}
 function celdaActivo(col, a){
   switch(col.key){
     case "tag": return `<span class="tag">${fmtTag(a)}</span>`;
+    case "empresa": return pillEmpresa(a.empresa);
     case "tipo": return `<span class="tipo-cell"><span class="tipo-icon" style="color:${colorTipo(a.tipo)}">${iconoTipo(a.tipo)}</span><span class="cell-clip">${esc(a.tipo)||'<span class="cell-muted">—</span>'}</span></span>`;
     case "marca": return celdaTextoRecortado(a.marca);
     case "modelo": return celdaTextoRecortado(a.modelo);
@@ -1639,8 +1749,18 @@ function celdaActivo(col, a){
     case "propiedad": return pillPropiedad(a.propiedad);
     case "serie": return celdaTextoRecortado(a.serie, "mono");
     case "so": return celdaTextoRecortado(a.sistema_operativo);
+    case "ram": return celdaNumeroUnidad(a.ram_gb, "GB");
+    case "disco": return celdaNumeroUnidad(a.disco_gb, "GB");
+    case "procesador": return celdaTextoRecortado(a.procesador);
+    case "macwifi": return celdaTextoRecortado(a.mac_wifi, "mono");
+    case "maceth": return celdaTextoRecortado(a.mac_ethernet, "mono");
     case "fecha": return a.fecha_adquisicion ? fmtFecha(a.fecha_adquisicion) : '<span class="cell-muted">—</span>';
     case "proveedor": return celdaTextoRecortado(a.proveedor);
+    case "valorcompra": return celdaMoneda(a.valor_compra);
+    case "valoractual": return fmtValorActualConPorcentaje(a) || '<span class="cell-muted">—</span>';
+    case "vidautil": return celdaNumeroUnidad(a.vida_util_anios, a.vida_util_anios===1?"año":"años");
+    case "color": return celdaTextoRecortado(a.color);
+    case "longitud": return celdaNumeroUnidad(a.longitud_m, "m");
     case "acciones": return `<div class="cell-actions">
       ${a.custodio ? `<button class="btn btn-sm ${estaEnPortapapeles(a.id)?'btn-primary':''}" data-action="marcar" data-id="${a.id}" title="Marcar para acta de entrega unificada">${estaEnPortapapeles(a.id)?'🔖 Marcado':'🔖'}</button>` : ""}
       ${puede("cambiar_custodio") ? `<button class="btn btn-sm" data-action="custodio" data-id="${a.id}">Custodio</button>`:""}
@@ -1675,7 +1795,7 @@ function abrirDetalle(id){
       <div class="modal-body">
         <div class="detail-head-v2">
           <div class="detail-profile-card" style="background:${gradienteCustodioActual(a)};border-color:${colorCustodioActual(a)}40;">
-            <div class="detail-icon-big" style="color:${colorTipo(a.tipo)}">${(a.fotos&&a.fotos.length>0) ? `<img src="${urlFoto(a.fotos[0])}" alt="Foto del activo" data-carrusel-foto data-fotos='${esc(JSON.stringify(a.fotos.map(urlFoto)))}' data-indice="0">` : iconoTipoTam(a.tipo, 40)}</div>
+            <div class="detail-icon-big" style="color:${colorTipo(a.tipo)}">${(a.fotos&&a.fotos.length>0) ? `<img src="${urlFoto(a.fotos[0])}" alt="Foto del activo" data-abrir-carrusel="0">` : iconoTipoTam(a.tipo, 40)}</div>
             ${bloquePerfilCustodio(a)}
           </div>
           <div class="detail-badges-grid">
@@ -1696,7 +1816,7 @@ function abrirDetalle(id){
           ${!camposNoRelevantes.includes("procesador") ? `<div class="kv"><div class="k">Procesador</div><div class="v">${esc(a.procesador)||'—'}</div></div>` : ""}
           <div class="kv"><div class="k">Proveedor</div><div class="v">${esc(a.proveedor)||'—'}</div></div>
           <div class="kv"><div class="k">Valor de compra</div><div class="v">${a.valor_compra?'$'+Number(a.valor_compra).toFixed(2):'—'}</div></div>
-          <div class="kv"><div class="k">Valor actual</div><div class="v">${valorActualActivo(a)!==null?'$'+valorActualActivo(a).toFixed(2):'—'}</div></div>
+          <div class="kv"><div class="k">Valor actual</div><div class="v">${fmtValorActualConPorcentaje(a) || '—'}</div></div>
           ${camposExtraParaTipo(a.tipo).includes("color") ? `<div class="kv"><div class="k">Color</div><div class="v">${esc(a.color)||'—'}</div></div>` : ""}
           ${camposExtraParaTipo(a.tipo).includes("longitud_m") ? `<div class="kv"><div class="k">Longitud</div><div class="v">${a.longitud_m?a.longitud_m+' m':'—'}</div></div>` : ""}
           ${!camposNoRelevantes.includes("mac_wifi") ? `<div class="kv"><div class="k">MAC WiFi</div><div class="v mono">${esc(a.mac_wifi)||'—'}</div></div>` : ""}
@@ -1705,12 +1825,11 @@ function abrirDetalle(id){
           ${a.celular ? `<div class="kv"><div class="k">Gmail asociado</div><div class="v mono">${esc(a.celular.gmail)||'—'}</div></div>` : ""}
         </div>
 
+        ${(a.fotos&&a.fotos.length>0) ? `
         <div class="section-title">Fotos</div>
         <div class="fotos-grid">
-          ${(a.fotos||[]).map(ruta=>`<div class="foto-thumb"><img src="${urlFoto(ruta)}" alt="Foto del activo" data-abrir-foto="${urlFoto(ruta)}"><button class="foto-borrar" data-borrar-foto="${esc(ruta)}" title="Borrar foto">✕</button></div>`).join("")}
-          <label class="foto-agregar"><span>+ Agregar</span><input type="file" accept="image/*" capture="environment" id="input-foto" style="display:none;"></label>
-        </div>
-        <div id="foto-estado" class="field hint" style="display:none;"></div>
+          ${a.fotos.map((ruta,i)=>`<div class="foto-thumb"><img src="${urlFoto(ruta)}" alt="Foto del activo" data-abrir-carrusel="${i}"></div>`).join("")}
+        </div>` : ""}
 
         <div class="section-title">Historial de custodia (más reciente primero)</div>
         <div class="timeline">
@@ -1725,31 +1844,8 @@ function abrirDetalle(id){
       </div>
     </div>`;
   abrirModal(html, ()=>{
-    const inputFoto = document.getElementById("input-foto");
-    if(inputFoto) inputFoto.addEventListener("change", async ()=>{
-      const archivo = inputFoto.files[0];
-      if(!archivo) return;
-      const estado = document.getElementById("foto-estado");
-      estado.style.display = "block"; estado.textContent = "Subiendo…";
-      try{ await subirFotoActivo(a.id, archivo); abrirDetalle(a.id); }
-      catch(err){ estado.textContent = "No se pudo subir la foto: " + err.message; }
-    });
-    document.querySelectorAll("[data-borrar-foto]").forEach(b=>{
-      b.addEventListener("click", async ()=>{
-        if(!confirm("¿Borrar esta foto?")) return;
-        try{ await borrarFotoActivo(a.id, b.dataset.borrarFoto); abrirDetalle(a.id); }
-        catch(err){ alert("No se pudo borrar la foto: " + err.message); }
-      });
-    });
-    document.querySelectorAll("[data-abrir-foto]").forEach(img=>{
-      img.addEventListener("click", ()=>window.open(img.dataset.abrirFoto, "_blank"));
-    });
-    const imgCarrusel = document.querySelector("[data-carrusel-foto]");
-    if(imgCarrusel) imgCarrusel.addEventListener("click", ()=>{
-      const fotos = JSON.parse(imgCarrusel.dataset.fotos);
-      const siguiente = (Number(imgCarrusel.dataset.indice) + 1) % fotos.length;
-      imgCarrusel.src = fotos[siguiente];
-      imgCarrusel.dataset.indice = siguiente;
+    document.querySelectorAll("[data-abrir-carrusel]").forEach(img=>{
+      img.addEventListener("click", ()=>abrirCarruselFotos(a.fotos.map(urlFoto), Number(img.dataset.abrirCarrusel), ()=>abrirDetalle(a.id)));
     });
     const be = document.getElementById("btn-editar-activo");
     if(be) be.addEventListener("click", ()=>abrirFormActivo(a.id));
@@ -1817,7 +1913,7 @@ function abrirFormActivo(id){
       <div class="modal-body">
         <form id="form-activo">
           <div class="form-grid">
-            <div class="field"><label>Tipo</label><input type="text" id="fa-tipo" value="${esc(a?a.tipo:'')}" placeholder="Laptop, Desktop, Celular, Mouse, Monitor, Fuente de alimentación, Cable HDMI, Cable USB, Biométrico, Router…"></div>
+            <div class="field"><label>Tipo</label><input type="text" id="fa-tipo" value="${esc(a?a.tipo:'')}" placeholder="Laptop, Desktop, Celular, Mouse, Monitor, Fuente de alimentación, Cable HDMI, Cable USB, Biométrico, Router, AP, Switch, UPS…"></div>
             <div class="field"><label>Propiedad</label>
               <select id="fa-propiedad" required>
                 <option value="propio" ${(!a||a.propiedad==='propio')?'selected':''}>Propio</option>
@@ -1855,6 +1951,14 @@ function abrirFormActivo(id){
               <div class="field"><label>Password</label><input type="text" id="fa-password" class="mono" value="${a&&a.celular?esc(a.celular.password):''}"></div>
             </div>
           </fieldset>
+          ${!esNuevo ? `
+          <div class="section-title" style="margin-top:14px;">Fotos</div>
+          <div class="fotos-grid">
+            ${(a.fotos||[]).map((ruta,i)=>`<div class="foto-thumb"><img src="${urlFoto(ruta)}" alt="Foto del activo" data-abrir-carrusel="${i}"><button class="foto-borrar" data-borrar-foto="${esc(ruta)}" title="Borrar foto">✕</button></div>`).join("")}
+            <label class="foto-agregar"><span>+ Agregar</span><input type="file" accept="image/*" capture="environment" id="input-foto" style="display:none;"></label>
+          </div>
+          <div id="foto-estado" class="field hint" style="display:none;"></div>
+          ` : ""}
           <div class="field hint" style="margin-top:10px;">
             ${esNuevo ? "El activo se crea sin custodio (disponible). Usa \"Cambiar custodio\" desde el detalle para asignarlo." : "Para cambiar el custodio, usa el botón \"Cambiar custodio\" del detalle — este formulario solo edita los datos base del equipo."}
           </div>
@@ -1865,6 +1969,27 @@ function abrirFormActivo(id){
       </div>
     </div>`;
   abrirModal(html, ()=>{
+    if(!esNuevo){
+      const inputFoto = document.getElementById("input-foto");
+      if(inputFoto) inputFoto.addEventListener("change", async ()=>{
+        const archivo = inputFoto.files[0];
+        if(!archivo) return;
+        const estado = document.getElementById("foto-estado");
+        estado.style.display = "block"; estado.textContent = "Subiendo…";
+        try{ await subirFotoActivo(a.id, archivo); abrirFormActivo(a.id); }
+        catch(err){ estado.textContent = "No se pudo subir la foto: " + err.message; }
+      });
+      document.querySelectorAll("[data-borrar-foto]").forEach(b=>{
+        b.addEventListener("click", async ()=>{
+          if(!confirm("¿Borrar esta foto?")) return;
+          try{ await borrarFotoActivo(a.id, b.dataset.borrarFoto); abrirFormActivo(a.id); }
+          catch(err){ alert("No se pudo borrar la foto: " + err.message); }
+        });
+      });
+      document.querySelectorAll("[data-abrir-carrusel]").forEach(img=>{
+        img.addEventListener("click", ()=>abrirCarruselFotos(a.fotos.map(urlFoto), Number(img.dataset.abrirCarrusel), ()=>abrirFormActivo(a.id)));
+      });
+    }
     document.getElementById("btn-guardar-activo").addEventListener("click", async ()=>{
       const campos = {
         tipo: document.getElementById("fa-tipo").value.trim(),
