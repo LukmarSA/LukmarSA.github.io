@@ -310,6 +310,7 @@ tr.rowclick:hover{background:var(--accent-soft);cursor:pointer;}
 .tipo-cell{display:flex;align-items:center;gap:7px;max-width:100%;min-width:0;}
 .tipo-icon{display:inline-flex;flex-shrink:0;}
 .cell-muted{color:var(--ink-muted);}
+.cell-na{color:var(--ink-faint);font-style:italic;}
 .cell-clip{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;min-width:0;}
 
 /* ---------- Modal "Visualizar KPIs" ---------- */

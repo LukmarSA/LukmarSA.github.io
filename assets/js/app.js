@@ -947,7 +947,12 @@ function claseKpiActiva(valor){
 
 /* ---------- Gestor de columnas visibles ---------- */
 function abrirGestorColumnas(){
-  const opcionesNoCore = DEFINICION_COLUMNAS.filter(c=>!c.core);
+  // Orden alfabético SOLO para cómo se listan los checkboxes acá — el orden
+  // real de las columnas en la tabla lo sigue decidiendo
+  // columnasVisiblesOrdenadas(), que usa el orden de DEFINICION_COLUMNAS
+  // (Tag primero, Acciones al final), no este.
+  const opcionesNoCore = DEFINICION_COLUMNAS.filter(c=>!c.core)
+    .sort((a,b)=>a.label.localeCompare(b.label,'es'));
   const html = `<div class="modal">
     <div class="modal-header"><h3>Columnas visibles</h3><button class="modal-close">✕</button></div>
     <div class="modal-body">
@@ -1626,13 +1631,14 @@ const COLOR_TIPO = {
 function claveTipo(tipo){
   return (tipo||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"");
 }
-// Qué campos NO son relevantes para cada tipo — usado ÚNICAMENTE por la ficha
-// de detalle (abrirDetalle), para no mostrar "MAC WiFi: —" en un mouse. A
-// propósito NO se usa en la tabla (sus columnas visibles son estáticas, vía
-// el menú "Columnas") ni en el formulario de alta/edición (siempre pide
-// todos los campos). Solo cubre tipos NUEVOS sin datos históricos en riesgo —
-// los tipos ya existentes (laptop/desktop/impresora/etc.) siguen mostrando
-// todo, porque hay activos reales con datos en esos campos (ej. MAC en impresoras).
+// Qué campos NO son relevantes para cada tipo — la ficha de detalle
+// (abrirDetalle) usa esto para no mostrar "MAC WiFi: —" en un mouse, y la
+// tabla (celdaActivo, vía columnaAplicaATipo) para mostrar "n/a" en vez del
+// valor. Es la misma lista para ambas vistas a propósito: si un campo no
+// aplica en el detalle, tampoco debería fingir que aplica en la tabla.
+// Solo cubre tipos NUEVOS sin datos históricos en riesgo — los tipos ya
+// existentes (laptop/desktop/impresora/etc.) siguen mostrando todo, porque
+// hay activos reales con datos en esos campos (ej. MAC en impresoras).
 const CAMPOS_NO_RELEVANTES_DETALLE = {
   mouse:               ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
   teclado:             ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
@@ -1650,15 +1656,34 @@ function camposNoRelevantesParaDetalle(tipo){
   return CAMPOS_NO_RELEVANTES_DETALLE[claveTipo(tipo)] || [];
 }
 // Lo opuesto de lo anterior: campos que NO son genéricos (no existen para
-// casi ningún tipo) y que solo se muestran en el detalle para los tipos que
-// sí los usan. Se parte de "nada visible" en vez de "todo visible, se oculta
-// lo que no aplica" — porque estos campos ni siquiera aparecen en la tabla.
+// casi ningún tipo) y que solo se muestran — en el detalle, y como columna
+// de tabla — para los tipos que sí los usan (vía columnaAplicaATipo). Se
+// parte de "nada visible" en vez de "todo visible, se oculta lo que no
+// aplica", porque son campos de nicho (cables), no la mayoría de los tipos.
 const CAMPOS_EXTRA_TIPO = {
   cablehdmi: ["color","longitud_m"],
   cableusb: ["color","longitud_m"],
 };
 function camposExtraParaTipo(tipo){
   return CAMPOS_EXTRA_TIPO[claveTipo(tipo)] || [];
+}
+// Qué campo de CAMPOS_NO_RELEVANTES_DETALLE / CAMPOS_EXTRA_TIPO corresponde a
+// cada columna de la TABLA — los nombres no siempre coinciden 1:1 (ram_gb en
+// la base de datos, "ram" como key de columna). Configurable acá, no
+// estructural en la base de datos: agregar/sacar un tipo de estas listas ya
+// alcanza para que la tabla (y el detalle, que usa las mismas listas) lo
+// reflejen — no hace falta ninguna columna nueva en Supabase para esto.
+const CAMPO_BLOQUEADO_POR_COLUMNA = {
+  serie:"serie", so:"so", ram:"ram_gb", disco:"disco_gb",
+  procesador:"procesador", macwifi:"mac_wifi", maceth:"mac_ethernet",
+};
+const CAMPO_EXTRA_POR_COLUMNA = { color:"color", longitud:"longitud_m" };
+function columnaAplicaATipo(colKey, tipo){
+  const bloqueado = CAMPO_BLOQUEADO_POR_COLUMNA[colKey];
+  if(bloqueado) return !camposNoRelevantesParaDetalle(tipo).includes(bloqueado);
+  const extra = CAMPO_EXTRA_POR_COLUMNA[colKey];
+  if(extra) return camposExtraParaTipo(tipo).includes(extra);
+  return true; // columnas que no dependen del tipo de activo (tag, marca, valor de compra, etc.)
 }
 function iconoTipo(tipo){
   const key = claveTipo(tipo);
@@ -1737,6 +1762,7 @@ function celdaNumeroUnidad(valor, unidad){
   return (valor===null||valor===undefined||valor==="") ? '<span class="cell-muted">—</span>' : `${valor} ${unidad}`;
 }
 function celdaActivo(col, a){
+  if(!columnaAplicaATipo(col.key, a.tipo)) return '<span class="cell-na" title="No aplica para este tipo de activo">n/a</span>';
   switch(col.key){
     case "tag": return `<span class="tag">${fmtTag(a)}</span>`;
     case "empresa": return pillEmpresa(a.empresa);
