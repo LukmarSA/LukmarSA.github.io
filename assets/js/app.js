@@ -80,6 +80,7 @@ async function refrescarDatos(){
       proveedor: a.proveedor, fecha_adquisicion: a.fecha_adquisicion,
       color: a.color, longitud_m: a.longitud_m,
       empresa: a.empresa, valor_compra: a.valor_compra, vida_util_anios: a.vida_util_anios,
+      fotos: a.fotos || [],
       celular: (a.celular_gmail || a.celular_password) ? { gmail: a.celular_gmail, password: a.celular_password } : null,
       custodio: vigente ? { tipo_custodio: vigente.tipo_custodio, nombre: vigente.nombre, cargo: vigente.cargo } : null,
       historial_custodia,
@@ -327,6 +328,59 @@ async function liberarCustodio(id, tipoDevolucion, fechaHasta, observacion){
     p_activo_id: id, p_fecha: fechaHasta || hoyISO(),
     p_tipo_devolucion: tipoDevolucion || null, p_observacion: observacion || null,
   });
+  if(error) throw error;
+  await refrescarDatos();
+}
+
+// ---------- Fotos de activos (Supabase Storage, bucket "fotos-activos") ----------
+// Varias fotos por activo (ej. laptop abierta/cerrada) — se guardan como un
+// array de rutas en activos.fotos, no en una tabla aparte, porque no hace
+// falta metadata extra por foto todavía. El bucket es público para lectura,
+// así que la URL pública sirve directo en un <img>, sin URLs firmadas que
+// expiren. Redimensiona en el navegador antes de subir porque el plan free
+// de Supabase Storage no incluye transformación de imágenes — sin esto,
+// una foto de celular sin comprimir (5-10 MB) se comería el GB gratis rápido.
+function redimensionarImagen(archivo, maxDim, calidad){
+  return new Promise((resolve, reject)=>{
+    const url = URL.createObjectURL(archivo);
+    const img = new Image();
+    img.onload = ()=>{
+      let w = img.width, h = img.height;
+      if(w > maxDim || h > maxDim){
+        if(w > h){ h = Math.round(h * maxDim / w); w = maxDim; }
+        else { w = Math.round(w * maxDim / h); h = maxDim; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      canvas.toBlob(blob=>{
+        URL.revokeObjectURL(url);
+        blob ? resolve(blob) : reject(new Error("No se pudo procesar la imagen."));
+      }, "image/jpeg", calidad);
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error("No se pudo leer el archivo como imagen.")); };
+    img.src = url;
+  });
+}
+function urlFoto(ruta){
+  return sb.storage.from("fotos-activos").getPublicUrl(ruta).data.publicUrl;
+}
+async function subirFotoActivo(id, archivo){
+  const blob = await redimensionarImagen(archivo, 1600, 0.82);
+  const ruta = `${id}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.jpg`;
+  const { error } = await sb.storage.from("fotos-activos").upload(ruta, blob, { contentType: "image/jpeg" });
+  if(error) throw error;
+  const a = buscarActivo(cargarActivos(), id);
+  const fotos = [...(a.fotos||[]), ruta];
+  const { error: e2 } = await sb.from("activos").update({ fotos }).eq("id", id);
+  if(e2) throw e2;
+  await refrescarDatos();
+}
+async function borrarFotoActivo(id, ruta){
+  await sb.storage.from("fotos-activos").remove([ruta]);
+  const a = buscarActivo(cargarActivos(), id);
+  const fotos = (a.fotos||[]).filter(r=>r!==ruta);
+  const { error } = await sb.from("activos").update({ fotos }).eq("id", id);
   if(error) throw error;
   await refrescarDatos();
 }
@@ -1327,8 +1381,15 @@ function celdaInline(colLetra, fila, styleIdx, valor){
 }
 const COLS_LISTADO_ACTIVOS = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W"];
 const COLS_LISTADO_HISTORIAL = ["A","B","C","D","E","F","G"];
-function filaXML(fila, styleIdx, columnas, valores){
-  const celdas = columnas.map((col,i)=>celdaInline(col, fila, styleIdx, valores[i])).join("");
+// Estilo real (índice de cellXfs) de cada columna en la fila de plantilla de
+// la Tabla — NO es uniforme: centra RAM/Disco/Fecha/Longitud y alinea a la
+// derecha Valor Compra/Valor Actual, tal como está definido en
+// ActivosTecnologicos.xlsx (verificado leyendo xl/worksheets/sheet1.xml
+// fila 10 y sheet2.xml fila 4 directamente).
+const ESTILOS_LISTADO_ACTIVOS = [31,28,28,28,28,28,29,30,27,28,29,30,32,32,28,28,29,30,32,34,34,28,33];
+const ESTILOS_LISTADO_HISTORIAL = [45,42,43,44,46,47,48];
+function filaXML(fila, estilos, columnas, valores){
+  const celdas = columnas.map((col,i)=>celdaInline(col, fila, estilos[i], valores[i])).join("");
   return `<row r="${fila}" spans="1:${columnas.length}" ht="18" customHeight="1" x14ac:dyDescent="0.25">${celdas}</row>`;
 }
 function etiquetaCustodioTipo(tipo){
@@ -1362,11 +1423,19 @@ async function exportarActivosExcel(){
       a.procesador||"", a.mac_wifi||"", a.mac_ethernet||"", a.proveedor||"", a.fecha_adquisicion||"",
       a.valor_compra??"", valorActualActivo(a)??"", a.color||"", a.longitud_m??"",
     ];
-    return filaXML(10+i, 19, COLS_LISTADO_ACTIVOS, valores);
+    return filaXML(10+i, ESTILOS_LISTADO_ACTIVOS, COLS_LISTADO_ACTIVOS, valores);
   }).join("");
   xml1 = xml1.replace(/<row r="10"[^>]*>.*?<\/row>/s, filas1);
   xml1 = xml1.replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:W${9+lista.length}"/>`);
   zip.file("xl/worksheets/sheet1.xml", xml1);
+
+  // tblComputadores es una Tabla real de Excel (no solo celdas con estilo):
+  // su propio ref y el autoFilter que la acompaña también delimitan A9:W10
+  // en la plantilla y hay que expandirlos junto con el <dimension> de la
+  // hoja, o Excel abre el archivo con la Tabla encogida a la fila original.
+  let tabla1 = await zip.file("xl/tables/table1.xml").async("string");
+  tabla1 = tabla1.split('ref="A9:W10"').join(`ref="A9:W${9+lista.length}"`);
+  zip.file("xl/tables/table1.xml", tabla1);
 
   // Hoja 2 "historial_custodia": un renglón por tramo de cada activo filtrado,
   // en orden cronológico (1 = más antiguo) — el array en memoria viene más
@@ -1378,7 +1447,7 @@ async function exportarActivosExcel(){
     const cronologico = [...a.historial_custodia].reverse();
     cronologico.forEach((t,idx)=>{
       const valores = [fmtTag(a), t.nombre||"", etiquetaCustodioTipo(t.tipo_custodio), t.cargo||"", t.desde||"", t.hasta||"", idx+1];
-      filas2.push(filaXML(filaActual, 22, COLS_LISTADO_HISTORIAL, valores));
+      filas2.push(filaXML(filaActual, ESTILOS_LISTADO_HISTORIAL, COLS_LISTADO_HISTORIAL, valores));
       filaActual++;
     });
   });
@@ -1387,8 +1456,15 @@ async function exportarActivosExcel(){
   xml2 = xml2.replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:G${Math.max(4,3+totalFilasHist)}"/>`);
   zip.file("xl/worksheets/sheet2.xml", xml2);
 
-  // {{FECHA_ACTUALIZACION}} es un marcador único (P7), no uno que se duplique
-  // por fila — este sí se puede reemplazar in-place en sharedStrings.xml.
+  // Mismo motivo que tblComputadores: tblHistorialCustodia también es una
+  // Tabla real (A3:G4 en la plantilla) y necesita su ref/autoFilter propios
+  // expandidos, con el mismo piso mínimo que el dimension de la hoja.
+  let tabla2 = await zip.file("xl/tables/table2.xml").async("string");
+  tabla2 = tabla2.split('ref="A3:G4"').join(`ref="A3:G${Math.max(4,3+totalFilasHist)}"`);
+  zip.file("xl/tables/table2.xml", tabla2);
+
+  // {{FECHA_ACTUALIZACION}} es un marcador único (F7/G7), no uno que se
+  // duplique por fila — este sí se puede reemplazar in-place en sharedStrings.xml.
   let shared = await zip.file("xl/sharedStrings.xml").async("string");
   shared = shared.split("{{FECHA_ACTUALIZACION}}").join(fechaEnPalabras(hoyISO()));
   zip.file("xl/sharedStrings.xml", shared);
@@ -1599,7 +1675,7 @@ function abrirDetalle(id){
       <div class="modal-body">
         <div class="detail-head-v2">
           <div class="detail-profile-card" style="background:${gradienteCustodioActual(a)};border-color:${colorCustodioActual(a)}40;">
-            <div class="detail-icon-big" style="color:${colorTipo(a.tipo)}">${iconoTipoTam(a.tipo, 40)}</div>
+            <div class="detail-icon-big" style="color:${colorTipo(a.tipo)}">${(a.fotos&&a.fotos.length>0) ? `<img src="${urlFoto(a.fotos[0])}" alt="Foto del activo" data-carrusel-foto data-fotos='${esc(JSON.stringify(a.fotos.map(urlFoto)))}' data-indice="0">` : iconoTipoTam(a.tipo, 40)}</div>
             ${bloquePerfilCustodio(a)}
           </div>
           <div class="detail-badges-grid">
@@ -1629,6 +1705,13 @@ function abrirDetalle(id){
           ${a.celular ? `<div class="kv"><div class="k">Gmail asociado</div><div class="v mono">${esc(a.celular.gmail)||'—'}</div></div>` : ""}
         </div>
 
+        <div class="section-title">Fotos</div>
+        <div class="fotos-grid">
+          ${(a.fotos||[]).map(ruta=>`<div class="foto-thumb"><img src="${urlFoto(ruta)}" alt="Foto del activo" data-abrir-foto="${urlFoto(ruta)}"><button class="foto-borrar" data-borrar-foto="${esc(ruta)}" title="Borrar foto">✕</button></div>`).join("")}
+          <label class="foto-agregar"><span>+ Agregar</span><input type="file" accept="image/*" capture="environment" id="input-foto" style="display:none;"></label>
+        </div>
+        <div id="foto-estado" class="field hint" style="display:none;"></div>
+
         <div class="section-title">Historial de custodia (más reciente primero)</div>
         <div class="timeline">
           ${renderTimelineHistorial(a) || '<div class="cell-muted">Sin historial registrado.</div>'}
@@ -1642,6 +1725,32 @@ function abrirDetalle(id){
       </div>
     </div>`;
   abrirModal(html, ()=>{
+    const inputFoto = document.getElementById("input-foto");
+    if(inputFoto) inputFoto.addEventListener("change", async ()=>{
+      const archivo = inputFoto.files[0];
+      if(!archivo) return;
+      const estado = document.getElementById("foto-estado");
+      estado.style.display = "block"; estado.textContent = "Subiendo…";
+      try{ await subirFotoActivo(a.id, archivo); abrirDetalle(a.id); }
+      catch(err){ estado.textContent = "No se pudo subir la foto: " + err.message; }
+    });
+    document.querySelectorAll("[data-borrar-foto]").forEach(b=>{
+      b.addEventListener("click", async ()=>{
+        if(!confirm("¿Borrar esta foto?")) return;
+        try{ await borrarFotoActivo(a.id, b.dataset.borrarFoto); abrirDetalle(a.id); }
+        catch(err){ alert("No se pudo borrar la foto: " + err.message); }
+      });
+    });
+    document.querySelectorAll("[data-abrir-foto]").forEach(img=>{
+      img.addEventListener("click", ()=>window.open(img.dataset.abrirFoto, "_blank"));
+    });
+    const imgCarrusel = document.querySelector("[data-carrusel-foto]");
+    if(imgCarrusel) imgCarrusel.addEventListener("click", ()=>{
+      const fotos = JSON.parse(imgCarrusel.dataset.fotos);
+      const siguiente = (Number(imgCarrusel.dataset.indice) + 1) % fotos.length;
+      imgCarrusel.src = fotos[siguiente];
+      imgCarrusel.dataset.indice = siguiente;
+    });
     const be = document.getElementById("btn-editar-activo");
     if(be) be.addEventListener("click", ()=>abrirFormActivo(a.id));
     const bc = document.getElementById("btn-cambiar-custodio");
