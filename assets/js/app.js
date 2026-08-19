@@ -80,6 +80,7 @@ async function refrescarDatos(){
       proveedor: a.proveedor, fecha_adquisicion: a.fecha_adquisicion,
       color: a.color, longitud_m: a.longitud_m,
       empresa: a.empresa, valor_compra: a.valor_compra, vida_util_anios: a.vida_util_anios,
+      estado: a.estado,
       fotos: a.fotos || [],
       celular: (a.celular_gmail || a.celular_password) ? { gmail: a.celular_gmail, password: a.celular_password } : null,
       custodio: vigente ? { tipo_custodio: vigente.tipo_custodio, nombre: vigente.nombre, cargo: vigente.cargo } : null,
@@ -138,9 +139,9 @@ const state = {
   vista: "activos",   // activos | bajas | auditoria | config
   configSubtab: "permisos",
   // null en tipo/propiedad/custodioClase = "sin filtrar" (equivale a todas las opciones marcadas).
-  filtros: { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, empresa:null, colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"", colSerie:"", colSo:"", colProveedor:"", colFechaDesde:"", colFechaHasta:"", colModelo:"", colNombre:"" },
+  filtros: { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, empresa:null, estado:null, colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"", colSerie:"", colSo:"", colProveedor:"", colFechaDesde:"", colFechaHasta:"", colModelo:"", colNombre:"" },
   orden: { campo:"id", dir:"asc" },
-  columnasVisibles: new Set(["tag","tipo","marca","custodio","propiedad","acciones"]),
+  columnasVisibles: new Set(["tag","tipo","marca","estado","custodio","propiedad","acciones"]),
   modal: null,         // función que renderiza el modal actual, o null
 };
 
@@ -250,7 +251,7 @@ function labelTipoDevolucion(v){
    ============================================================ */
 function calcularAgregados(activos){
   const total = activos.length;
-  const disponibles = activos.filter(a=>a.custodio===null).length;
+  const disponibles = activos.filter(a=>a.estado==="disponible").length;
   const asignadosPersona = activos.filter(a=>a.custodio && a.custodio.tipo_custodio==="persona").length;
   const asignadosArea = activos.filter(a=>a.custodio && a.custodio.tipo_custodio==="area").length;
   const porTipo = {};
@@ -288,6 +289,7 @@ async function crearActivo(campos){
     empresa: campos.empresa || "lukmar",
     valor_compra: campos.valor_compra ? Number(campos.valor_compra) : null,
     vida_util_anios: campos.vida_util_anios ? Number(campos.vida_util_anios) : null,
+    estado: "disponible",
     celular_gmail: esCelular ? (campos.gmail || null) : null,
     celular_password: esCelular ? (campos.password || null) : null,
     trazabilidad: { categoria:null, custodio_texto:null, numero_original:null, estado_notas:null, seccion_origen:"Alta manual (app)", fila_excel:null, id_anterior:null },
@@ -328,6 +330,15 @@ async function cambiarCustodio(id, nuevoCustodio, tipoDevolucionSaliente, fechaH
     p_tipo_devolucion: tipoDevolucionSaliente || null, p_observacion: observacionSaliente || null,
   });
   if(error) throw error;
+  // Ayuda razonable, no obligatoria: si el nuevo custodio es una persona, se
+  // asume que el activo pasa a "en uso" — sigue siendo editable aparte si no
+  // aplica (ej. lo recibe alguien de IT para reacondicionarlo antes de
+  // asignarlo a otra persona). Si el nuevo custodio es un área, no se toca
+  // el estado — "área" es ambiguo (¿bodega en espera, o en uso por todo un
+  // departamento?) y no vale la pena adivinar.
+  if(nuevoCustodio.tipo_custodio === "persona"){
+    await sb.from("activos").update({ estado: "uso" }).eq("id", id);
+  }
   await refrescarDatos();
 }
 
@@ -337,6 +348,18 @@ async function liberarCustodio(id, tipoDevolucion, fechaHasta, observacion){
     p_activo_id: id, p_fecha: fechaHasta || hoyISO(),
     p_tipo_devolucion: tipoDevolucion || null, p_observacion: observacion || null,
   });
+  if(error) throw error;
+  // Sin custodio siempre pasa a "disponible" — a diferencia de asignar a un
+  // área, acá no hay ambigüedad posible.
+  await sb.from("activos").update({ estado: "disponible" }).eq("id", id);
+  await refrescarDatos();
+}
+
+// Cambiar el Estado es una acción independiente de Custodio: no toca
+// historial_custodia ni pasa por ningún RPC — es una columna simple que se
+// actualiza directo, sin arrastrar su propio historial.
+async function cambiarEstado(id, nuevoEstado){
+  const { error } = await sb.from("activos").update({ estado: nuevoEstado }).eq("id", id);
   if(error) throw error;
   await refrescarDatos();
 }
@@ -721,6 +744,7 @@ const DEFINICION_COLUMNAS = [
   { key:"marca",      label:"Marca",           core:false, weight:1.5, sortCampo:"marca",    filterCampo:"marca",        campoTexto:"colMarca",     placeholder:"Buscar marca…" },
   { key:"modelo",     label:"Modelo",          core:false, weight:1.6, sortCampo:"modelo",   filterCampo:null,           campoTexto:"colModelo",    placeholder:"Buscar modelo…" },
   { key:"nombre",     label:"Nombre equipo",   core:false, weight:1.6, sortCampo:"nombre",   filterCampo:null,           campoTexto:"colNombre",    placeholder:"Buscar nombre…" },
+  { key:"estado",     label:"Estado",          core:false, weight:1.2, sortCampo:"estado",   filterCampo:"estado",       campoTexto:null,           placeholder:null },
   { key:"custodio",   label:"Custodio",        core:false, weight:2.4, sortCampo:"custodio", filterCampo:"custodioClase",campoTexto:"colCustodio",  placeholder:"Buscar nombre…" },
   { key:"cargo",      label:"Cargo",           core:false, weight:1.5, sortCampo:"cargo",    filterCampo:null,           campoTexto:"colCargo",     placeholder:"Buscar cargo…" },
   { key:"propiedad",  label:"Propiedad",       core:false, weight:1.1, sortCampo:"propiedad",filterCampo:"propiedad",    campoTexto:"colPropiedad", placeholder:"Buscar propiedad…" },
@@ -751,13 +775,14 @@ const LIMITE_COLUMNAS_RECOMENDADO = 7;
 // caché de módulo para que los manejadores de eventos (delegados a nivel de
 // documento) sepan qué significa "seleccionar todo" para cada columna sin
 // tener que releer el DOM.
-let opcionesFiltroCache = { tipo:[], propiedad:[], custodioClase:[], marca:[], empresa:[] };
+let opcionesFiltroCache = { tipo:[], propiedad:[], custodioClase:[], marca:[], empresa:[], estado:[] };
 function recalcularOpcionesFiltro(datos){
   opcionesFiltroCache.tipo = [...new Set(datos.activos.map(a=>a.tipo).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
   opcionesFiltroCache.propiedad = [...new Set(datos.activos.map(a=>a.propiedad).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
   opcionesFiltroCache.custodioClase = [...new Set(datos.activos.map(a=>claseCustodio(a)))].sort((a,b)=>a.localeCompare(b,'es'));
   opcionesFiltroCache.marca = [...new Set(datos.activos.map(a=>a.marca).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
   opcionesFiltroCache.empresa = [...new Set(datos.activos.map(a=>a.empresa).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+  opcionesFiltroCache.estado = [...new Set(datos.activos.map(a=>a.estado).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
 }
 // Cuántos activos (del total, sin aplicar otros filtros) tienen ese valor en
 // esa columna — es la info que se muestra junto a cada opción del checklist.
@@ -801,6 +826,9 @@ function labelOpcionFiltro(campo, valor){
   if(campo==="empresa"){
     return { lukmar:"Lukmar", eq:"EQ Soluciones" }[valor] || valor;
   }
+  if(campo==="estado"){
+    return infoEstado(valor).label;
+  }
   return valor.charAt(0).toUpperCase() + valor.slice(1);
 }
 function capitalizar(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
@@ -823,6 +851,22 @@ function pillEmpresa(valor){
   const c = COLOR_EMPRESA[valor] || COLOR_EMPRESA.lukmar;
   return `<span class="pill" style="background:${c.bg};color:${c.fg};"><span class="pill-dot"></span>${valor==='eq'?'EQ Soluciones':'Lukmar'}</span>`;
 }
+// Estado del activo: disponible / en mantenimiento / en uso — INDEPENDIENTE
+// de custodio. Un activo puede estar disponible y aun así tener custodio
+// (ej. en bodega, a cargo de un área) o estar en mantenimiento sin perder el
+// custodio al que hay que devolvérselo. Una sola fuente de verdad para el
+// color/etiqueta de cada valor, usada tanto por el pill de tabla como por el
+// selector editable del detalle — así no pueden desincronizarse entre sí.
+const ESTADO_INFO = {
+  disponible:    { label:"Disponible",       fg:"#2E6B3D", bg:"#DCEFE0" },
+  mantenimiento: { label:"En mantenimiento",  fg:"#8A5A0F", bg:"#F5E6C8" },
+  uso:           { label:"En uso",            fg:"#004DAB", bg:"#DCE8F7" },
+};
+function infoEstado(valor){ return ESTADO_INFO[valor] || { label: valor || "—", fg:"#57697C", bg:"#EEF1F4" }; }
+function pillEstado(valor){
+  const i = infoEstado(valor);
+  return `<span class="pill" style="background:${i.bg};color:${i.fg};"><span class="pill-dot"></span>${esc(i.label)}</span>`;
+}
 // Selección efectiva para una columna: null significa "todavía no se tocó
 // el filtro", lo que equivale a "todas las opciones seleccionadas" (sin filtrar).
 function seleccionActiva(campo){
@@ -839,10 +883,10 @@ function columnasColapsadas(){
 }
 function camposBusquedaGeneral(a){
   if(columnasColapsadas()){
-    return [a.tipo, a.custodio ? a.custodio.nombre : "Disponible"];
+    return [a.tipo, a.custodio ? a.custodio.nombre : "Disponible", infoEstado(a.estado).label];
   }
   return [fmtTag(a), a.marca, a.modelo, a.serie, a.nombre_dispositivo,
-    a.custodio?a.custodio.nombre:"Disponible", a.tipo, a.propiedad, a.sistema_operativo, a.proveedor];
+    a.custodio?a.custodio.nombre:"Disponible", a.tipo, a.propiedad, a.sistema_operativo, a.proveedor, infoEstado(a.estado).label];
 }
 
 function filtrarActivos(datos){
@@ -853,6 +897,7 @@ function filtrarActivos(datos){
     if(f.custodioClase !== null && !f.custodioClase.has(claseCustodio(a))) return false;
     if(f.marca !== null && a.marca && !f.marca.has(a.marca)) return false;
     if(f.empresa !== null && !f.empresa.has(a.empresa)) return false;
+    if(f.estado !== null && !f.estado.has(a.estado)) return false;
     if(f.colTag && !fmtTag(a).toLowerCase().includes(f.colTag.toLowerCase())) return false;
     if(f.colTipo && !(a.tipo||"").toLowerCase().includes(f.colTipo.toLowerCase())) return false;
     if(f.colMarca){
@@ -907,6 +952,7 @@ function compararActivos(a,b,campo,dir){
     case "fecha": va=a.fecha_adquisicion||""; vb=b.fecha_adquisicion||""; break;
     case "modelo": va=a.modelo||""; vb=b.modelo||""; break;
     case "nombre": va=a.nombre_dispositivo||""; vb=b.nombre_dispositivo||""; break;
+    case "estado": va=a.estado||""; vb=b.estado||""; break;
     case "valorcompra": va=a.valor_compra??0; vb=b.valor_compra??0; break;
     case "valoractual": va=valorActualActivo(a)??0; vb=valorActualActivo(b)??0; break;
     case "vidautil": va=a.vida_util_anios??0; vb=b.vida_util_anios??0; break;
@@ -925,23 +971,32 @@ function listaOrdenadaFiltrada(datos){
 
 /* ---------- Filtro rápido: los KPI de arriba también son botones ---------- */
 function estadoInicialFiltros(){
-  return { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null,
+  return { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, empresa:null, estado:null,
     colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"",
     colSerie:"", colSo:"", colProveedor:"", colFechaDesde:"", colFechaHasta:"", colModelo:"", colNombre:"" };
 }
+// "Disponible" ahora es Estado, no Custodio — "Persona"/"Área" siguen
+// siendo Custodio como siempre. Las tres tarjetas se excluyen mutuamente
+// (activar una limpia la otra), para que el click siga sintiéndose como un
+// solo interruptor aunque por debajo escriban en dos campos distintos.
+const CAMPO_FILTRO_KPI = { disponible:"estado", persona:"custodioClase", area:"custodioClase" };
 function aplicarFiltroKpi(valor){
   if(valor === null){
     state.filtros = estadoInicialFiltros();
   } else {
-    const actual = state.filtros.custodioClase;
+    const campo = CAMPO_FILTRO_KPI[valor];
+    const otroCampo = campo === "estado" ? "custodioClase" : "estado";
+    const actual = state.filtros[campo];
     const yaActivo = actual && actual.size===1 && actual.has(valor);
-    state.filtros.custodioClase = yaActivo ? null : new Set([valor]);
+    state.filtros[campo] = yaActivo ? null : new Set([valor]);
+    state.filtros[otroCampo] = null;
   }
   renderMain();
 }
 function claseKpiActiva(valor){
-  if(valor === null) return !state.filtros.custodioClase ? "kpi-selected" : "";
-  const actual = state.filtros.custodioClase;
+  if(valor === null) return (!state.filtros.custodioClase && !state.filtros.estado) ? "kpi-selected" : "";
+  const campo = CAMPO_FILTRO_KPI[valor];
+  const actual = state.filtros[campo];
   return (actual && actual.size===1 && actual.has(valor)) ? "kpi-selected" : "";
 }
 
@@ -990,7 +1045,7 @@ function actualizarAvisoColumnas(){
 }
 
 /* ---------- Modal "Visualizar KPIs": el mismo desglose del filtro, con barras ---------- */
-const NOMBRE_COLUMNA_KPI = { tipo:"Tipo", marca:"Marca", custodioClase:"Custodio", propiedad:"Propiedad", empresa:"Empresa" };
+const NOMBRE_COLUMNA_KPI = { tipo:"Tipo", marca:"Marca", custodioClase:"Custodio", propiedad:"Propiedad", empresa:"Empresa", estado:"Estado" };
 // Columnas que entran en el resumen GLOBAL (todas las categóricas menos
 // Custodio, que queda fuera a propósito por decisión explícita).
 const CAMPOS_RESUMEN_GLOBAL = ["tipo","marca","propiedad"];
@@ -1240,7 +1295,7 @@ function actualizarTablaYResumen(){
     </div>
     <div class="summary-card kpi-disponible ${claseKpiActiva("disponible")}" data-kpi="disponible" tabindex="0" role="button" aria-label="Filtrar disponibles">
       <div class="kpi-icon">${ICONO_KPI_DISPONIBLE}</div>
-      <div class="kpi-text"><div class="num">${agregadosKpi.disponibles}</div><div class="lbl">Disponibles (sin custodio)</div></div>
+      <div class="kpi-text"><div class="num">${agregadosKpi.disponibles}</div><div class="lbl">Disponibles (por estado)</div></div>
     </div>
     <div class="summary-card kpi-persona ${claseKpiActiva("persona")}" data-kpi="persona" tabindex="0" role="button" aria-label="Filtrar asignados a persona">
       <div class="kpi-icon">${ICONO_KPI_PERSONA}</div>
@@ -1407,7 +1462,10 @@ document.addEventListener("click", (e)=>{
   if(btn){
     const id = Number(btn.dataset.id);
     const accion = btn.dataset.action;
-    if(accion==="custodio") abrirCambioCustodio(id);
+    if(accion==="custodio"){
+      const act = buscarActivo(cargarActivos(), id);
+      if(act && act.custodio) abrirMarcarDisponible(id); else abrirAsignarCustodio(id);
+    }
     if(accion==="baja") abrirConfirmarBaja(id);
     if(accion==="marcar"){ toggleEnPortapapeles(id); actualizarTablaYResumen(); return; }
     return;
@@ -1750,6 +1808,18 @@ function tarjetaBadge(label, valorHtml, color){
     <div class="detail-badge-value">${valorHtml}</div>
   </div>`;
 }
+// Variante editable de tarjetaBadge, solo para Estado: un <select> con el
+// mismo look, que guarda apenas cambia — la acción independiente de
+// Custodio que pedías, sin abrir ningún modal aparte para un solo campo.
+function tarjetaBadgeEstado(a){
+  const i = infoEstado(a.estado);
+  const opciones = Object.entries(ESTADO_INFO).map(([v,info])=>
+    `<option value="${v}" ${a.estado===v?"selected":""}>${esc(info.label)}</option>`).join("");
+  return `<div class="detail-badge-card" style="border-left-color:${i.fg};background:linear-gradient(135deg, ${i.fg}17 0%, var(--surface-2) 75%);">
+    <span class="detail-badge" style="background:${i.fg}22;color:${i.fg};">Estado</span>
+    <select class="detail-badge-select" id="sel-estado-activo" style="color:${i.fg};">${opciones}</select>
+  </div>`;
+}
 function celdaTextoRecortado(valor, claseExtra){
   if(!valor) return '<span class="cell-muted">—</span>';
   const v = esc(valor);
@@ -1770,6 +1840,7 @@ function celdaActivo(col, a){
     case "marca": return celdaTextoRecortado(a.marca);
     case "modelo": return celdaTextoRecortado(a.modelo);
     case "nombre": return celdaTextoRecortado(a.nombre_dispositivo);
+    case "estado": return pillEstado(a.estado);
     case "custodio": return pillCustodio(a);
     case "cargo": return celdaTextoRecortado(a.custodio ? a.custodio.cargo : null);
     case "propiedad": return pillPropiedad(a.propiedad);
@@ -1830,6 +1901,7 @@ function abrirDetalle(id){
             ${tarjetaBadge("Propiedad", `<span style="color:${(COLOR_PROPIEDAD[a.propiedad]||{fg:'#57697C'}).fg}">${esc(capitalizar(a.propiedad))}</span>`, (COLOR_PROPIEDAD[a.propiedad]||{fg:"#57697C"}).fg)}
             ${tarjetaBadge("Empresa", `<span style="color:${(COLOR_EMPRESA[a.empresa]||COLOR_EMPRESA.lukmar).fg}">${a.empresa==='eq'?'EQ Soluciones':'Lukmar'}</span>`, (COLOR_EMPRESA[a.empresa]||COLOR_EMPRESA.lukmar).fg)}
             ${tarjetaBadge("Tipo", esc(a.tipo)||'—', colorTipo(a.tipo))}
+            ${tarjetaBadgeEstado(a)}
           </div>
         </div>
 
@@ -1864,7 +1936,10 @@ function abrirDetalle(id){
       </div>
       <div class="modal-footer">
         ${puede("editar_activo") ? `<button class="btn" id="btn-editar-activo">Editar datos base</button>` : ""}
-        ${puede("cambiar_custodio") ? `<button class="btn btn-primary" id="btn-cambiar-custodio">Cambiar custodio</button>` : ""}
+        ${puede("cambiar_custodio") ? (a.custodio
+          ? `<button class="btn btn-primary" id="btn-marcar-disponible">Marcar disponible</button>`
+          : `<button class="btn btn-primary" id="btn-asignar-custodio">Asignar custodio</button>`
+        ) : ""}
         ${a.custodio ? `<button class="btn ${estaEnPortapapeles(a.id)?'btn-primary':''}" id="btn-marcar-portapapeles">${estaEnPortapapeles(a.id)?'🔖 Marcado para acta':'🔖 Marcar para acta'}</button>` : ""}
         ${puede("dar_baja") ? `<button class="btn btn-danger" id="btn-dar-baja">Dar de baja</button>` : ""}
       </div>
@@ -1873,10 +1948,18 @@ function abrirDetalle(id){
     document.querySelectorAll("[data-abrir-carrusel]").forEach(img=>{
       img.addEventListener("click", ()=>abrirCarruselFotos(a.fotos.map(urlFoto), Number(img.dataset.abrirCarrusel), ()=>abrirDetalle(a.id)));
     });
+    const selEstado = document.getElementById("sel-estado-activo");
+    if(selEstado) selEstado.addEventListener("change", async ()=>{
+      const nuevo = selEstado.value;
+      try{ await cambiarEstado(a.id, nuevo); abrirDetalle(a.id); }
+      catch(err){ alert("No se pudo cambiar el estado: " + err.message); }
+    });
     const be = document.getElementById("btn-editar-activo");
     if(be) be.addEventListener("click", ()=>abrirFormActivo(a.id));
-    const bc = document.getElementById("btn-cambiar-custodio");
-    if(bc) bc.addEventListener("click", ()=>abrirCambioCustodio(a.id));
+    const bmd = document.getElementById("btn-marcar-disponible");
+    if(bmd) bmd.addEventListener("click", ()=>abrirMarcarDisponible(a.id));
+    const bac = document.getElementById("btn-asignar-custodio");
+    if(bac) bac.addEventListener("click", ()=>abrirAsignarCustodio(a.id));
     const bm = document.getElementById("btn-marcar-portapapeles");
     if(bm) bm.addEventListener("click", ()=>{ toggleEnPortapapeles(a.id); actualizarTablaYResumen(); abrirDetalle(a.id); });
     const bb = document.getElementById("btn-dar-baja");
@@ -1894,23 +1977,18 @@ function abrirDetalle(id){
   });
 }
 
-// El historial se pinta más reciente primero (índice 0 = vigente). La
-// observación de un tramo describe la transición HACIA el tramo más nuevo
-// que viene justo antes en esta lista (cómo se devolvió + qué mantenimiento
-// se le dio + cómo se entregó al siguiente) — por eso se pinta como un
-// conector VISUALMENTE ENTRE las dos tarjetas, no adentro de ninguna, para
-// que se lea como lo que es: una nota sobre el paso de uno a otro, no un
-// atributo propio del custodio saliente.
+// Cada tramo muestra su propia observación en su propia tarjeta. Antes se
+// pintaba como un "conector" usando la observación del tramo siguiente —
+// eso significaba que la observación de un tramo era invisible hasta que
+// existiera un tramo MÁS NUEVO después de él: quedaba oculta mientras el
+// activo estuviera "disponible" sin custodio nuevo todavía, y de entrada
+// nunca aparecía en la primerísima entrega de un activo recién creado (que
+// no tiene ningún tramo "siguiente" posible). f_cambiar_custodio/
+// f_liberar_custodio ya guardan la observación correctamente en todos los
+// casos (verificado contra las funciones reales en Supabase) — esto era
+// puramente un bug de visualización, no de datos.
 function renderTimelineHistorial(a){
-  const lista = a.historial_custodia;
-  return lista.map((t,i)=>{
-    let html = tramoHtml(a,t,i);
-    const siguiente = lista[i+1];
-    if(siguiente && siguiente.observacion){
-      html += `<div class="titem-conector"><div class="titem-conector-texto">${esc(siguiente.observacion)}</div></div>`;
-    }
-    return html;
-  }).join("");
+  return a.historial_custodia.map((t,i)=>tramoHtml(a,t,i)).join("");
 }
 function tramoHtml(a, t, i){
   const tipoLbl = t.tipo_custodio==="mantenimiento" ? "Mantenimiento" : (t.tipo_custodio==="area" ? "Área / departamento" : "Persona");
@@ -1925,6 +2003,7 @@ function tramoHtml(a, t, i){
         ${i!==0 && state.sesion.rol===ROL_ADMIN ? `<button class="btn btn-sm btn-danger" data-borrar-tramo="${t._id}">Borrar</button>` : ""}
       </div>
     </div>
+    ${t.observacion ? `<div class="titem-observacion">${esc(t.observacion)}</div>` : ""}
   </div>`;
 }
 
@@ -2052,86 +2131,100 @@ function abrirFormActivo(id){
 }
 
 /* ---------- Cambio de custodio ---------- */
-function abrirCambioCustodio(id){
+// Ya no existe una transferencia directa de un custodio a otro: primero hay
+// que marcar disponible (con observación obligatoria — cómo/por qué se
+// devolvió) y, en un paso separado, asignar el nuevo custodio. Reemplaza a
+// la vieja abrirCambioCustodio, que permitía saltarse el paso intermedio.
+function abrirMarcarDisponible(id){
   const datos = cargarActivos();
   const a = buscarActivo(datos, id);
-  if(!a) return;
-  const tieneVigente = a.custodio !== null;
-  // Si viene de "disponible", se prellena con la observación que quedó al
-  // devolverse — así se completa (mantenimiento hecho, estado actual) en vez
-  // de perderse. f_cambiar_custodio guarda esto en ese mismo tramo si no hay
-  // ningún tramo vigente que cerrar.
-  const observacionAnterior = (!tieneVigente && a.historial_custodia[0]) ? (a.historial_custodia[0].observacion || "") : "";
+  if(!a || !a.custodio) return;
   const html = `
     <div class="modal">
-      <div class="modal-header"><h3>Cambiar custodio — ${fmtTag(a)}</h3><button class="modal-close">✕</button></div>
+      <div class="modal-header"><h3>Marcar disponible — ${fmtTag(a)}</h3><button class="modal-close">✕</button></div>
       <div class="modal-body">
-        ${tieneVigente ? `
-          <div class="alert alert-info">Custodio actual: <strong>${esc(a.custodio.nombre)}</strong>. Al confirmar, este tramo se cierra hoy.</div>
-          <div class="form-grid" style="margin-bottom:14px;">
-            <div class="field"><label>Tipo de devolución del custodio saliente</label>
-              <select id="cc-tipodev">
-                <option value="">— Selecciona —</option>
-                ${TIPOS_DEVOLUCION.map(t=>`<option value="${t.v}">${t.label}</option>`).join("")}
-              </select>
-            </div>
-            <div class="field"><label>Fecha del cambio</label><input type="date" id="cc-fecha" value="${hoyISO()}"></div>
-            <div class="field span-2"><label>Observación de la entrega (opcional)</label><textarea id="cc-observacion" placeholder="Ej: equipo entregado con un rayón en la tapa, cargador incluido…"></textarea></div>
+        <div class="alert alert-info">Custodio actual: <strong>${esc(a.custodio.nombre)}</strong>. Al confirmar, este tramo se cierra hoy y el activo queda sin custodio.</div>
+        <div class="form-grid">
+          <div class="field"><label>Tipo de devolución</label>
+            <select id="md-tipodev">
+              <option value="">— Selecciona —</option>
+              ${TIPOS_DEVOLUCION.map(t=>`<option value="${t.v}">${t.label}</option>`).join("")}
+            </select>
           </div>
-        ` : `
-          <div class="alert alert-info">Este activo está disponible (sin custodio actual).</div>
-          <div class="form-grid" style="margin-bottom:14px;">
-            <div class="field"><label>Fecha del cambio</label><input type="date" id="cc-fecha" value="${hoyISO()}"></div>
-            <div class="field span-2">
-              <label>Observación${observacionAnterior ? "" : " (opcional)"}</label>
-              ${observacionAnterior ? `<div class="field hint" style="margin-bottom:6px;">Este texto quedó registrado cuando el activo pasó a disponible. Agrégale lo que corresponda a esta entrega (mantenimiento realizado, estado actual, etc.) — el texto completo queda disponible para el acta de entrega del nuevo custodio.</div>` : ""}
-              <textarea id="cc-observacion" placeholder="Ej: se realizó limpieza y cambio de pasta térmica antes de esta entrega…">${esc(observacionAnterior)}</textarea>
-            </div>
+          <div class="field"><label>Fecha</label><input type="date" id="md-fecha" value="${hoyISO()}"></div>
+          <div class="field span-2"><label>Observación</label><textarea id="md-observacion" placeholder="Ej: equipo devuelto con un rayón en la tapa, cargador incluido…"></textarea></div>
+        </div>
+        <div class="field hint" style="margin-top:10px;">La observación es obligatoria — queda visible en el historial de este activo aunque todavía no tenga un nuevo custodio.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="btn-confirmar-disponible">Marcar disponible</button>
+      </div>
+    </div>`;
+  abrirModal(html, ()=>{
+    document.getElementById("btn-confirmar-disponible").addEventListener("click", async ()=>{
+      const tipoDev = document.getElementById("md-tipodev").value;
+      if(!tipoDev){ alert("Selecciona el tipo de devolución."); return; }
+      const observacion = document.getElementById("md-observacion").value.trim();
+      if(!observacion){ alert("La observación es obligatoria para marcar disponible."); return; }
+      const fecha = document.getElementById("md-fecha").value || hoyISO();
+      try{ await liberarCustodio(id, tipoDev, fecha, observacion); cerrarModal(); renderMain(); abrirDetalle(id); }
+      catch(err){ alert("No se pudo marcar disponible: " + err.message); }
+    });
+  });
+}
+function abrirAsignarCustodio(id){
+  const datos = cargarActivos();
+  const a = buscarActivo(datos, id);
+  if(!a || a.custodio) return;
+  // Prellenado con la observación de cuando quedó disponible — se completa
+  // (mantenimiento hecho, estado actual), no se pierde. f_cambiar_custodio
+  // la guarda en ese mismo tramo cerrado, ya que no hay ninguno vigente que
+  // cerrar en este flujo (verificado contra la función real en Supabase).
+  const observacionAnterior = a.historial_custodia[0] ? (a.historial_custodia[0].observacion || "") : "";
+  const html = `
+    <div class="modal">
+      <div class="modal-header"><h3>Asignar custodio — ${fmtTag(a)}</h3><button class="modal-close">✕</button></div>
+      <div class="modal-body">
+        <div class="alert alert-info">Este activo está disponible (sin custodio actual).</div>
+        <div class="form-grid" style="margin-bottom:14px;">
+          <div class="field"><label>Fecha</label><input type="date" id="ac-fecha" value="${hoyISO()}"></div>
+          <div class="field span-2">
+            <label>Observación${observacionAnterior ? "" : " (opcional)"}</label>
+            ${observacionAnterior ? `<div class="field hint" style="margin-bottom:6px;">Este texto quedó registrado cuando el activo pasó a disponible. Agrégale lo que corresponda a esta entrega (mantenimiento realizado, estado actual, etc.).</div>` : ""}
+            <textarea id="ac-observacion" placeholder="Ej: se realizó limpieza y cambio de pasta térmica antes de esta entrega…">${esc(observacionAnterior)}</textarea>
           </div>
-        `}
+        </div>
         <fieldset>
           <legend>Nuevo custodio</legend>
           <div class="form-grid">
             <div class="field"><label>Tipo</label>
-              <select id="cc-tipo">
+              <select id="ac-tipo">
                 <option value="persona">Persona</option>
                 <option value="area">Área / departamento</option>
-                <option value="mantenimiento">Mantenimiento</option>
               </select>
             </div>
-            <div class="field"><label>Nombre</label><input type="text" id="cc-nombre" placeholder="Nombre de la persona, del área, o motivo del mantenimiento"></div>
-            <div class="field span-2"><label>Cargo (opcional)</label><input type="text" id="cc-cargo"></div>
+            <div class="field"><label>Nombre</label><input type="text" id="ac-nombre" placeholder="Nombre de la persona o del área"></div>
+            <div class="field span-2"><label>Cargo (opcional)</label><input type="text" id="ac-cargo"></div>
           </div>
         </fieldset>
-        ${tieneVigente ? `<div class="field hint" style="margin-top:10px;">Si el activo va a quedar sin custodio (disponible), déjalo así y usa el botón "Marcar disponible" en su lugar.</div>` : ""}
       </div>
       <div class="modal-footer">
-        ${tieneVigente ? `<button class="btn btn-danger" id="btn-liberar">Marcar disponible</button>` : ""}
-        <button class="btn btn-primary" id="btn-confirmar-custodio">Confirmar cambio</button>
+        <button class="btn btn-primary" id="btn-confirmar-asignar">Confirmar</button>
       </div>
     </div>`;
   abrirModal(html, ()=>{
-    document.getElementById("btn-confirmar-custodio").addEventListener("click", async ()=>{
-      const nombre = document.getElementById("cc-nombre").value.trim();
+    document.getElementById("btn-confirmar-asignar").addEventListener("click", async ()=>{
+      const nombre = document.getElementById("ac-nombre").value.trim();
       if(!nombre){ alert("Ingresa el nombre del nuevo custodio."); return; }
-      const tipoDev = tieneVigente ? document.getElementById("cc-tipodev").value : null;
-      if(tieneVigente && !tipoDev){ alert("Selecciona el tipo de devolución del custodio saliente."); return; }
-      const fecha = document.getElementById("cc-fecha").value || hoyISO();
-      const observacion = document.getElementById("cc-observacion").value.trim();
-      await cambiarCustodio(id, {
-        tipo_custodio: document.getElementById("cc-tipo").value,
-        nombre, cargo: document.getElementById("cc-cargo").value.trim(),
-      }, tipoDev, fecha, observacion);
-      cerrarModal(); renderMain(); abrirDetalle(id);
-    });
-    const bl = document.getElementById("btn-liberar");
-    if(bl) bl.addEventListener("click", async ()=>{
-      const tipoDev = document.getElementById("cc-tipodev").value;
-      if(!tipoDev){ alert("Selecciona el tipo de devolución antes de marcar disponible."); return; }
-      const fecha = document.getElementById("cc-fecha").value || hoyISO();
-      const observacion = document.getElementById("cc-observacion").value.trim();
-      await liberarCustodio(id, tipoDev, fecha, observacion);
-      cerrarModal(); renderMain(); abrirDetalle(id);
+      const fecha = document.getElementById("ac-fecha").value || hoyISO();
+      const observacion = document.getElementById("ac-observacion").value.trim();
+      try{
+        await cambiarCustodio(id, {
+          tipo_custodio: document.getElementById("ac-tipo").value,
+          nombre, cargo: document.getElementById("ac-cargo").value.trim(),
+        }, null, fecha, observacion);
+        cerrarModal(); renderMain(); abrirDetalle(id);
+      } catch(err){ alert("No se pudo asignar el custodio: " + err.message); }
     });
   });
 }
@@ -2151,7 +2244,7 @@ function abrirEditarTramo(id, index){
             <select id="et-tipo">
               <option value="persona" ${t.tipo_custodio==='persona'?'selected':''}>Persona</option>
               <option value="area" ${t.tipo_custodio==='area'?'selected':''}>Área / departamento</option>
-              <option value="mantenimiento" ${t.tipo_custodio==='mantenimiento'?'selected':''}>Mantenimiento</option>
+              ${t.tipo_custodio==='mantenimiento' ? `<option value="mantenimiento" selected>Mantenimiento (heredado)</option>` : ''}
             </select>
           </div>
           <div class="field"><label>Nombre</label><input type="text" id="et-nombre" value="${esc(t.nombre)}"></div>
@@ -2164,9 +2257,9 @@ function abrirEditarTramo(id, index){
               ${TIPOS_DEVOLUCION.map(x=>`<option value="${x.v}" ${t.tipo_devolucion===x.v?'selected':''}>${x.label}</option>`).join("")}
             </select>
           </div>
-          <div class="field span-2"><label>Observación de la entrega</label><textarea id="et-observacion" ${index===0?'disabled':''} placeholder="${index===0?'Se habilita cuando este tramo se cierre':''}">${esc(t.observacion)}</textarea></div>
+          <div class="field span-2"><label>Observación</label><textarea id="et-observacion" placeholder="Ej: se entrega con cargador original…">${esc(t.observacion)}</textarea></div>
         </div>
-        ${index===0 ? `<div class="field hint" style="margin-top:8px;">Este es el tramo vigente: "Hasta", "Tipo de devolución" y "Observación" quedan bloqueados porque aún no ha terminado.</div>` : ""}
+        ${index===0 ? `<div class="field hint" style="margin-top:8px;">Este es el tramo vigente: "Hasta" y "Tipo de devolución" quedan bloqueados porque aún no ha terminado. La observación sí se puede editar (ej. notas de esta entrega).</div>` : ""}
       </div>
       <div class="modal-footer">
         <button class="btn btn-primary" id="btn-guardar-tramo">Guardar</button>
@@ -2181,7 +2274,7 @@ function abrirEditarTramo(id, index){
         desde: document.getElementById("et-desde").value,
         hasta: index===0 ? null : document.getElementById("et-hasta").value,
         tipo_devolucion: index===0 ? null : document.getElementById("et-tipodev").value,
-        observacion: index===0 ? null : document.getElementById("et-observacion").value.trim(),
+        observacion: document.getElementById("et-observacion").value.trim(),
       });
       cerrarModal(); renderMain(); abrirDetalle(id);
     });
