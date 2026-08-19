@@ -1992,7 +1992,10 @@ function renderTimelineHistorial(a){
 }
 function tramoHtml(a, t, i){
   const tipoLbl = t.tipo_custodio==="mantenimiento" ? "Mantenimiento" : (t.tipo_custodio==="area" ? "Área / departamento" : "Persona");
-  return `<div class="titem ${i===0?'current':''}">
+  const vigente = t.hasta===null; // el tramo activo de verdad — NO necesariamente i===0: si el
+  // activo está disponible, el tramo más reciente (i===0) ya está cerrado y no es distinto
+  // de cualquier otro tramo viejo para efectos de editar/borrar.
+  return `<div class="titem ${vigente?'current':''}">
     <div class="titem-row">
       <div>
         <div class="titem-name">${esc(t.nombre)} <span class="pill ${t.tipo_custodio==='mantenimiento'?'pill-mantenimiento':(t.tipo_custodio==='area'?'pill-area':'pill-persona')}" style="margin-left:6px;">${tipoLbl}</span></div>
@@ -2000,7 +2003,7 @@ function tramoHtml(a, t, i){
       </div>
       <div class="titem-actions">
         ${puede("editar_historial") ? `<button class="btn btn-sm" data-editar-tramo="${i}">Editar</button>` : ""}
-        ${i!==0 && state.sesion.rol===ROL_ADMIN ? `<button class="btn btn-sm btn-danger" data-borrar-tramo="${t._id}">Borrar</button>` : ""}
+        ${!vigente && state.sesion.rol===ROL_ADMIN ? `<button class="btn btn-sm btn-danger" data-borrar-tramo="${t._id}">Borrar</button>` : ""}
       </div>
     </div>
     ${t.observacion ? `<div class="titem-observacion">${esc(t.observacion)}</div>` : ""}
@@ -2154,7 +2157,7 @@ function abrirMarcarDisponible(id){
           <div class="field"><label>Fecha</label><input type="date" id="md-fecha" value="${hoyISO()}"></div>
           <div class="field span-2"><label>Observación</label><textarea id="md-observacion" placeholder="Ej: equipo devuelto con un rayón en la tapa, cargador incluido…"></textarea></div>
         </div>
-        <div class="field hint" style="margin-top:10px;">La observación es obligatoria — queda visible en el historial de este activo aunque todavía no tenga un nuevo custodio.</div>
+        <div class="field hint" style="margin-top:10px;">La observación es obligatoria. Se agrega a las observaciones que ya tenga este custodio (no las reemplaza), y queda visible en el historial de este activo aunque todavía no tenga un nuevo custodio.</div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-primary" id="btn-confirmar-disponible">Marcar disponible</button>
@@ -2176,11 +2179,6 @@ function abrirAsignarCustodio(id){
   const datos = cargarActivos();
   const a = buscarActivo(datos, id);
   if(!a || a.custodio) return;
-  // Prellenado con la observación de cuando quedó disponible — se completa
-  // (mantenimiento hecho, estado actual), no se pierde. f_cambiar_custodio
-  // la guarda en ese mismo tramo cerrado, ya que no hay ninguno vigente que
-  // cerrar en este flujo (verificado contra la función real en Supabase).
-  const observacionAnterior = a.historial_custodia[0] ? (a.historial_custodia[0].observacion || "") : "";
   const html = `
     <div class="modal">
       <div class="modal-header"><h3>Asignar custodio — ${fmtTag(a)}</h3><button class="modal-close">✕</button></div>
@@ -2189,9 +2187,8 @@ function abrirAsignarCustodio(id){
         <div class="form-grid" style="margin-bottom:14px;">
           <div class="field"><label>Fecha</label><input type="date" id="ac-fecha" value="${hoyISO()}"></div>
           <div class="field span-2">
-            <label>Observación${observacionAnterior ? "" : " (opcional)"}</label>
-            ${observacionAnterior ? `<div class="field hint" style="margin-bottom:6px;">Este texto quedó registrado cuando el activo pasó a disponible. Agrégale lo que corresponda a esta entrega (mantenimiento realizado, estado actual, etc.).</div>` : ""}
-            <textarea id="ac-observacion" placeholder="Ej: se realizó limpieza y cambio de pasta térmica antes de esta entrega…">${esc(observacionAnterior)}</textarea>
+            <label>Observación de esta entrega (opcional)</label>
+            <textarea id="ac-observacion" placeholder="Ej: se entrega con cargador original y funda…"></textarea>
           </div>
         </div>
         <fieldset>
@@ -2235,6 +2232,8 @@ function abrirEditarTramo(id, index){
   const a = buscarActivo(datos, id);
   const t = a.historial_custodia[index];
   if(!t) return;
+  const vigente = t.hasta===null; // igual que en tramoHtml: NO es lo mismo que index===0
+  // cuando el activo está disponible (ahí el tramo más reciente ya está cerrado).
   const html = `
     <div class="modal">
       <div class="modal-header"><h3>Editar tramo #${index+1} — ${fmtTag(a)}</h3><button class="modal-close">✕</button></div>
@@ -2250,16 +2249,16 @@ function abrirEditarTramo(id, index){
           <div class="field"><label>Nombre</label><input type="text" id="et-nombre" value="${esc(t.nombre)}"></div>
           <div class="field"><label>Cargo</label><input type="text" id="et-cargo" value="${esc(t.cargo)}"></div>
           <div class="field"><label>Desde</label><input type="date" id="et-desde" value="${t.desde||''}"></div>
-          <div class="field"><label>Hasta</label><input type="date" id="et-hasta" value="${t.hasta||''}" ${index===0?'disabled':''}></div>
+          <div class="field"><label>Hasta</label><input type="date" id="et-hasta" value="${t.hasta||''}" ${vigente?'disabled':''}></div>
           <div class="field"><label>Tipo de devolución</label>
-            <select id="et-tipodev" ${index===0?'disabled':''}>
+            <select id="et-tipodev" ${vigente?'disabled':''}>
               <option value="">— Ninguno —</option>
               ${TIPOS_DEVOLUCION.map(x=>`<option value="${x.v}" ${t.tipo_devolucion===x.v?'selected':''}>${x.label}</option>`).join("")}
             </select>
           </div>
           <div class="field span-2"><label>Observación</label><textarea id="et-observacion" placeholder="Ej: se entrega con cargador original…">${esc(t.observacion)}</textarea></div>
         </div>
-        ${index===0 ? `<div class="field hint" style="margin-top:8px;">Este es el tramo vigente: "Hasta" y "Tipo de devolución" quedan bloqueados porque aún no ha terminado. La observación sí se puede editar (ej. notas de esta entrega).</div>` : ""}
+        ${vigente ? `<div class="field hint" style="margin-top:8px;">Este es el tramo vigente: "Hasta" y "Tipo de devolución" quedan bloqueados porque aún no ha terminado. La observación sí se puede editar (ej. notas de esta entrega).</div>` : ""}
       </div>
       <div class="modal-footer">
         <button class="btn btn-primary" id="btn-guardar-tramo">Guardar</button>
@@ -2272,8 +2271,8 @@ function abrirEditarTramo(id, index){
         nombre: document.getElementById("et-nombre").value.trim(),
         cargo: document.getElementById("et-cargo").value.trim(),
         desde: document.getElementById("et-desde").value,
-        hasta: index===0 ? null : document.getElementById("et-hasta").value,
-        tipo_devolucion: index===0 ? null : document.getElementById("et-tipodev").value,
+        hasta: vigente ? null : document.getElementById("et-hasta").value,
+        tipo_devolucion: vigente ? null : document.getElementById("et-tipodev").value,
         observacion: document.getElementById("et-observacion").value.trim(),
       });
       cerrarModal(); renderMain(); abrirDetalle(id);
