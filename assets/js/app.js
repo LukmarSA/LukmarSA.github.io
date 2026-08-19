@@ -2016,6 +2016,60 @@ function abrirFormActivo(id){
   const datos = cargarActivos();
   const a = id ? buscarActivo(datos, id) : null;
   const esNuevo = !a;
+
+  // Fotos ya NO tocan Supabase al hacer clic — quedan "pendientes" en memoria
+  // (como cualquier otro campo del formulario) y solo se aplican al confirmar
+  // "Guardar cambios", en el mismo paso que el resto de los datos base.
+  // fotosABorrar: rutas existentes marcadas para borrar (con deshacer).
+  // fotosNuevas: File[] seleccionados y todavía sin subir.
+  let fotosABorrar = [];
+  let fotosNuevas = [];
+
+  function htmlGridFotos(){
+    const existentes = (a&&a.fotos||[]).map(ruta=>{
+      const marcada = fotosABorrar.includes(ruta);
+      return `<div class="foto-thumb ${marcada?'foto-marcada-borrar':''}">
+        <img src="${urlFoto(ruta)}" alt="Foto del activo">
+        <button type="button" class="foto-borrar" data-toggle-borrar="${esc(ruta)}" title="${marcada?'Deshacer':'Quitar foto'}">${marcada?'↺':'✕'}</button>
+      </div>`;
+    }).join("");
+    const nuevas = fotosNuevas.map((file,i)=>`<div class="foto-thumb foto-thumb-pendiente">
+        <img src="${URL.createObjectURL(file)}" alt="Foto nueva, todavía sin guardar">
+        <button type="button" class="foto-borrar" data-quitar-nueva="${i}" title="Quitar">✕</button>
+        <span class="foto-pendiente-tag">Nueva</span>
+      </div>`).join("");
+    return existentes + nuevas + `<label class="foto-agregar"><span>+ Agregar</span><input type="file" accept="image/*" capture="environment" id="input-foto" style="display:none;"></label>`;
+  }
+  function wireGridFotos(){
+    const inputFoto = document.getElementById("input-foto");
+    if(inputFoto) inputFoto.addEventListener("change", ()=>{
+      const archivo = inputFoto.files[0];
+      if(!archivo) return;
+      fotosNuevas.push(archivo);
+      refrescarGridFotos();
+    });
+    document.querySelectorAll("[data-toggle-borrar]").forEach(b=>{
+      b.addEventListener("click", ()=>{
+        const ruta = b.dataset.toggleBorrar;
+        const idx = fotosABorrar.indexOf(ruta);
+        if(idx===-1) fotosABorrar.push(ruta); else fotosABorrar.splice(idx,1);
+        refrescarGridFotos();
+      });
+    });
+    document.querySelectorAll("[data-quitar-nueva]").forEach(b=>{
+      b.addEventListener("click", ()=>{
+        fotosNuevas.splice(Number(b.dataset.quitarNueva), 1);
+        refrescarGridFotos();
+      });
+    });
+  }
+  function refrescarGridFotos(){
+    const grid = document.getElementById("fotos-grid-form");
+    if(!grid) return;
+    grid.innerHTML = htmlGridFotos();
+    wireGridFotos();
+  }
+
   const html = `
     <div class="modal modal-wide">
       <div class="modal-header"><h3>${esNuevo?'Nuevo activo':'Editar ' + fmtTag(a)}</h3><button class="modal-close">✕</button></div>
@@ -2062,11 +2116,8 @@ function abrirFormActivo(id){
           </fieldset>
           ${!esNuevo ? `
           <div class="section-title" style="margin-top:14px;">Fotos</div>
-          <div class="fotos-grid">
-            ${(a.fotos||[]).map((ruta,i)=>`<div class="foto-thumb"><img src="${urlFoto(ruta)}" alt="Foto del activo" data-abrir-carrusel="${i}"><button class="foto-borrar" data-borrar-foto="${esc(ruta)}" title="Borrar foto">✕</button></div>`).join("")}
-            <label class="foto-agregar"><span>+ Agregar</span><input type="file" accept="image/*" capture="environment" id="input-foto" style="display:none;"></label>
-          </div>
-          <div id="foto-estado" class="field hint" style="display:none;"></div>
+          <div class="fotos-grid" id="fotos-grid-form">${htmlGridFotos()}</div>
+          <div class="field hint" style="margin-top:6px;">Los cambios de fotos (agregar, quitar) se guardan junto con el resto al presionar "${esNuevo?'Crear activo':'Guardar cambios'}" — no se aplican antes.</div>
           ` : ""}
           <div class="field hint" style="margin-top:10px;">
             ${esNuevo ? "El activo se crea sin custodio (disponible). Usa \"Cambiar custodio\" desde el detalle para asignarlo." : "Para cambiar el custodio, usa el botón \"Cambiar custodio\" del detalle — este formulario solo edita los datos base del equipo."}
@@ -2078,27 +2129,8 @@ function abrirFormActivo(id){
       </div>
     </div>`;
   abrirModal(html, ()=>{
-    if(!esNuevo){
-      const inputFoto = document.getElementById("input-foto");
-      if(inputFoto) inputFoto.addEventListener("change", async ()=>{
-        const archivo = inputFoto.files[0];
-        if(!archivo) return;
-        const estado = document.getElementById("foto-estado");
-        estado.style.display = "block"; estado.textContent = "Subiendo…";
-        try{ await subirFotoActivo(a.id, archivo); abrirFormActivo(a.id); }
-        catch(err){ estado.textContent = "No se pudo subir la foto: " + err.message; }
-      });
-      document.querySelectorAll("[data-borrar-foto]").forEach(b=>{
-        b.addEventListener("click", async ()=>{
-          if(!confirm("¿Borrar esta foto?")) return;
-          try{ await borrarFotoActivo(a.id, b.dataset.borrarFoto); abrirFormActivo(a.id); }
-          catch(err){ alert("No se pudo borrar la foto: " + err.message); }
-        });
-      });
-      document.querySelectorAll("[data-abrir-carrusel]").forEach(img=>{
-        img.addEventListener("click", ()=>abrirCarruselFotos(a.fotos.map(urlFoto), Number(img.dataset.abrirCarrusel), ()=>abrirFormActivo(a.id)));
-      });
-    }
+    document.getElementById("form-activo").addEventListener("submit", e=>e.preventDefault());
+    if(!esNuevo) wireGridFotos();
     document.getElementById("btn-guardar-activo").addEventListener("click", async ()=>{
       const campos = {
         tipo: document.getElementById("fa-tipo").value.trim(),
@@ -2123,12 +2155,25 @@ function abrirFormActivo(id){
         gmail: document.getElementById("fa-gmail").value.trim(),
         password: document.getElementById("fa-password").value.trim(),
       };
-      if(esNuevo){
-        const nuevoId = await crearActivo(campos);
-        cerrarModal(); renderMain(); abrirDetalle(nuevoId);
-      } else {
-        await editarActivoBase(a.id, campos);
-        cerrarModal(); renderMain(); abrirDetalle(a.id);
+      const btn = document.getElementById("btn-guardar-activo");
+      btn.disabled = true; btn.textContent = "Guardando…";
+      try{
+        let idActivo;
+        if(esNuevo){
+          idActivo = await crearActivo(campos);
+        } else {
+          idActivo = a.id;
+          await editarActivoBase(idActivo, campos);
+        }
+        // Fotos pendientes recién ahora, en el mismo paso — si alguna falla,
+        // los datos base ya quedaron guardados; se informa cuál falló en vez
+        // de perder todo el trabajo ya hecho.
+        for(const file of fotosNuevas) await subirFotoActivo(idActivo, file);
+        for(const ruta of fotosABorrar) await borrarFotoActivo(idActivo, ruta);
+        cerrarModal(); renderMain(); abrirDetalle(idActivo);
+      } catch(err){
+        btn.disabled = false; btn.textContent = esNuevo?'Crear activo':'Guardar cambios';
+        alert("No se pudo guardar: " + err.message);
       }
     });
   });
