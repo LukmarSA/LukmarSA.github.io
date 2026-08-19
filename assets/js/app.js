@@ -66,7 +66,7 @@ async function refrescarDatos(){
     (historialPorActivo[t.activo_id] ||= []).push({
       _id: t.id, tipo_custodio: t.tipo_custodio, nombre: t.nombre, cargo: t.cargo,
       desde: t.desde, hasta: t.hasta, tipo_devolucion: t.tipo_devolucion,
-      observacion: t.observacion, orden: t.orden,
+      observacion_entrega: t.observacion_entrega, observacion_devolucion: t.observacion_devolucion, orden: t.orden,
     });
   });
   const activos = (activosRaw||[]).map(a=>{
@@ -424,7 +424,7 @@ async function editarTramoHistorial(id, index, campos){
   const tramo = a.historial_custodia[index];
   if(!tramo || !tramo._id) return;
   const patch = {};
-  ["tipo_custodio","nombre","cargo","desde","hasta","tipo_devolucion","observacion"].forEach(k=>{
+  ["tipo_custodio","nombre","cargo","desde","hasta","tipo_devolucion","observacion_entrega","observacion_devolucion"].forEach(k=>{
     if(k in campos) patch[k] = campos[k] || null;
   });
   const { error } = await sb.from("historial_custodia").update(patch).eq("id", tramo._id);
@@ -2006,7 +2006,8 @@ function tramoHtml(a, t, i){
         ${!vigente && state.sesion.rol===ROL_ADMIN ? `<button class="btn btn-sm btn-danger" data-borrar-tramo="${t._id}">Borrar</button>` : ""}
       </div>
     </div>
-    ${t.observacion ? `<div class="titem-observacion">${esc(t.observacion)}</div>` : ""}
+    ${t.observacion_entrega ? `<div class="titem-observacion titem-obs-entrega"><span class="titem-obs-tag">Entrega</span>${esc(t.observacion_entrega)}</div>` : ""}
+    ${t.observacion_devolucion ? `<div class="titem-observacion titem-obs-devolucion"><span class="titem-obs-tag">Devolución</span>${esc(t.observacion_devolucion)}</div>` : ""}
   </div>`;
 }
 
@@ -2256,9 +2257,10 @@ function abrirEditarTramo(id, index){
               ${TIPOS_DEVOLUCION.map(x=>`<option value="${x.v}" ${t.tipo_devolucion===x.v?'selected':''}>${x.label}</option>`).join("")}
             </select>
           </div>
-          <div class="field span-2"><label>Observación</label><textarea id="et-observacion" placeholder="Ej: se entrega con cargador original…">${esc(t.observacion)}</textarea></div>
+          <div class="field span-2"><label>Observación de la entrega</label><textarea id="et-observacion-entrega" placeholder="Ej: se entrega con cargador original…">${esc(t.observacion_entrega)}</textarea></div>
+          <div class="field span-2"><label>Observación de la devolución</label><textarea id="et-observacion-devolucion" ${vigente?'disabled':''} placeholder="${vigente?'Se habilita cuando este tramo se cierre':'Ej: se devuelve con la pantalla rayada…'}">${esc(t.observacion_devolucion)}</textarea></div>
         </div>
-        ${vigente ? `<div class="field hint" style="margin-top:8px;">Este es el tramo vigente: "Hasta" y "Tipo de devolución" quedan bloqueados porque aún no ha terminado. La observación sí se puede editar (ej. notas de esta entrega).</div>` : ""}
+        ${vigente ? `<div class="field hint" style="margin-top:8px;">Este es el tramo vigente: "Hasta", "Tipo de devolución" y "Observación de la devolución" quedan bloqueados porque aún no ha terminado. La observación de la entrega sí se puede editar.</div>` : ""}
       </div>
       <div class="modal-footer">
         <button class="btn btn-primary" id="btn-guardar-tramo">Guardar</button>
@@ -2273,7 +2275,8 @@ function abrirEditarTramo(id, index){
         desde: document.getElementById("et-desde").value,
         hasta: vigente ? null : document.getElementById("et-hasta").value,
         tipo_devolucion: vigente ? null : document.getElementById("et-tipodev").value,
-        observacion: document.getElementById("et-observacion").value.trim(),
+        observacion_entrega: document.getElementById("et-observacion-entrega").value.trim(),
+        observacion_devolucion: vigente ? null : document.getElementById("et-observacion-devolucion").value.trim(),
       });
       cerrarModal(); renderMain(); abrirDetalle(id);
     });
@@ -2433,7 +2436,7 @@ async function generarActaEntregaDesdeLista(activos){
     const a = activos[i-1];
     const anterior = a ? a.historial_custodia[1] : null;
     valores["ITEM"+i] = a ? descripcionItemActa(a) : "";
-    valores["OBS"+i] = (anterior && anterior.observacion) || "";
+    valores["OBS"+i] = (anterior && anterior.observacion_devolucion) || "";
   }
 
   const resp = await fetch("assets/plantillas/TIC-FRM-003.xlsx");

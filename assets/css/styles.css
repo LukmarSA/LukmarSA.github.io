@@ -451,7 +451,12 @@ fieldset legend{font-size:12px;font-weight:600;color:var(--ink-muted);padding:0 
 .titem-name{font-weight:600;font-size:13.5px;}
 .titem-meta{font-size:12px;color:var(--ink-muted);margin-top:2px;}
 .titem-actions{display:flex;gap:4px;}
-.titem-observacion{font-size:12.5px;color:var(--ink);font-style:italic;margin-top:8px;padding-left:8px;border-left:2px dashed var(--border-strong);white-space:pre-line;}
+.titem-observacion{font-size:12.5px;color:var(--ink);font-style:italic;margin-top:6px;padding-left:8px;border-left:2px dashed var(--border-strong);white-space:pre-line;}
+.titem-obs-tag{display:inline-block;font-style:normal;font-weight:700;font-size:10px;letter-spacing:0.03em;text-transform:uppercase;margin-right:6px;padding:1px 6px;border-radius:4px;vertical-align:1px;}
+.titem-obs-entrega{border-left-color:#8FC79C;}
+.titem-obs-entrega .titem-obs-tag{background:#DCEFE0;color:#2E6B3D;}
+.titem-obs-devolucion{border-left-color:#D8B26B;}
+.titem-obs-devolucion .titem-obs-tag{background:#F5E6C8;color:#8A5A0F;}
 
 /* ---------- Login ("portada") ---------- */
 .login-wrap{
