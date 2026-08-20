@@ -65,7 +65,7 @@ async function refrescarDatos(){
   (historialRaw||[]).forEach(t=>{
     (historialPorActivo[t.activo_id] ||= []).push({
       _id: t.id, tipo_custodio: t.tipo_custodio, nombre: t.nombre, cargo: t.cargo,
-      desde: t.desde, hasta: t.hasta, tipo_devolucion: t.tipo_devolucion,
+      desde: t.desde, hasta: t.hasta, tipo_devolucion: t.tipo_devolucion, tipo_entrega: t.tipo_entrega,
       observacion_entrega: t.observacion_entrega, observacion_devolucion: t.observacion_devolucion, orden: t.orden,
     });
   });
@@ -240,9 +240,18 @@ const TIPOS_DEVOLUCION = [
   {v:"firmada", label:"Firmada (devolución normal con acta)"},
   {v:"desvinculada", label:"Desvinculada (el custodio dejó la empresa)"},
   {v:"perdida", label:"Perdida (no se recuperó el activo)"},
+  {v:"simple", label:"Simple (no aplica firmar)"},
 ];
 function labelTipoDevolucion(v){
   const f = TIPOS_DEVOLUCION.find(t=>t.v===v);
+  return f ? f.label : "—";
+}
+const TIPOS_ENTREGA = [
+  {v:"firmada", label:"Firmada (entrega normal con acta)"},
+  {v:"simple", label:"Simple (no aplica firmar)"},
+];
+function labelTipoEntrega(v){
+  const f = TIPOS_ENTREGA.find(t=>t.v===v);
   return f ? f.label : "—";
 }
 
@@ -323,44 +332,20 @@ async function editarActivoBase(id, campos){
 
 // Registrar cambio de custodio: vía RPC (cierra el tramo vigente + abre uno
 // nuevo en una sola transacción atómica en Postgres — ver f_cambiar_custodio).
-async function cambiarCustodio(id, nuevoCustodio, tipoDevolucionSaliente, fechaHasta, observacionSaliente){
+async function cambiarCustodio(id, nuevoCustodio, tipoDevolucionSaliente, fechaHasta, observacionSaliente, tipoEntrega, nuevoEstado){
   const { error } = await sb.rpc("f_cambiar_custodio", {
     p_activo_id: id, p_tipo_custodio: nuevoCustodio.tipo_custodio, p_nombre: nuevoCustodio.nombre,
     p_cargo: nuevoCustodio.cargo || null, p_fecha: fechaHasta || hoyISO(),
     p_tipo_devolucion: tipoDevolucionSaliente || null, p_observacion: observacionSaliente || null,
+    p_tipo_entrega: tipoEntrega || null,
   });
   if(error) throw error;
-  // Ayuda razonable, no obligatoria: si el nuevo custodio es una persona, se
-  // asume que el activo pasa a "en uso" — sigue siendo editable aparte si no
-  // aplica (ej. lo recibe alguien de IT para reacondicionarlo antes de
-  // asignarlo a otra persona). Si el nuevo custodio es un área, no se toca
-  // el estado — "área" es ambiguo (¿bodega en espera, o en uso por todo un
-  // departamento?) y no vale la pena adivinar.
-  if(nuevoCustodio.tipo_custodio === "persona"){
-    await sb.from("activos").update({ estado: "uso" }).eq("id", id);
+  // Estado ya no se infiere — viene explícito del dropdown de
+  // abrirCambiarCustodio (siempre obligatorio ahí).
+  if(nuevoEstado){
+    const { error: errorEstado } = await sb.from("activos").update({ estado: nuevoEstado }).eq("id", id);
+    if(errorEstado) throw errorEstado;
   }
-  await refrescarDatos();
-}
-
-// Marcar el activo como disponible (sin custodio) — vía RPC (f_liberar_custodio).
-async function liberarCustodio(id, tipoDevolucion, fechaHasta, observacion){
-  const { error } = await sb.rpc("f_liberar_custodio", {
-    p_activo_id: id, p_fecha: fechaHasta || hoyISO(),
-    p_tipo_devolucion: tipoDevolucion || null, p_observacion: observacion || null,
-  });
-  if(error) throw error;
-  // Sin custodio siempre pasa a "disponible" — a diferencia de asignar a un
-  // área, acá no hay ambigüedad posible.
-  await sb.from("activos").update({ estado: "disponible" }).eq("id", id);
-  await refrescarDatos();
-}
-
-// Cambiar el Estado es una acción independiente de Custodio: no toca
-// historial_custodia ni pasa por ningún RPC — es una columna simple que se
-// actualiza directo, sin arrastrar su propio historial.
-async function cambiarEstado(id, nuevoEstado){
-  const { error } = await sb.from("activos").update({ estado: nuevoEstado }).eq("id", id);
-  if(error) throw error;
   await refrescarDatos();
 }
 
@@ -424,7 +409,7 @@ async function editarTramoHistorial(id, index, campos){
   const tramo = a.historial_custodia[index];
   if(!tramo || !tramo._id) return;
   const patch = {};
-  ["tipo_custodio","nombre","cargo","desde","hasta","tipo_devolucion","observacion_entrega","observacion_devolucion"].forEach(k=>{
+  ["tipo_custodio","nombre","cargo","desde","hasta","tipo_devolucion","tipo_entrega","observacion_entrega","observacion_devolucion"].forEach(k=>{
     if(k in campos) patch[k] = campos[k] || null;
   });
   const { error } = await sb.from("historial_custodia").update(patch).eq("id", tramo._id);
@@ -1159,13 +1144,12 @@ function abrirModalKpiColumna(campo){
             <div class="kpi-breakdown-num">${f.n}</div>
           </div>`).join("") || '<div class="empty-state"><div class="big">—</div>No hay datos para mostrar.</div>'}
       </div>
-      <div class="kpi-export-row">
-        <button class="btn btn-sm" id="kpi-export-wa">Copiar para WhatsApp</button>
-        <button class="btn btn-sm" id="kpi-export-csv">Descargar CSV</button>
-        <button class="btn btn-sm" id="kpi-export-html">Descargar HTML</button>
-      </div>
     </div>
-    <div class="modal-footer"><button class="btn modal-close">Cerrar</button></div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" id="kpi-export-wa">Copiar para WhatsApp</button>
+      <button class="btn btn-sm" id="kpi-export-csv">Descargar CSV</button>
+      <button class="btn btn-sm" id="kpi-export-html">Descargar HTML</button>
+    </div>
   </div>`;
   abrirModal(html, ()=>{
     const seccion = [{ nombre, filas, totalConteo }];
@@ -1462,10 +1446,7 @@ document.addEventListener("click", (e)=>{
   if(btn){
     const id = Number(btn.dataset.id);
     const accion = btn.dataset.action;
-    if(accion==="custodio"){
-      const act = buscarActivo(cargarActivos(), id);
-      if(act && act.custodio) abrirMarcarDisponible(id); else abrirAsignarCustodio(id);
-    }
+    if(accion==="custodio") abrirCambiarCustodio(id);
     if(accion==="baja") abrirConfirmarBaja(id);
     if(accion==="marcar"){ toggleEnPortapapeles(id); actualizarTablaYResumen(); return; }
     return;
@@ -1808,18 +1789,6 @@ function tarjetaBadge(label, valorHtml, color){
     <div class="detail-badge-value">${valorHtml}</div>
   </div>`;
 }
-// Variante editable de tarjetaBadge, solo para Estado: un <select> con el
-// mismo look, que guarda apenas cambia — la acción independiente de
-// Custodio que pedías, sin abrir ningún modal aparte para un solo campo.
-function tarjetaBadgeEstado(a){
-  const i = infoEstado(a.estado);
-  const opciones = Object.entries(ESTADO_INFO).map(([v,info])=>
-    `<option value="${v}" ${a.estado===v?"selected":""}>${esc(info.label)}</option>`).join("");
-  return `<div class="detail-badge-card" style="border-left-color:${i.fg};background:linear-gradient(135deg, ${i.fg}17 0%, var(--surface-2) 75%);">
-    <span class="detail-badge" style="background:${i.fg}22;color:${i.fg};">Estado</span>
-    <select class="detail-badge-select" id="sel-estado-activo" style="color:${i.fg};">${opciones}</select>
-  </div>`;
-}
 function celdaTextoRecortado(valor, claseExtra){
   if(!valor) return '<span class="cell-muted">—</span>';
   const v = esc(valor);
@@ -1901,7 +1870,7 @@ function abrirDetalle(id){
             ${tarjetaBadge("Propiedad", `<span style="color:${(COLOR_PROPIEDAD[a.propiedad]||{fg:'#57697C'}).fg}">${esc(capitalizar(a.propiedad))}</span>`, (COLOR_PROPIEDAD[a.propiedad]||{fg:"#57697C"}).fg)}
             ${tarjetaBadge("Empresa", `<span style="color:${(COLOR_EMPRESA[a.empresa]||COLOR_EMPRESA.lukmar).fg}">${a.empresa==='eq'?'EQ Soluciones':'Lukmar'}</span>`, (COLOR_EMPRESA[a.empresa]||COLOR_EMPRESA.lukmar).fg)}
             ${tarjetaBadge("Tipo", esc(a.tipo)||'—', colorTipo(a.tipo))}
-            ${tarjetaBadgeEstado(a)}
+            ${tarjetaBadge("Estado", `<span style="color:${infoEstado(a.estado).fg}">${esc(infoEstado(a.estado).label)}</span>`, infoEstado(a.estado).fg)}
           </div>
         </div>
 
@@ -1936,10 +1905,7 @@ function abrirDetalle(id){
       </div>
       <div class="modal-footer">
         ${puede("editar_activo") ? `<button class="btn" id="btn-editar-activo">Editar datos base</button>` : ""}
-        ${puede("cambiar_custodio") ? (a.custodio
-          ? `<button class="btn btn-primary" id="btn-marcar-disponible">Marcar disponible</button>`
-          : `<button class="btn btn-primary" id="btn-asignar-custodio">Asignar custodio</button>`
-        ) : ""}
+        ${puede("cambiar_custodio") ? `<button class="btn btn-primary" id="btn-cambiar-custodio">Cambiar custodio</button>` : ""}
         ${a.custodio ? `<button class="btn ${estaEnPortapapeles(a.id)?'btn-primary':''}" id="btn-marcar-portapapeles">${estaEnPortapapeles(a.id)?'🔖 Marcado para acta':'🔖 Marcar para acta'}</button>` : ""}
         ${puede("dar_baja") ? `<button class="btn btn-danger" id="btn-dar-baja">Dar de baja</button>` : ""}
       </div>
@@ -1948,18 +1914,10 @@ function abrirDetalle(id){
     document.querySelectorAll("[data-abrir-carrusel]").forEach(img=>{
       img.addEventListener("click", ()=>abrirCarruselFotos(a.fotos.map(urlFoto), Number(img.dataset.abrirCarrusel), ()=>abrirDetalle(a.id)));
     });
-    const selEstado = document.getElementById("sel-estado-activo");
-    if(selEstado) selEstado.addEventListener("change", async ()=>{
-      const nuevo = selEstado.value;
-      try{ await cambiarEstado(a.id, nuevo); abrirDetalle(a.id); }
-      catch(err){ alert("No se pudo cambiar el estado: " + err.message); }
-    });
     const be = document.getElementById("btn-editar-activo");
     if(be) be.addEventListener("click", ()=>abrirFormActivo(a.id));
-    const bmd = document.getElementById("btn-marcar-disponible");
-    if(bmd) bmd.addEventListener("click", ()=>abrirMarcarDisponible(a.id));
-    const bac = document.getElementById("btn-asignar-custodio");
-    if(bac) bac.addEventListener("click", ()=>abrirAsignarCustodio(a.id));
+    const bc = document.getElementById("btn-cambiar-custodio");
+    if(bc) bc.addEventListener("click", ()=>abrirCambiarCustodio(a.id));
     const bm = document.getElementById("btn-marcar-portapapeles");
     if(bm) bm.addEventListener("click", ()=>{ toggleEnPortapapeles(a.id); actualizarTablaYResumen(); abrirDetalle(a.id); });
     const bb = document.getElementById("btn-dar-baja");
@@ -1999,7 +1957,7 @@ function tramoHtml(a, t, i){
     <div class="titem-row">
       <div>
         <div class="titem-name">${esc(t.nombre)} <span class="pill ${t.tipo_custodio==='mantenimiento'?'pill-mantenimiento':(t.tipo_custodio==='area'?'pill-area':'pill-persona')}" style="margin-left:6px;">${tipoLbl}</span></div>
-        <div class="titem-meta">${t.cargo?esc(t.cargo)+' · ':''}${fmtFecha(t.desde)} → ${t.hasta?fmtFecha(t.hasta):'presente'}${t.tipo_devolucion?' · '+labelTipoDevolucion(t.tipo_devolucion).split(' (')[0]:''}</div>
+        <div class="titem-meta">${t.cargo?esc(t.cargo)+' · ':''}${fmtFecha(t.desde)} → ${t.hasta?fmtFecha(t.hasta):'presente'}${t.tipo_entrega?' · Entrega: '+labelTipoEntrega(t.tipo_entrega).split(' (')[0]:''}${t.tipo_devolucion?' · Devolución: '+labelTipoDevolucion(t.tipo_devolucion).split(' (')[0]:''}</div>
       </div>
       <div class="titem-actions">
         ${puede("editar_historial") ? `<button class="btn btn-sm" data-editar-tramo="${i}">Editar</button>` : ""}
@@ -2114,13 +2072,11 @@ function abrirFormActivo(id){
               <div class="field"><label>Password</label><input type="text" id="fa-password" class="mono" value="${a&&a.celular?esc(a.celular.password):''}"></div>
             </div>
           </fieldset>
-          ${!esNuevo ? `
           <div class="section-title" style="margin-top:14px;">Fotos</div>
           <div class="fotos-grid" id="fotos-grid-form">${htmlGridFotos()}</div>
           <div class="field hint" style="margin-top:6px;">Los cambios de fotos (agregar, quitar) se guardan junto con el resto al presionar "${esNuevo?'Crear activo':'Guardar cambios'}" — no se aplican antes.</div>
-          ` : ""}
           <div class="field hint" style="margin-top:10px;">
-            ${esNuevo ? "El activo se crea sin custodio (disponible). Usa \"Cambiar custodio\" desde el detalle para asignarlo." : "Para cambiar el custodio, usa el botón \"Cambiar custodio\" del detalle — este formulario solo edita los datos base del equipo."}
+            ${esNuevo ? "Al guardar, se te va a pedir asignar el primer custodio — un activo nunca queda sin uno." : "Para cambiar el custodio, usa el botón \"Cambiar custodio\" del detalle — este formulario solo edita los datos base del equipo."}
           </div>
         </form>
       </div>
@@ -2130,7 +2086,7 @@ function abrirFormActivo(id){
     </div>`;
   abrirModal(html, ()=>{
     document.getElementById("form-activo").addEventListener("submit", e=>e.preventDefault());
-    if(!esNuevo) wireGridFotos();
+    wireGridFotos();
     document.getElementById("btn-guardar-activo").addEventListener("click", async ()=>{
       const campos = {
         tipo: document.getElementById("fa-tipo").value.trim(),
@@ -2170,7 +2126,11 @@ function abrirFormActivo(id){
         // de perder todo el trabajo ya hecho.
         for(const file of fotosNuevas) await subirFotoActivo(idActivo, file);
         for(const ruta of fotosABorrar) await borrarFotoActivo(idActivo, ruta);
-        cerrarModal(); renderMain(); abrirDetalle(idActivo);
+        cerrarModal(); renderMain();
+        // Un activo nuevo nace sin custodio en la base — nunca debe quedar
+        // así en la práctica, así que el siguiente paso obligatorio es
+        // asignarle uno, no ir directo al detalle.
+        if(esNuevo) abrirCambiarCustodio(idActivo); else abrirDetalle(idActivo);
       } catch(err){
         btn.disabled = false; btn.textContent = esNuevo?'Crear activo':'Guardar cambios';
         alert("No se pudo guardar: " + err.message);
@@ -2184,90 +2144,99 @@ function abrirFormActivo(id){
 // que marcar disponible (con observación obligatoria — cómo/por qué se
 // devolvió) y, en un paso separado, asignar el nuevo custodio. Reemplaza a
 // la vieja abrirCambioCustodio, que permitía saltarse el paso intermedio.
-function abrirMarcarDisponible(id){
+// Cambio de procedimiento: los equipos NUNCA quedan sin custodio — siempre
+// hay trazabilidad de quién es responsable (persona o área), esté en uso,
+// disponible o en mantenimiento. Por eso ya no hay dos pantallas separadas
+// ("marcar disponible" que dejaba custodio=null, y "asignar" que solo
+// corría desde ahí) — es un único flujo que siempre cierra el tramo
+// vigente (si existe) Y abre uno nuevo con custodio obligatorio, en la
+// misma acción. Estado ya no se infiere — se elige acá explícitamente.
+function abrirCambiarCustodio(id){
   const datos = cargarActivos();
   const a = buscarActivo(datos, id);
-  if(!a || !a.custodio) return;
+  if(!a) return;
+  const tieneVigente = a.custodio !== null;
   const html = `
     <div class="modal">
-      <div class="modal-header"><h3>Marcar disponible — ${fmtTag(a)}</h3><button class="modal-close">✕</button></div>
+      <div class="modal-header"><h3>Cambiar custodio — ${fmtTag(a)}</h3><button class="modal-close">✕</button></div>
       <div class="modal-body">
-        <div class="alert alert-info">Custodio actual: <strong>${esc(a.custodio.nombre)}</strong>. Al confirmar, este tramo se cierra hoy y el activo queda sin custodio.</div>
-        <div class="form-grid">
-          <div class="field"><label>Tipo de devolución</label>
-            <select id="md-tipodev">
-              <option value="">— Selecciona —</option>
-              ${TIPOS_DEVOLUCION.map(t=>`<option value="${t.v}">${t.label}</option>`).join("")}
-            </select>
+        <div class="alert alert-info">${tieneVigente
+          ? `Custodio actual: <strong>${esc(a.custodio.nombre)}</strong>. Al confirmar, este tramo se cierra hoy y se abre uno nuevo.`
+          : `Este activo todavía no tiene custodio — es obligatorio asignarle uno.`}</div>
+        ${tieneVigente ? `
+        <fieldset style="margin-bottom:14px;">
+          <legend>Cierre del tramo actual</legend>
+          <div class="form-grid">
+            <div class="field"><label>Tipo de devolución</label>
+              <select id="cc-tipodev">
+                <option value="">— Selecciona —</option>
+                ${TIPOS_DEVOLUCION.map(t=>`<option value="${t.v}">${t.label}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field span-2"><label>Observación de la devolución</label><textarea id="cc-observaciondev" placeholder="Ej: equipo devuelto con un rayón en la tapa, cargador incluido…"></textarea></div>
           </div>
-          <div class="field"><label>Fecha</label><input type="date" id="md-fecha" value="${hoyISO()}"></div>
-          <div class="field span-2"><label>Observación</label><textarea id="md-observacion" placeholder="Ej: equipo devuelto con un rayón en la tapa, cargador incluido…"></textarea></div>
-        </div>
-        <div class="field hint" style="margin-top:10px;">La observación es obligatoria. Se agrega a las observaciones que ya tenga este custodio (no las reemplaza), y queda visible en el historial de este activo aunque todavía no tenga un nuevo custodio.</div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-primary" id="btn-confirmar-disponible">Marcar disponible</button>
-      </div>
-    </div>`;
-  abrirModal(html, ()=>{
-    document.getElementById("btn-confirmar-disponible").addEventListener("click", async ()=>{
-      const tipoDev = document.getElementById("md-tipodev").value;
-      if(!tipoDev){ alert("Selecciona el tipo de devolución."); return; }
-      const observacion = document.getElementById("md-observacion").value.trim();
-      if(!observacion){ alert("La observación es obligatoria para marcar disponible."); return; }
-      const fecha = document.getElementById("md-fecha").value || hoyISO();
-      try{ await liberarCustodio(id, tipoDev, fecha, observacion); cerrarModal(); renderMain(); abrirDetalle(id); }
-      catch(err){ alert("No se pudo marcar disponible: " + err.message); }
-    });
-  });
-}
-function abrirAsignarCustodio(id){
-  const datos = cargarActivos();
-  const a = buscarActivo(datos, id);
-  if(!a || a.custodio) return;
-  const html = `
-    <div class="modal">
-      <div class="modal-header"><h3>Asignar custodio — ${fmtTag(a)}</h3><button class="modal-close">✕</button></div>
-      <div class="modal-body">
-        <div class="alert alert-info">Este activo está disponible (sin custodio actual).</div>
-        <div class="form-grid" style="margin-bottom:14px;">
-          <div class="field"><label>Fecha</label><input type="date" id="ac-fecha" value="${hoyISO()}"></div>
-          <div class="field span-2">
-            <label>Observación de esta entrega (opcional)</label>
-            <textarea id="ac-observacion" placeholder="Ej: se entrega con cargador original y funda…"></textarea>
+        </fieldset>` : ""}
+        <fieldset style="margin-bottom:14px;">
+          <legend>Nuevo tramo</legend>
+          <div class="form-grid">
+            <div class="field"><label>Fecha</label><input type="date" id="cc-fecha" value="${hoyISO()}"></div>
+            <div class="field"><label>Estado resultante</label>
+              <select id="cc-estado">
+                <option value="">— Selecciona —</option>
+                ${Object.entries(ESTADO_INFO).map(([v,info])=>`<option value="${v}">${esc(info.label)}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field"><label>Tipo de entrega</label>
+              <select id="cc-tipoentrega">
+                <option value="">— Selecciona —</option>
+                ${TIPOS_ENTREGA.map(t=>`<option value="${t.v}">${t.label}</option>`).join("")}
+              </select>
+            </div>
+            <div class="field span-2"><label>Observación de la entrega (opcional)</label><textarea id="cc-observacionentrega" placeholder="Ej: se entrega con cargador original y funda…"></textarea></div>
           </div>
-        </div>
+        </fieldset>
         <fieldset>
-          <legend>Nuevo custodio</legend>
+          <legend>Custodio</legend>
           <div class="form-grid">
             <div class="field"><label>Tipo</label>
-              <select id="ac-tipo">
+              <select id="cc-tipo">
                 <option value="persona">Persona</option>
                 <option value="area">Área / departamento</option>
               </select>
             </div>
-            <div class="field"><label>Nombre</label><input type="text" id="ac-nombre" placeholder="Nombre de la persona o del área"></div>
-            <div class="field span-2"><label>Cargo (opcional)</label><input type="text" id="ac-cargo"></div>
+            <div class="field"><label>Nombre</label><input type="text" id="cc-nombre" placeholder="Nombre de la persona o del área — ej. Bodega General si queda disponible"></div>
+            <div class="field span-2"><label>Cargo (opcional)</label><input type="text" id="cc-cargo"></div>
           </div>
         </fieldset>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-primary" id="btn-confirmar-asignar">Confirmar</button>
+        <button class="btn btn-primary" id="btn-confirmar-cambiar">Confirmar</button>
       </div>
     </div>`;
   abrirModal(html, ()=>{
-    document.getElementById("btn-confirmar-asignar").addEventListener("click", async ()=>{
-      const nombre = document.getElementById("ac-nombre").value.trim();
-      if(!nombre){ alert("Ingresa el nombre del nuevo custodio."); return; }
-      const fecha = document.getElementById("ac-fecha").value || hoyISO();
-      const observacion = document.getElementById("ac-observacion").value.trim();
+    document.getElementById("btn-confirmar-cambiar").addEventListener("click", async ()=>{
+      const nombre = document.getElementById("cc-nombre").value.trim();
+      if(!nombre){ alert("Ingresa el nombre del custodio — es obligatorio, el activo no puede quedar sin uno."); return; }
+      const nuevoEstado = document.getElementById("cc-estado").value;
+      if(!nuevoEstado){ alert("Selecciona el estado resultante."); return; }
+      const tipoEntrega = document.getElementById("cc-tipoentrega").value;
+      if(!tipoEntrega){ alert("Selecciona el tipo de entrega."); return; }
+      let tipoDev = null, observacionDev = "";
+      if(tieneVigente){
+        tipoDev = document.getElementById("cc-tipodev").value;
+        if(!tipoDev){ alert("Selecciona el tipo de devolución del tramo que se cierra."); return; }
+        observacionDev = document.getElementById("cc-observaciondev").value.trim();
+        if(!observacionDev){ alert("La observación de la devolución es obligatoria."); return; }
+      }
+      const fecha = document.getElementById("cc-fecha").value || hoyISO();
+      const observacionEntrega = document.getElementById("cc-observacionentrega").value.trim();
       try{
         await cambiarCustodio(id, {
-          tipo_custodio: document.getElementById("ac-tipo").value,
-          nombre, cargo: document.getElementById("ac-cargo").value.trim(),
-        }, null, fecha, observacion);
+          tipo_custodio: document.getElementById("cc-tipo").value,
+          nombre, cargo: document.getElementById("cc-cargo").value.trim(),
+        }, tipoDev, fecha, observacionDev, tipoEntrega, nuevoEstado);
         cerrarModal(); renderMain(); abrirDetalle(id);
-      } catch(err){ alert("No se pudo asignar el custodio: " + err.message); }
+      } catch(err){ alert("No se pudo cambiar el custodio: " + err.message); }
     });
   });
 }
@@ -2295,6 +2264,12 @@ function abrirEditarTramo(id, index){
           <div class="field"><label>Nombre</label><input type="text" id="et-nombre" value="${esc(t.nombre)}"></div>
           <div class="field"><label>Cargo</label><input type="text" id="et-cargo" value="${esc(t.cargo)}"></div>
           <div class="field"><label>Desde</label><input type="date" id="et-desde" value="${t.desde||''}"></div>
+          <div class="field"><label>Tipo de entrega</label>
+            <select id="et-tipoentrega">
+              <option value="">— Ninguno —</option>
+              ${TIPOS_ENTREGA.map(x=>`<option value="${x.v}" ${t.tipo_entrega===x.v?'selected':''}>${x.label}</option>`).join("")}
+            </select>
+          </div>
           <div class="field"><label>Hasta</label><input type="date" id="et-hasta" value="${t.hasta||''}" ${vigente?'disabled':''}></div>
           <div class="field"><label>Tipo de devolución</label>
             <select id="et-tipodev" ${vigente?'disabled':''}>
@@ -2318,6 +2293,7 @@ function abrirEditarTramo(id, index){
         nombre: document.getElementById("et-nombre").value.trim(),
         cargo: document.getElementById("et-cargo").value.trim(),
         desde: document.getElementById("et-desde").value,
+        tipo_entrega: document.getElementById("et-tipoentrega").value,
         hasta: vigente ? null : document.getElementById("et-hasta").value,
         tipo_devolucion: vigente ? null : document.getElementById("et-tipodev").value,
         observacion_entrega: document.getElementById("et-observacion-entrega").value.trim(),

@@ -246,7 +246,6 @@ th{
 .dropdown-item{display:block;width:100%;text-align:left;background:none;border:none;
   padding:8px 10px;font-size:13px;color:var(--ink);border-radius:5px;cursor:pointer;}
 .dropdown-item:hover{background:var(--surface-2);}
-.kpi-export-row{display:flex;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);flex-wrap:wrap;}
 .th-label{cursor:default;display:inline-flex;align-items:center;gap:5px;user-select:none;min-width:0;max-width:100%;}
 .th-label-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
 .th-label.th-sortable{cursor:pointer;}
@@ -352,8 +351,8 @@ tr.rowclick:hover{background:var(--accent-soft);cursor:pointer;}
 .modal-header h3{margin:0;font-size:16px;font-weight:600;color:#fff;}
 .modal-body{padding:18px 20px;max-height:70vh;overflow-y:auto;background:linear-gradient(180deg, #F5F9FC 0%, var(--surface) 90px);}
 .modal-footer{padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
-.modal-close{border:none;background:transparent;font-size:18px;color:rgba(255,255,255,0.85);padding:2px 6px;border-radius:4px;}
-.modal-close:hover{background:rgba(255,255,255,0.16);color:#fff;}
+.modal-header .modal-close{border:none;background:transparent;font-size:18px;color:rgba(255,255,255,0.85);padding:2px 6px;border-radius:4px;}
+.modal-header .modal-close:hover{background:rgba(255,255,255,0.16);color:#fff;}
 
 /* ---------- Forms ---------- */
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;}
