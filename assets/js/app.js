@@ -659,6 +659,113 @@ function cerrarModal(){
   document.removeEventListener("keydown", atraparTabModal);
 }
 
+/* ---------- Notificaciones (toasts con temporizador, reemplazan alert()) ---------- */
+// alert() nativo bloquea toda la página hasta que se cierra a mano — mal
+// para un simple "falta un campo" o un "se guardó bien". Estos toasts se
+// apilan en una esquina fija; cada uno trae su propio temporizador de
+// autocierre (visible como una barra que se va vaciando) que se pausa si
+// el mouse está encima, para no perder un mensaje a medio leer. Es un
+// sistema aparte del `.toast` de "guarda tu acceso" en renderLogin (clases
+// distintas a propósito, para no arriesgar esa lógica ya afinada); comparte
+// paleta y lenguaje visual, pero no markup. Igual que ese, vive fuera de
+// #app (agregado directo a document.body) para sobrevivir los re-render de
+// root.innerHTML.
+const DURACION_TOAST = { success:4000, info:5500, error:7000 };
+const ICONOS_TOAST = {
+  success: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.3 12.3l2.4 2.4 5-5.4"/></svg>`,
+  error: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.7"/><circle cx="12" cy="16.3" r="0.9" fill="currentColor" stroke="none"/></svg>`,
+  info: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.3"/><circle cx="12" cy="7.3" r="0.9" fill="currentColor" stroke="none"/></svg>`,
+};
+function contenedorToasts(){
+  let cont = document.getElementById("toast-stack");
+  if(!cont){
+    cont = document.createElement("div");
+    cont.id = "toast-stack";
+    cont.className = "toast-stack";
+    document.body.appendChild(cont);
+  }
+  return cont;
+}
+// tipo: "success" | "error" | cualquier otra cosa cae en "info".
+function mostrarToast(mensaje, tipo){
+  tipo = (tipo==="success" || tipo==="error") ? tipo : "info";
+  const duracion = DURACION_TOAST[tipo];
+  const cont = contenedorToasts();
+  const el = document.createElement("div");
+  el.className = `toast-notif toast-notif-${tipo}`;
+  el.setAttribute("role", tipo==="error" ? "alert" : "status");
+  el.innerHTML = `
+    <span class="toast-notif-icon">${ICONOS_TOAST[tipo]}</span>
+    <span class="toast-notif-msg">${esc(mensaje)}</span>
+    <button type="button" class="toast-notif-close" aria-label="Cerrar">✕</button>
+    <span class="toast-notif-bar" style="animation-duration:${duracion}ms"></span>`;
+  cont.appendChild(el);
+  let cerrado = false;
+  const cerrar = ()=>{
+    if(cerrado) return;
+    cerrado = true;
+    el.classList.add("toast-notif-out");
+    setTimeout(()=>el.remove(), 300);
+  };
+  let restante = duracion, inicio = Date.now();
+  let temporizador = setTimeout(cerrar, restante);
+  const barra = el.querySelector(".toast-notif-bar");
+  el.addEventListener("mouseenter", ()=>{
+    clearTimeout(temporizador);
+    restante -= (Date.now() - inicio);
+    barra.style.animationPlayState = "paused";
+  });
+  el.addEventListener("mouseleave", ()=>{
+    inicio = Date.now();
+    temporizador = setTimeout(cerrar, Math.max(300, restante));
+    barra.style.animationPlayState = "running";
+  });
+  el.querySelector(".toast-notif-close").addEventListener("click", cerrar);
+}
+
+// Reemplaza confirm() nativo: bloquea igual que alert() y no se puede
+// estilizar, con el agravante de que aquí sí hace falta una decisión sí/no
+// antes de seguir — por eso esto es un modal, no un toast. Devuelve una
+// Promise<boolean>: true si se confirmó, false si se canceló por cualquier
+// camino (✕, "Cancelar", clic en el fondo, Esc). Reutiliza modalVolver —el
+// mismo enganche que ya usa el carrusel de fotos para correr lógica propia
+// al cerrarse, sin importar cuál de esos caminos se usó— así que quien
+// llama no tiene que distinguir el cierre por botón del cierre por fuera.
+function confirmarAccion(mensaje, textoConfirmar){
+  return new Promise((resolve)=>{
+    let resuelto = false;
+    const resolverUnaVez = (valor)=>{
+      if(resuelto) return;
+      resuelto = true;
+      resolve(valor);
+    };
+    const html = `<div class="modal">
+      <div class="modal-header"><h3>Confirmar</h3><button class="modal-close">✕</button></div>
+      <div class="modal-body"><div class="alert alert-error">${esc(mensaje)}</div></div>
+      <div class="modal-footer">
+        <button class="btn modal-close">Cancelar</button>
+        <button class="btn btn-danger" id="btn-confirmar-si">${esc(textoConfirmar || "Confirmar")}</button>
+      </div>
+    </div>`;
+    abrirModal(html, ()=>{
+      document.getElementById("btn-confirmar-si").addEventListener("click", ()=>{
+        resolverUnaVez(true);
+        cerrarModal();
+      });
+    });
+    // Asignado DESPUÉS de abrirModal, como pide su propio contrato (que
+    // acaba de resetear modalVolver a null). Cubre ✕/backdrop/Esc, que
+    // llaman a cerrarModal() directo sin pasar por el botón de arriba.
+    modalVolver = ()=>{
+      resolverUnaVez(false);
+      const host = document.getElementById("modal-host");
+      if(host) host.innerHTML = "";
+      document.removeEventListener("keydown", escCierraModal);
+      document.removeEventListener("keydown", atraparTabModal);
+    };
+  });
+}
+
 /* ---------- Carrusel de fotos (modal grande, con flechas/contador/teclado) ---------- */
 // `fotos` ya son URLs resueltas (urlFoto ya aplicado por quien llama).
 // `alCerrar` es a dónde "volver" al cerrar este modal (típicamente
@@ -1147,8 +1254,8 @@ function abrirModalKpiColumna(campo){
   abrirModal(html, ()=>{
     const seccion = [{ nombre, filas, totalConteo }];
     document.getElementById("kpi-export-wa").addEventListener("click", async ()=>{
-      try{ await copiarAlPortapapelesTexto(resumenATextoWhatsApp(seccion)); alert("Copiado — pégalo directo en WhatsApp."); }
-      catch(err){ alert("No se pudo copiar: " + err.message); }
+      try{ await copiarAlPortapapelesTexto(resumenATextoWhatsApp(seccion)); mostrarToast("Copiado — pégalo directo en WhatsApp.", "success"); }
+      catch(err){ mostrarToast("No se pudo copiar: " + err.message, "error"); }
     });
     document.getElementById("kpi-export-csv").addEventListener("click", ()=>{
       descargarArchivoTexto(`resumen_${campo}.csv`, resumenACSV(seccion), "text/csv");
@@ -1212,7 +1319,7 @@ function renderVistaActivos(main){
   if(btnNuevo) btnNuevo.addEventListener("click", ()=>abrirFormActivo(null));
   document.getElementById("btn-exportar").addEventListener("click", async ()=>{
     try{ await exportarActivosExcel(); }
-    catch(err){ alert("No se pudo generar el Excel: " + err.message); }
+    catch(err){ mostrarToast("No se pudo generar el Excel: " + err.message, "error"); }
   });
   document.getElementById("btn-limpiar-filtros").addEventListener("click", ()=>{
     state.filtros = estadoInicialFiltros();
@@ -1229,8 +1336,8 @@ function renderVistaActivos(main){
       const secciones = CAMPOS_RESUMEN_GLOBAL.map(calcularResumenColumna);
       const formato = b.dataset.formatoGlobal;
       if(formato==="wa"){
-        try{ await copiarAlPortapapelesTexto(resumenATextoWhatsApp(secciones)); alert("Copiado — pégalo directo en WhatsApp."); }
-        catch(err){ alert("No se pudo copiar: " + err.message); }
+        try{ await copiarAlPortapapelesTexto(resumenATextoWhatsApp(secciones)); mostrarToast("Copiado — pégalo directo en WhatsApp.", "success"); }
+        catch(err){ mostrarToast("No se pudo copiar: " + err.message, "error"); }
       } else if(formato==="csv"){
         descargarArchivoTexto("resumenes_activos.csv", resumenACSV(secciones), "text/csv");
       } else if(formato==="html"){
@@ -1506,7 +1613,7 @@ function etiquetaCustodioTipo(tipo){
 async function exportarActivosExcel(){
   const datos = cargarActivos();
   const lista = listaOrdenadaFiltrada(datos);
-  if(lista.length===0){ alert("No hay activos que coincidan con los filtros actuales."); return; }
+  if(lista.length===0){ mostrarToast("No hay activos que coincidan con los filtros actuales.", "error"); return; }
 
   const resp = await fetch("assets/plantillas/ActivosTecnologicos.xlsx");
   if(!resp.ok) throw new Error("No se pudo cargar la plantilla (assets/plantillas/ActivosTecnologicos.xlsx).");
@@ -1887,9 +1994,11 @@ function abrirDetalle(id){
     });
     document.querySelectorAll("[data-borrar-tramo]").forEach(b=>{
       b.addEventListener("click", async ()=>{
-        if(!confirm("¿Borrar este registro del historial? Esta acción no se puede deshacer.")) return;
-        try{ await eliminarTramoHistorial(Number(b.dataset.borrarTramo)); cerrarModal(); abrirDetalle(a.id); }
-        catch(err){ alert("No se pudo borrar: " + err.message); }
+        const confirmado = await confirmarAccion("¿Borrar este registro del historial? Esta acción no se puede deshacer.", "Borrar");
+        if(!confirmado){ abrirDetalle(a.id); return; }
+        try{ await eliminarTramoHistorial(Number(b.dataset.borrarTramo)); }
+        catch(err){ mostrarToast("No se pudo borrar: " + err.message, "error"); }
+        abrirDetalle(a.id);
       });
     });
   });
@@ -2093,7 +2202,7 @@ function abrirFormActivo(id){
         if(esNuevo) abrirCambiarCustodio(idActivo); else abrirDetalle(idActivo);
       } catch(err){
         btn.disabled = false; btn.textContent = esNuevo?'Crear activo':'Guardar cambios';
-        alert("No se pudo guardar: " + err.message);
+        mostrarToast("No se pudo guardar: " + err.message, "error");
       }
     });
   });
@@ -2176,17 +2285,17 @@ function abrirCambiarCustodio(id){
   abrirModal(html, ()=>{
     document.getElementById("btn-confirmar-cambiar").addEventListener("click", async ()=>{
       const nombre = document.getElementById("cc-nombre").value.trim();
-      if(!nombre){ alert("Ingresa el nombre del custodio — es obligatorio, el activo no puede quedar sin uno."); return; }
+      if(!nombre){ mostrarToast("Ingresa el nombre del custodio — es obligatorio, el activo no puede quedar sin uno.", "error"); return; }
       const nuevoEstado = document.getElementById("cc-estado").value;
-      if(!nuevoEstado){ alert("Selecciona el estado resultante."); return; }
+      if(!nuevoEstado){ mostrarToast("Selecciona el estado resultante.", "error"); return; }
       const tipoEntrega = document.getElementById("cc-tipoentrega").value;
-      if(!tipoEntrega){ alert("Selecciona el tipo de entrega."); return; }
+      if(!tipoEntrega){ mostrarToast("Selecciona el tipo de entrega.", "error"); return; }
       let tipoDev = null, observacionDev = "";
       if(tieneVigente){
         tipoDev = document.getElementById("cc-tipodev").value;
-        if(!tipoDev){ alert("Selecciona el tipo de devolución del tramo que se cierra."); return; }
+        if(!tipoDev){ mostrarToast("Selecciona el tipo de devolución del tramo que se cierra.", "error"); return; }
         observacionDev = document.getElementById("cc-observaciondev").value.trim();
-        if(!observacionDev){ alert("La observación de la devolución es obligatoria."); return; }
+        if(!observacionDev){ mostrarToast("La observación de la devolución es obligatoria.", "error"); return; }
       }
       const fecha = document.getElementById("cc-fecha").value || hoyISO();
       const observacionEntrega = document.getElementById("cc-observacionentrega").value.trim();
@@ -2196,7 +2305,7 @@ function abrirCambiarCustodio(id){
           nombre, cargo: document.getElementById("cc-cargo").value.trim(),
         }, tipoDev, fecha, observacionDev, tipoEntrega, nuevoEstado, observacionEntrega);
         cerrarModal(); renderMain(); abrirDetalle(id);
-      } catch(err){ alert("No se pudo cambiar el custodio: " + err.message); }
+      } catch(err){ mostrarToast("No se pudo cambiar el custodio: " + err.message, "error"); }
     });
   });
 }
@@ -2289,21 +2398,20 @@ function descripcionItemActa(a){
   if(a.serie) partes.push(`Número de serie: ${a.serie}`);
   return partes.join(" — ") || fmtTag(a);
 }
-// Un acta documenta la entrega de UN tramo puntual del historial (el
-// vigente, o el inmediatamente anterior si así se eligió en el panel de
-// portapapeles — ver tramoSeleccionadoActa). Ese mismo traspaso queda
-// anotado en dos lugares distintos del historial: la observación de
-// entrega del tramo que empieza, y la observación de devolución del
-// tramo que se cierra justo antes (historial_custodia[idx+1]). Antes solo
-// se exportaba la segunda — la nota propia de la entrega se perdía por
-// completo. Ahora se concatenan ambas, cada una con su etiqueta, cuando
-// existen.
+// Un acta documenta UN tramo puntual del historial (el vigente, o el
+// inmediatamente anterior si así se eligió — ver tramoSeleccionadoActa).
+// Las dos observaciones mostradas son las del PROPIO tramo elegido: cómo
+// ese custodio recibió el activo (observacion_entrega) y, si ya lo
+// devolvió — o sea si el tramo está cerrado —, cómo lo devolvió
+// (observacion_devolucion). Si el tramo elegido es el vigente, nunca va a
+// haber observación de devolución todavía: eso es correcto, no un dato
+// faltante, y no debe rellenarse con la devolución de ningún otro tramo.
 function observacionesActaItem(a, idx){
   const tramo = a.historial_custodia[idx];
-  const previo = a.historial_custodia[idx+1] || null;
+  if(!tramo) return "";
   const partes = [];
-  if(tramo && tramo.observacion_entrega) partes.push(`Entrega: ${tramo.observacion_entrega}`);
-  if(previo && previo.observacion_devolucion) partes.push(`Devolución: ${previo.observacion_devolucion}`);
+  if(tramo.observacion_entrega) partes.push(`Entrega: ${tramo.observacion_entrega}`);
+  if(tramo.observacion_devolucion) partes.push(`Devolución: ${tramo.observacion_devolucion}`);
   return partes.join(" | ");
 }
 /* ---------- Portapapeles de activos (para actas de entrega unificadas) ---------- */
@@ -2344,9 +2452,9 @@ function toggleEnPortapapeles(id){
   if(ids.includes(id)){
     ids = ids.filter(x=>x!==id);
   } else {
-    if(!a.custodio){ alert("Solo se pueden marcar activos con custodio vigente."); return; }
+    if(!a.custodio){ mostrarToast("Solo se pueden marcar activos con custodio vigente.", "error"); return; }
     if(ids.length >= MAX_PORTAPAPELES){
-      alert(`Ya tienes ${MAX_PORTAPAPELES} activos marcados — es el máximo por acta. Genera esta acta o quita alguno antes de agregar otro.`);
+      mostrarToast(`Ya tienes ${MAX_PORTAPAPELES} activos marcados — es el máximo por acta. Genera esta acta o quita alguno antes de agregar otro.`, "error");
       return;
     }
     ids.push(id);
@@ -2444,7 +2552,7 @@ function abrirPanelPortapapeles(){
         vaciarPortapapeles();
         renderMain();
         cerrarModal();
-      } catch(err){ alert("No se pudo generar el acta: " + err.message); }
+      } catch(err){ mostrarToast("No se pudo generar el acta: " + err.message, "error"); }
       finally{ bg.disabled = false; bg.textContent = txt; }
     });
   });
@@ -2631,12 +2739,12 @@ function renderConfigPermisos(content){
       nueva[cb.dataset.rol][cb.dataset.accion] = cb.checked;
     });
     await guardarPermisos(nueva);
-    alert("Matriz de permisos guardada.");
+    mostrarToast("Matriz de permisos guardada.", "success");
   });
   document.getElementById("btn-agregar-rol").addEventListener("click", async ()=>{
     const nombre = document.getElementById("nuevo-rol").value.trim().toLowerCase();
     if(!nombre){ return; }
-    if(nombre===ROL_ADMIN || matriz[nombre]){ alert("Ese nombre de rol ya existe."); return; }
+    if(nombre===ROL_ADMIN || matriz[nombre]){ mostrarToast("Ese nombre de rol ya existe.", "error"); return; }
     matriz[nombre] = {}; ACCIONES.forEach(a=>matriz[nombre][a.id]=false);
     await guardarPermisos(matriz);
     renderVistaConfig(document.getElementById("main"));
@@ -2686,7 +2794,7 @@ function renderConfigUsuarios(content){
   content.querySelectorAll("[data-cambiar-rol]").forEach(sel=>{
     sel.addEventListener("change", async ()=>{
       const { error } = await sb.from("perfiles").update({ rol: sel.value }).eq("id", sel.dataset.cambiarRol);
-      if(error){ alert("No se pudo cambiar el rol: " + error.message); return; }
+      if(error){ mostrarToast("No se pudo cambiar el rol: " + error.message, "error"); return; }
       await refrescarDatos();
       renderVistaConfig(document.getElementById("main"));
     });
@@ -2695,11 +2803,11 @@ function renderConfigUsuarios(content){
     const email = document.getElementById("nu-email").value.trim();
     const nombre_completo = document.getElementById("nu-nombre").value.trim();
     const rol = document.getElementById("nu-rol").value;
-    if(!email || !nombre_completo){ alert("Completa correo y nombre."); return; }
+    if(!email || !nombre_completo){ mostrarToast("Completa correo y nombre.", "error"); return; }
     const { data: uid, error: e1 } = await sb.rpc("buscar_uid_por_email", { p_email: email });
-    if(e1 || !uid){ alert("No se encontró ninguna cuenta con ese correo. Crea la cuenta primero en el panel de Supabase (Authentication → Add user)."); return; }
+    if(e1 || !uid){ mostrarToast("No se encontró ninguna cuenta con ese correo. Crea la cuenta primero en el panel de Supabase (Authentication → Add user).", "error"); return; }
     const { error: e2 } = await sb.from("perfiles").insert({ id: uid, rol, nombre_completo });
-    if(e2){ alert("No se pudo vincular: " + e2.message); return; }
+    if(e2){ mostrarToast("No se pudo vincular: " + e2.message, "error"); return; }
     await refrescarDatos();
     renderVistaConfig(document.getElementById("main"));
   });
