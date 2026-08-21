@@ -79,7 +79,7 @@ async function refrescarDatos(){
       ram_gb: a.ram_gb, disco_gb: a.disco_gb, procesador: a.procesador,
       proveedor: a.proveedor, fecha_adquisicion: a.fecha_adquisicion,
       color: a.color, longitud_m: a.longitud_m,
-      empresa: a.empresa, valor_compra: a.valor_compra, vida_util_anios: a.vida_util_anios,
+      valor_compra: a.valor_compra, vida_util_anios: a.vida_util_anios,
       estado: a.estado,
       fotos: a.fotos || [],
       celular: (a.celular_gmail || a.celular_password) ? { gmail: a.celular_gmail, password: a.celular_password } : null,
@@ -139,7 +139,7 @@ const state = {
   vista: "activos",   // activos | bajas | auditoria | config
   configSubtab: "permisos",
   // null en tipo/propiedad/custodioClase = "sin filtrar" (equivale a todas las opciones marcadas).
-  filtros: { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, empresa:null, estado:null, colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"", colSerie:"", colSo:"", colProveedor:"", colFechaDesde:"", colFechaHasta:"", colModelo:"", colNombre:"" },
+  filtros: { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, estado:null, colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"", colSerie:"", colSo:"", colProveedor:"", colFechaDesde:"", colFechaHasta:"", colModelo:"", colNombre:"" },
   orden: { campo:"id", dir:"asc" },
   columnasVisibles: new Set(["tag","tipo","marca","estado","custodio","propiedad","acciones"]), // debe coincidir con COLUMNAS_VISIBLES_DEFAULT más abajo
   modal: null,         // función que renderiza el modal actual, o null
@@ -185,15 +185,22 @@ function puede(accion){
 /* ============================================================
    5. HELPERS DE DOMINIO
    ============================================================ */
-// Antes devolvía "ACT-XXX" para todos. Ahora el prefijo depende de la
-// empresa dueña del activo (Lukmar vs. EQ Soluciones) — el id de fondo en
-// Supabase sigue siendo puramente numérico y no cambia, esto es solo la
-// etiqueta visual. Acepta el objeto activo completo (no solo el id) para
-// poder leer `.empresa`; si llega un id suelto por error, no rompe —
-// simplemente no puede mostrar el prefijo correcto y usa LKM por defecto.
+// Antes devolvía "ACT-XXX" para todos. Ahora el prefijo depende de qué
+// empresa aparece en `propiedad` — Lukmar vs. EQ Soluciones — el id de
+// fondo en Supabase sigue siendo puramente numérico y no cambia, esto es
+// solo la etiqueta visual. Acepta el objeto activo completo (no solo el
+// id) para poder leer `.propiedad`; si llega un id suelto por error, no
+// rompe — usa LKM por defecto.
+// Nota: hasta antes de este cambio existía una columna `empresa` aparte
+// (Lukmar/EQ Soluciones) independiente de `propiedad` (Propio/Rentado/
+// Externo) — se fusionaron porque, en la práctica, el 100% de los
+// activos "Rentado"/"Externo" existentes ya estaban registrados bajo
+// Lukmar de todas formas. Un activo Rentado o Externo (no Lukmar/EQ) cae
+// en LKM por defecto — si alguna vez EQ Soluciones necesita registrar
+// uno de esos, esta regla habría que revisarla.
 function fmtTag(a){
   if(a===null || typeof a!=="object") a = {id:a};
-  const prefijo = a.empresa==="eq" ? "EQS" : "LKM";
+  const prefijo = a.propiedad==="eq" ? "EQS" : "LKM";
   return prefijo + "-" + String(a.id).padStart(3,"0");
 }
 // Depreciación en línea recta, valor residual $0 (igual al ejemplo típico
@@ -283,7 +290,6 @@ async function crearActivo(campos){
     fecha_adquisicion: campos.fecha_adquisicion || null,
     color: campos.color || null,
     longitud_m: campos.longitud_m ? Number(campos.longitud_m) : null,
-    empresa: campos.empresa || "lukmar",
     valor_compra: campos.valor_compra ? Number(campos.valor_compra) : null,
     vida_util_anios: campos.vida_util_anios ? Number(campos.vida_util_anios) : null,
     estado: "disponible",
@@ -299,7 +305,7 @@ async function crearActivo(campos){
 async function editarActivoBase(id, campos){
   const patch = {};
   const editables = ["propiedad","tipo","marca","modelo","serie","nombre_dispositivo",
-    "mac_wifi","mac_ethernet","sistema_operativo","procesador","proveedor","fecha_adquisicion","color","empresa"];
+    "mac_wifi","mac_ethernet","sistema_operativo","procesador","proveedor","fecha_adquisicion","color"];
   editables.forEach(k=>{ if(k in campos) patch[k] = campos[k] || null; });
   if("ram_gb" in campos) patch.ram_gb = campos.ram_gb ? Number(campos.ram_gb) : null;
   if("disco_gb" in campos) patch.disco_gb = campos.disco_gb ? Number(campos.disco_gb) : null;
@@ -819,7 +825,6 @@ function navegarCarruselTeclado(e){
 // (así la tabla se reparte bien sin importar cuántas columnas elijas).
 const DEFINICION_COLUMNAS = [
   { key:"tag",        label:"Tag",             core:true,  weight:1.0, sortCampo:"id",       filterCampo:null,           campoTexto:"colTag",       placeholder:"Ej: 012" },
-  { key:"empresa",    label:"Empresa",         core:false, weight:1.3, sortCampo:"empresa",  filterCampo:"empresa",      campoTexto:null,           placeholder:null },
   { key:"tipo",       label:"Tipo",            core:false, weight:1.9, sortCampo:"tipo",     filterCampo:"tipo",         campoTexto:"colTipo",      placeholder:"Buscar tipo…" },
   { key:"marca",      label:"Marca",           core:false, weight:1.5, sortCampo:"marca",    filterCampo:"marca",        campoTexto:"colMarca",     placeholder:"Buscar marca…" },
   { key:"modelo",     label:"Modelo",          core:false, weight:1.6, sortCampo:"modelo",   filterCampo:null,           campoTexto:"colModelo",    placeholder:"Buscar modelo…" },
@@ -855,13 +860,12 @@ const LIMITE_COLUMNAS_RECOMENDADO = 7;
 // caché de módulo para que los manejadores de eventos (delegados a nivel de
 // documento) sepan qué significa "seleccionar todo" para cada columna sin
 // tener que releer el DOM.
-let opcionesFiltroCache = { tipo:[], propiedad:[], custodioClase:[], marca:[], empresa:[], estado:[] };
+let opcionesFiltroCache = { tipo:[], propiedad:[], custodioClase:[], marca:[], estado:[] };
 function recalcularOpcionesFiltro(datos){
   opcionesFiltroCache.tipo = [...new Set(datos.activos.map(a=>a.tipo).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
   opcionesFiltroCache.propiedad = [...new Set(datos.activos.map(a=>a.propiedad).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
   opcionesFiltroCache.custodioClase = [...new Set(datos.activos.map(a=>claseCustodio(a)))].sort((a,b)=>a.localeCompare(b,'es'));
   opcionesFiltroCache.marca = [...new Set(datos.activos.map(a=>a.marca).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
-  opcionesFiltroCache.empresa = [...new Set(datos.activos.map(a=>a.empresa).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
   opcionesFiltroCache.estado = [...new Set(datos.activos.map(a=>a.estado).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
 }
 // Cuántos activos (del total, sin aplicar otros filtros) tienen ese valor en
@@ -903,8 +907,8 @@ function labelOpcionFiltro(campo, valor){
   if(campo==="custodioClase"){
     return { disponible:"Disponible", persona:"Persona", area:"Área / depto." }[valor] || valor;
   }
-  if(campo==="empresa"){
-    return { lukmar:"Lukmar", eq:"EQ Soluciones" }[valor] || valor;
+  if(campo==="propiedad"){
+    return LABEL_PROPIEDAD[valor] || valor;
   }
   if(campo==="estado"){
     return infoEstado(valor).label;
@@ -912,24 +916,23 @@ function labelOpcionFiltro(campo, valor){
   return valor.charAt(0).toUpperCase() + valor.slice(1);
 }
 function capitalizar(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
-// Un color propio por tipo de propiedad, igual que ya existe para tipo de activo.
+// Un color propio por tipo de propiedad, igual que ya existe para tipo de
+// activo. "lukmar"/"eq" son las dos empresas propias (antes vivían en una
+// columna `empresa` aparte, fusionada acá); "eq" usa el "Marino" real de
+// la paleta de marca EQ Soluciones (Logos_EQ_LUKMAR_v1.zip/LEEME.txt).
+// "rentado"/"externo" son activos que no son propios de ninguna de las dos.
 const COLOR_PROPIEDAD = {
-  propio:  { fg:"#2E6B3D", bg:"#DCEFE0" },
+  lukmar:  { fg:"#3A5068", bg:"#E7ECF1" },
+  eq:      { fg:"#1A3756", bg:"#DCE6EC" },
   rentado: { fg:"#B35A17", bg:"#FCE3D0" },
   externo: { fg:"#4A3F73", bg:"#E9E4F3" },
 };
-// eq usa el "Marino" real de la paleta de marca EQ Soluciones (Logos_EQ_LUKMAR_v1.zip/LEEME.txt).
-const COLOR_EMPRESA = {
-  lukmar: { fg:"#3A5068", bg:"#E7ECF1" },
-  eq:     { fg:"#1A3756", bg:"#DCE6EC" },
-};
+// "lukmar"/"eq" no se pueden capitalizar a secas ("Eq" se ve mal) — de ahí
+// este mapa explícito en vez de solo capitalizar(valor).
+const LABEL_PROPIEDAD = { lukmar:"Lukmar", eq:"EQ Soluciones", rentado:"Rentado", externo:"Externo" };
 function pillPropiedad(valor){
   const c = COLOR_PROPIEDAD[valor] || { fg:"#57697C", bg:"#EEF1F4" };
-  return `<span class="pill" style="background:${c.bg};color:${c.fg};"><span class="pill-dot"></span>${esc(capitalizar(valor))}</span>`;
-}
-function pillEmpresa(valor){
-  const c = COLOR_EMPRESA[valor] || COLOR_EMPRESA.lukmar;
-  return `<span class="pill" style="background:${c.bg};color:${c.fg};"><span class="pill-dot"></span>${valor==='eq'?'EQ Soluciones':'Lukmar'}</span>`;
+  return `<span class="pill" style="background:${c.bg};color:${c.fg};"><span class="pill-dot"></span>${esc(LABEL_PROPIEDAD[valor] || capitalizar(valor))}</span>`;
 }
 // Estado del activo: disponible / en mantenimiento / en uso — INDEPENDIENTE
 // de custodio. Un activo puede estar disponible y aun así tener custodio
@@ -976,7 +979,6 @@ function filtrarActivos(datos){
     if(f.propiedad !== null && !f.propiedad.has(a.propiedad)) return false;
     if(f.custodioClase !== null && !f.custodioClase.has(claseCustodio(a))) return false;
     if(f.marca !== null && a.marca && !f.marca.has(a.marca)) return false;
-    if(f.empresa !== null && !f.empresa.has(a.empresa)) return false;
     if(f.estado !== null && !f.estado.has(a.estado)) return false;
     if(f.colTag && !fmtTag(a).toLowerCase().includes(f.colTag.toLowerCase())) return false;
     if(f.colTipo && !(a.tipo||"").toLowerCase().includes(f.colTipo.toLowerCase())) return false;
@@ -1015,7 +1017,6 @@ function compararActivos(a,b,campo,dir){
   let va, vb;
   switch(campo){
     case "id": va=a.id; vb=b.id; break;
-    case "empresa": va=a.empresa||""; vb=b.empresa||""; break;
     case "tipo": va=a.tipo||""; vb=b.tipo||""; break;
     case "marca": va=((a.marca||"")+" "+(a.modelo||"")).trim(); vb=((b.marca||"")+" "+(b.modelo||"")).trim(); break;
     case "custodio": va=(a.custodio?a.custodio.nombre:"") ; vb=(b.custodio?b.custodio.nombre:""); break;
@@ -1051,16 +1052,16 @@ function listaOrdenadaFiltrada(datos){
 
 /* ---------- Estado de filtros ---------- */
 function estadoInicialFiltros(){
-  return { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, empresa:null, estado:null,
+  return { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, estado:null,
     colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"",
     colSerie:"", colSo:"", colProveedor:"", colFechaDesde:"", colFechaHasta:"", colModelo:"", colNombre:"" };
 }
-// Checklist (tipo/propiedad/custodioClase/marca/empresa/estado): null = sin
+// Checklist (tipo/propiedad/custodioClase/marca/estado): null = sin
 // filtrar. Texto (todo lo demás, incluida la búsqueda general): "" = sin
 // filtrar. Cualquier otra cosa cuenta como "hay un filtro puesto".
 function hayFiltrosActivos(){
   const f = state.filtros;
-  if(["tipo","propiedad","custodioClase","marca","empresa","estado"].some(k=>f[k]!==null)) return true;
+  if(["tipo","propiedad","custodioClase","marca","estado"].some(k=>f[k]!==null)) return true;
   return ["texto","colTag","colTipo","colMarca","colCustodio","colCargo","colPropiedad",
     "colSerie","colSo","colProveedor","colFechaDesde","colFechaHasta","colModelo","colNombre"].some(k=>f[k]);
 }
@@ -1130,7 +1131,7 @@ function actualizarAvisoColumnas(){
 }
 
 /* ---------- Modal "Visualizar KPIs": el mismo desglose del filtro, con barras ---------- */
-const NOMBRE_COLUMNA_KPI = { tipo:"Tipo", marca:"Marca", custodioClase:"Custodio", propiedad:"Propiedad", empresa:"Empresa", estado:"Estado" };
+const NOMBRE_COLUMNA_KPI = { tipo:"Tipo", marca:"Marca", custodioClase:"Custodio", propiedad:"Propiedad", estado:"Estado" };
 // Columnas que entran en el resumen GLOBAL (todas las categóricas menos
 // Custodio, que queda fuera a propósito por decisión explícita).
 const CAMPOS_RESUMEN_GLOBAL = ["tipo","marca","propiedad"];
@@ -1627,8 +1628,8 @@ async function exportarActivosExcel(){
   xml1 = xml1.replace(/<row r="8"[^>]*>.*?<\/row>/s, "");
   const filas1 = lista.map((a,i)=>{
     const valores = [
-      fmtTag(a), a.empresa==="eq"?"EQ Soluciones":"Lukmar", a.tipo||"", a.marca||"", a.modelo||"",
-      a.serie||"", a.nombre_dispositivo||"", capitalizar(a.propiedad)||"",
+      fmtTag(a), a.propiedad==="eq"?"EQ Soluciones":"Lukmar", a.tipo||"", a.marca||"", a.modelo||"",
+      a.serie||"", a.nombre_dispositivo||"", (LABEL_PROPIEDAD[a.propiedad] || capitalizar(a.propiedad))||"",
       a.custodio?a.custodio.nombre:"Disponible", a.custodio?etiquetaCustodioTipo(a.custodio.tipo_custodio):"",
       a.custodio?(a.custodio.cargo||""):"", a.sistema_operativo||"", a.ram_gb??"", a.disco_gb??"",
       a.procesador||"", a.mac_wifi||"", a.mac_ethernet||"", a.proveedor||"", a.fecha_adquisicion||"",
@@ -1871,7 +1872,6 @@ function celdaActivo(col, a){
   if(!columnaAplicaATipo(col.key, a.tipo)) return '<span class="cell-na" title="No aplica para este tipo de activo">n/a</span>';
   switch(col.key){
     case "tag": return `<span class="tag">${fmtTag(a)}</span>`;
-    case "empresa": return pillEmpresa(a.empresa);
     case "tipo": return `<span class="tipo-cell"><span class="tipo-icon" style="color:${colorTipo(a.tipo)}">${iconoTipo(a.tipo)}</span><span class="cell-clip">${esc(a.tipo)||'<span class="cell-muted">—</span>'}</span></span>`;
     case "marca": return celdaTextoRecortado(a.marca);
     case "modelo": return celdaTextoRecortado(a.modelo);
@@ -1937,8 +1937,7 @@ function abrirDetalle(id){
           <div class="detail-badges-grid">
             ${tarjetaBadge("Modelo", esc(a.modelo)||'—', "#004DAB")}
             ${tarjetaBadge("Nombre", esc(a.nombre_dispositivo)||'—', "#007EB2")}
-            ${tarjetaBadge("Propiedad", `<span style="color:${(COLOR_PROPIEDAD[a.propiedad]||{fg:'#57697C'}).fg}">${esc(capitalizar(a.propiedad))}</span>`, (COLOR_PROPIEDAD[a.propiedad]||{fg:"#57697C"}).fg)}
-            ${tarjetaBadge("Empresa", `<span style="color:${(COLOR_EMPRESA[a.empresa]||COLOR_EMPRESA.lukmar).fg}">${a.empresa==='eq'?'EQ Soluciones':'Lukmar'}</span>`, (COLOR_EMPRESA[a.empresa]||COLOR_EMPRESA.lukmar).fg)}
+            ${tarjetaBadge("Propiedad", `<span style="color:${(COLOR_PROPIEDAD[a.propiedad]||{fg:'#57697C'}).fg}">${esc(LABEL_PROPIEDAD[a.propiedad] || capitalizar(a.propiedad))}</span>`, (COLOR_PROPIEDAD[a.propiedad]||{fg:"#57697C"}).fg)}
             ${tarjetaBadge("Tipo", esc(a.tipo)||'—', colorTipo(a.tipo))}
             ${tarjetaBadge("Estado", `<span style="color:${infoEstado(a.estado).fg}">${esc(infoEstado(a.estado).label)}</span>`, infoEstado(a.estado).fg)}
           </div>
@@ -2109,15 +2108,10 @@ function abrirFormActivo(id){
             <div class="field"><label>Tipo</label><input type="text" id="fa-tipo" value="${esc(a?a.tipo:'')}" placeholder="Laptop, Desktop, Celular, Mouse, Monitor, Fuente de alimentación, Cable HDMI, Cable USB, Biométrico, Router, AP, Switch, UPS…"></div>
             <div class="field"><label>Propiedad</label>
               <select id="fa-propiedad" required>
-                <option value="propio" ${(!a||a.propiedad==='propio')?'selected':''}>Propio</option>
+                <option value="lukmar" ${(!a||a.propiedad==='lukmar')?'selected':''}>Lukmar</option>
+                <option value="eq" ${a&&a.propiedad==='eq'?'selected':''}>EQ Soluciones</option>
                 <option value="rentado" ${a&&a.propiedad==='rentado'?'selected':''}>Rentado</option>
                 <option value="externo" ${a&&a.propiedad==='externo'?'selected':''}>Externo</option>
-              </select>
-            </div>
-            <div class="field"><label>Empresa</label>
-              <select id="fa-empresa">
-                <option value="lukmar" ${(!a||!a.empresa||a.empresa==='lukmar')?'selected':''}>Lukmar</option>
-                <option value="eq" ${a&&a.empresa==='eq'?'selected':''}>EQ Soluciones</option>
               </select>
             </div>
             <div class="field"><label>Marca</label><input type="text" id="fa-marca" value="${esc(a?a.marca:'')}"></div>
@@ -2163,7 +2157,6 @@ function abrirFormActivo(id){
       const campos = {
         tipo: document.getElementById("fa-tipo").value.trim(),
         propiedad: document.getElementById("fa-propiedad").value,
-        empresa: document.getElementById("fa-empresa").value,
         marca: document.getElementById("fa-marca").value.trim(),
         modelo: document.getElementById("fa-modelo").value.trim(),
         serie: document.getElementById("fa-serie").value.trim(),
