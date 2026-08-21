@@ -141,55 +141,6 @@ a{color:var(--accent-ink);}
 main{flex:1;padding:22px 26px 60px;max-width:1280px;width:100%;margin:0 auto;}
 .hidden{display:none !important;}
 
-/* ---------- Cards / summary ---------- */
-.summary-row{display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap;}
-.summary-card{
-  border:1px solid transparent;border-radius:14px;
-  padding:14px 16px;min-width:150px;flex:1;
-  display:flex;align-items:center;gap:12px;
-  position:relative;overflow:hidden;
-  box-shadow:0 1px 2px rgba(20,30,40,0.05), 0 6px 16px -6px rgba(20,30,40,0.10);
-  transition:transform .15s, box-shadow .15s;
-  cursor:pointer;user-select:none;
-}
-.summary-card::after{
-  content:"";position:absolute;inset:0;border-radius:inherit;
-  border:1px solid rgba(255,255,255,0.35);pointer-events:none;
-}
-.summary-card:hover{transform:translateY(-1px);box-shadow:0 2px 4px rgba(20,30,40,0.06), 0 10px 22px -8px rgba(20,30,40,0.16);}
-.summary-card:active{transform:translateY(0);}
-.summary-card:focus-visible{outline:2px solid var(--accent-ink);outline-offset:2px;}
-.summary-card.kpi-selected{box-shadow:0 0 0 3px rgba(255,255,255,0.7), 0 2px 4px rgba(20,30,40,0.06), 0 10px 22px -8px rgba(20,30,40,0.20);}
-.summary-card.kpi-selected::after{border:1.5px solid rgba(255,255,255,0.75);}
-.kpi-icon{
-  display:flex;align-items:center;justify-content:center;flex-shrink:0;
-  width:38px;height:38px;border-radius:10px;
-}
-.kpi-text{display:flex;flex-direction:column;min-width:0;}
-.summary-card .num{font-family:'IBM Plex Mono',monospace;font-size:23px;font-weight:600;line-height:1.1;}
-.summary-card .lbl{font-size:12px;margin-top:2px;}
-
-.kpi-total{background:var(--gradient-brand);color:#fff;}
-.kpi-total .kpi-icon{background:rgba(255,255,255,0.18);color:#fff;}
-.kpi-total .num{color:#fff;}
-.kpi-total .lbl{color:rgba(255,255,255,0.85);}
-
-.kpi-disponible{background:linear-gradient(135deg, #2E6B3D 0%, var(--good) 100%);color:#fff;}
-.kpi-disponible .kpi-icon{background:rgba(255,255,255,0.18);color:#fff;}
-.kpi-disponible .num{color:#fff;}
-.kpi-disponible .lbl{color:rgba(255,255,255,0.85);}
-
-.kpi-persona{background:linear-gradient(135deg, var(--accent-ink) 0%, var(--accent) 100%);color:#fff;}
-.kpi-persona .kpi-icon{background:rgba(255,255,255,0.18);color:#fff;}
-.kpi-persona .num{color:#fff;}
-.kpi-persona .lbl{color:rgba(255,255,255,0.85);}
-
-.kpi-area{background:linear-gradient(135deg, #3B3159 0%, var(--area) 100%);color:#fff;}
-.kpi-mantenimiento{background:linear-gradient(135deg, #6E4D06 0%, var(--mantenimiento) 100%);color:#fff;}
-.kpi-area .kpi-icon{background:rgba(255,255,255,0.18);color:#fff;}
-.kpi-area .num{color:#fff;}
-.kpi-area .lbl{color:rgba(255,255,255,0.85);}
-
 /* ---------- Filters ---------- */
 .filterbar{
   display:flex;gap:8px;flex-wrap:wrap;align-items:center;
@@ -461,6 +412,7 @@ fieldset legend{font-size:12px;font-weight:600;color:var(--ink-muted);padding:0 
 .titem-actions{display:flex;gap:4px;}
 .titem-observacion{font-size:12.5px;color:var(--ink);font-style:italic;margin-top:6px;padding-left:8px;border-left:2px dashed var(--border-strong);white-space:pre-line;}
 .titem-obs-tag{display:inline-block;font-style:normal;font-weight:700;font-size:10px;letter-spacing:0.03em;text-transform:uppercase;margin-right:6px;padding:1px 6px;border-radius:4px;vertical-align:1px;}
+.titem-obs-tipo{display:inline-block;font-style:normal;font-weight:600;font-size:11px;margin-right:6px;padding:1px 7px;border-radius:4px;vertical-align:1px;background:var(--surface-2);color:var(--ink-muted);}
 .titem-obs-entrega{border-left-color:#8FC79C;}
 .titem-obs-entrega .titem-obs-tag{background:#DCEFE0;color:#2E6B3D;}
 .titem-obs-devolucion{border-left-color:#D8B26B;}
@@ -546,7 +498,6 @@ fieldset legend{font-size:12px;font-weight:600;color:var(--ink-muted);padding:0 
 /* ---- Pantallas grandes / TV: más aire, texto ligeramente mayor ---- */
 @media (min-width:1600px){
   main{max-width:1500px;font-size:15.5px;}
-  .summary-card .num{font-size:25px;}
 }
 
 /* ---- SmartTV / pantallas enormes: pensado para verse desde lejos, no desde
@@ -554,10 +505,6 @@ fieldset legend{font-size:12px;font-weight:600;color:var(--ink-muted);padding:0 
    respiro, sin volverse un mar de columnas angostas y letra chica. ---- */
 @media (min-width:2200px){
   main{max-width:1900px;font-size:19px;}
-  .summary-card{padding:18px 20px;}
-  .summary-card .num{font-size:32px;}
-  .summary-card .lbl{font-size:14.5px;}
-  .kpi-icon svg{width:26px;height:26px;}
   .tipo-icon svg{width:22px;height:22px;}
   .btn{font-size:15px;padding:9px 16px;}
   .modal{max-width:720px;}
@@ -582,10 +529,6 @@ fieldset legend{font-size:12px;font-weight:600;color:var(--ink-muted);padding:0 
   .tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;}
   .tab-btn{flex-shrink:0;}
   .topbar-right{width:100%;justify-content:space-between;}
-
-  /* Tarjetas KPI: 2 por fila en vez de 4 */
-  .summary-row{gap:8px;}
-  .summary-card{min-width:0;flex:1 1 calc(50% - 8px);}
 
   /* Barra de filtros: apila y prioriza el botón de nuevo activo */
   .filterbar{flex-direction:column;align-items:stretch;}
@@ -641,6 +584,5 @@ fieldset legend{font-size:12px;font-weight:600;color:var(--ink-muted);padding:0 
 
 /* ---- Celular chico ---- */
 @media (max-width:400px){
-  .summary-card{flex:1 1 100%;}
   .login-card{padding:22px 16px;}
 }

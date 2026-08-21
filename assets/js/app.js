@@ -255,18 +255,6 @@ function labelTipoEntrega(v){
   return f ? f.label : "—";
 }
 
-/* ============================================================
-   6. AGREGADOS (siempre calculados al vuelo, nunca guardados)
-   ============================================================ */
-function calcularAgregados(activos){
-  const total = activos.length;
-  const disponibles = activos.filter(a=>a.estado==="disponible").length;
-  const asignadosPersona = activos.filter(a=>a.custodio && a.custodio.tipo_custodio==="persona").length;
-  const asignadosArea = activos.filter(a=>a.custodio && a.custodio.tipo_custodio==="area").length;
-  const porTipo = {};
-  activos.forEach(a=>{ const t=a.tipo||"Sin tipo"; porTipo[t]=(porTipo[t]||0)+1; });
-  return { total, disponibles, asignadosPersona, asignadosArea, porTipo };
-}
 
 /* ============================================================
    7. OPERACIONES DE NEGOCIO (Supabase — antes LocalStorage)
@@ -954,7 +942,7 @@ function listaOrdenadaFiltrada(datos){
   return lista;
 }
 
-/* ---------- Filtro rápido: los KPI de arriba también son botones ---------- */
+/* ---------- Estado de filtros ---------- */
 function estadoInicialFiltros(){
   return { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, empresa:null, estado:null,
     colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"",
@@ -969,31 +957,6 @@ function hayFiltrosActivos(){
   return ["texto","colTag","colTipo","colMarca","colCustodio","colCargo","colPropiedad",
     "colSerie","colSo","colProveedor","colFechaDesde","colFechaHasta","colModelo","colNombre"].some(k=>f[k]);
 }
-// "Disponible" ahora es Estado, no Custodio — "Persona"/"Área" siguen
-// siendo Custodio como siempre. Las tres tarjetas se excluyen mutuamente
-// (activar una limpia la otra), para que el click siga sintiéndose como un
-// solo interruptor aunque por debajo escriban en dos campos distintos.
-const CAMPO_FILTRO_KPI = { disponible:"estado", persona:"custodioClase", area:"custodioClase" };
-function aplicarFiltroKpi(valor){
-  if(valor === null){
-    state.filtros = estadoInicialFiltros();
-  } else {
-    const campo = CAMPO_FILTRO_KPI[valor];
-    const otroCampo = campo === "estado" ? "custodioClase" : "estado";
-    const actual = state.filtros[campo];
-    const yaActivo = actual && actual.size===1 && actual.has(valor);
-    state.filtros[campo] = yaActivo ? null : new Set([valor]);
-    state.filtros[otroCampo] = null;
-  }
-  renderMain();
-}
-function claseKpiActiva(valor){
-  if(valor === null) return (!state.filtros.custodioClase && !state.filtros.estado) ? "kpi-selected" : "";
-  const campo = CAMPO_FILTRO_KPI[valor];
-  const actual = state.filtros[campo];
-  return (actual && actual.size===1 && actual.has(valor)) ? "kpi-selected" : "";
-}
-
 /* ---------- Gestor de columnas visibles ---------- */
 function abrirGestorColumnas(){
   // Orden alfabético SOLO para cómo se listan los checkboxes acá — el orden
@@ -1200,11 +1163,8 @@ function abrirModalKpiColumna(campo){
 function renderVistaActivos(main){
   const datos = cargarActivos();
   recalcularOpcionesFiltro(datos);
-  const lista = listaOrdenadaFiltrada(datos);
-  const agregados = calcularAgregados(lista);
 
   main.innerHTML = `
-    <div class="summary-row" id="resumen-cards"></div>
     <div class="filterbar">
       <input type="text" id="f-texto" placeholder="Buscar por tag, marca, serie, custodio…" value="${esc(state.filtros.texto)}">
       <div class="fb-spacer"></div>
@@ -1280,21 +1240,9 @@ function renderVistaActivos(main){
   });
 }
 
-// Repinta solo las tarjetas de resumen y el cuerpo de la tabla — nunca el
-// input de búsqueda ni los paneles de filtro — para que escribir o marcar
-// checkboxes no pierda el foco ni cierre nada que esté abierto por hover.
-// Para los KPI de arriba, el conteo de cada categoría de custodio debe verse
-// completo (respetando los demás filtros activos, pero NO el filtro de
-// custodio en sí) — si no, al hacer clic en "Disponibles" las otras 3
-// tarjetas colapsarían al mismo número y se perdería la vista general.
-function agregadosParaKpis(datos){
-  const anterior = state.filtros.custodioClase;
-  state.filtros.custodioClase = null;
-  const lista = filtrarActivos(datos);
-  state.filtros.custodioClase = anterior;
-  return calcularAgregados(lista);
-}
-
+// Repinta solo el cuerpo de la tabla — nunca el input de búsqueda ni los
+// paneles de filtro — para que escribir o marcar checkboxes no pierda el
+// foco ni cierre nada que esté abierto por hover.
 function actualizarTablaYResumen(){
   const main = document.getElementById("main");
   if(!main || state.vista !== "activos") return;
@@ -1307,26 +1255,6 @@ function actualizarTablaYResumen(){
   const scrollXAntes = window.scrollX, scrollYAntes = window.scrollY;
   const datos = cargarActivos();
   const lista = listaOrdenadaFiltrada(datos);
-  const agregadosKpi = agregadosParaKpis(datos);
-  const resumen = document.getElementById("resumen-cards");
-  if(resumen) resumen.innerHTML = `
-    <div class="summary-card kpi-total ${claseKpiActiva(null)}" data-kpi="total" tabindex="0" role="button" aria-label="Ver todos">
-      <div class="kpi-icon">${ICONO_KPI_TOTAL}</div>
-      <div class="kpi-text"><div class="num">${agregadosKpi.total}</div><div class="lbl">Total (según filtros)</div></div>
-    </div>
-    <div class="summary-card kpi-disponible ${claseKpiActiva("disponible")}" data-kpi="disponible" tabindex="0" role="button" aria-label="Filtrar disponibles">
-      <div class="kpi-icon">${ICONO_KPI_DISPONIBLE}</div>
-      <div class="kpi-text"><div class="num">${agregadosKpi.disponibles}</div><div class="lbl">Disponibles (por estado)</div></div>
-    </div>
-    <div class="summary-card kpi-persona ${claseKpiActiva("persona")}" data-kpi="persona" tabindex="0" role="button" aria-label="Filtrar asignados a persona">
-      <div class="kpi-icon">${ICONO_KPI_PERSONA}</div>
-      <div class="kpi-text"><div class="num">${agregadosKpi.asignadosPersona}</div><div class="lbl">Asignados a persona</div></div>
-    </div>
-    <div class="summary-card kpi-area ${claseKpiActiva("area")}" data-kpi="area" tabindex="0" role="button" aria-label="Filtrar asignados a área">
-      <div class="kpi-icon">${ICONO_KPI_AREA}</div>
-      <div class="kpi-text"><div class="num">${agregadosKpi.asignadosArea}</div><div class="lbl">Asignados a área/depto.</div></div>
-    </div>
-  `;
   const tbody = document.getElementById("tbody-activos");
   if(tbody){
     tbody.innerHTML = lista.map(a=>filaActivo(a)).join("");
@@ -1464,18 +1392,7 @@ function actualizarFlechasOrden(){
 // de checkbox (filtrar) y doble clic (aislar una opción). Todo dispara solo
 // actualizarTablaYResumen(), nunca un renderVistaActivos() completo, para no
 // destruir el panel de filtro que el usuario tiene abierto con el mouse encima.
-document.addEventListener("keydown", (e)=>{
-  if(e.key !== "Enter" && e.key !== " ") return;
-  const kpi = e.target.closest && e.target.closest("[data-kpi]");
-  if(kpi){ e.preventDefault(); kpi.click(); }
-});
 document.addEventListener("click", (e)=>{
-  const kpi = e.target.closest("[data-kpi]");
-  if(kpi){
-    const valor = kpi.dataset.kpi;
-    aplicarFiltroKpi(valor==="total" ? null : valor);
-    return;
-  }
   const verKpis = e.target.closest("[data-ver-kpis]");
   if(verKpis){
     abrirModalKpiColumna(verKpis.dataset.verKpis);
@@ -1788,12 +1705,6 @@ function colorTipo(tipo){
   return COLOR_TIPO[key] || COLOR_TIPO.generico;
 }
 
-// ---------- Iconos de las tarjetas KPI ----------
-const ICONO_KPI_TOTAL = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="7.5" height="7.5" rx="1.2"/><rect x="13" y="4" width="7.5" height="7.5" rx="1.2"/><rect x="3.5" y="13.5" width="7.5" height="7.5" rx="1.2"/><rect x="13" y="13.5" width="7.5" height="7.5" rx="1.2"/></svg>`;
-const ICONO_KPI_DISPONIBLE = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.3 12.3l2.4 2.4 5-5.4"/></svg>`;
-const ICONO_KPI_PERSONA = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M4.8 19.5c1-3.3 4-5 7.2-5s6.2 1.7 7.2 5"/></svg>`;
-const ICONO_KPI_AREA = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10.5L12 4l8 6.5V20"/><path d="M9.5 20v-6h5v6"/></svg>`;
-
 function pillCustodio(a){
   if(a.custodio===null) return `<span class="pill pill-cell pill-good"><span class="pill-dot"></span>Disponible</span>`;
   if(a.custodio.tipo_custodio==="mantenimiento") return `<span class="pill pill-cell pill-mantenimiento"><span class="pill-dot"></span><span class="cell-clip">${esc(a.custodio.nombre)}</span></span>`;
@@ -2006,15 +1917,15 @@ function tramoHtml(a, t, i){
     <div class="titem-row">
       <div>
         <div class="titem-name">${esc(t.nombre)} <span class="pill ${t.tipo_custodio==='mantenimiento'?'pill-mantenimiento':(t.tipo_custodio==='area'?'pill-area':'pill-persona')}" style="margin-left:6px;">${tipoLbl}</span></div>
-        <div class="titem-meta">${t.cargo?esc(t.cargo)+' · ':''}${fmtFecha(t.desde)} → ${t.hasta?fmtFecha(t.hasta):'presente'}${t.tipo_entrega?' · Entrega: '+labelTipoEntrega(t.tipo_entrega).split(' (')[0]:''}${t.tipo_devolucion?' · Devolución: '+labelTipoDevolucion(t.tipo_devolucion).split(' (')[0]:''}</div>
+        <div class="titem-meta">${t.cargo?esc(t.cargo)+' · ':''}${fmtFecha(t.desde)} → ${t.hasta?fmtFecha(t.hasta):'presente'}</div>
       </div>
       <div class="titem-actions">
         ${puede("editar_historial") ? `<button class="btn btn-sm" data-editar-tramo="${i}">Editar</button>` : ""}
         ${!vigente && state.sesion.rol===ROL_ADMIN ? `<button class="btn btn-sm btn-danger" data-borrar-tramo="${t._id}">Borrar</button>` : ""}
       </div>
     </div>
-    ${t.observacion_entrega ? `<div class="titem-observacion titem-obs-entrega"><span class="titem-obs-tag">Entrega</span>${esc(t.observacion_entrega)}</div>` : ""}
-    ${t.observacion_devolucion ? `<div class="titem-observacion titem-obs-devolucion"><span class="titem-obs-tag">Devolución</span>${esc(t.observacion_devolucion)}</div>` : ""}
+    ${(t.tipo_entrega || t.observacion_entrega) ? `<div class="titem-observacion titem-obs-entrega"><span class="titem-obs-tag">Entrega</span>${t.tipo_entrega ? `<span class="titem-obs-tipo">${esc(labelTipoEntrega(t.tipo_entrega).split(' (')[0])}</span>` : ""}${t.observacion_entrega?esc(t.observacion_entrega):""}</div>` : ""}
+    ${(t.tipo_devolucion || t.observacion_devolucion) ? `<div class="titem-observacion titem-obs-devolucion"><span class="titem-obs-tag">Devolución</span>${t.tipo_devolucion ? `<span class="titem-obs-tipo">${esc(labelTipoDevolucion(t.tipo_devolucion).split(' (')[0])}</span>` : ""}${t.observacion_devolucion?esc(t.observacion_devolucion):""}</div>` : ""}
   </div>`;
 }
 
@@ -2378,11 +2289,43 @@ function descripcionItemActa(a){
   if(a.serie) partes.push(`Número de serie: ${a.serie}`);
   return partes.join(" — ") || fmtTag(a);
 }
+// Un acta documenta la entrega de UN tramo puntual del historial (el
+// vigente, o el inmediatamente anterior si así se eligió en el panel de
+// portapapeles — ver tramoSeleccionadoActa). Ese mismo traspaso queda
+// anotado en dos lugares distintos del historial: la observación de
+// entrega del tramo que empieza, y la observación de devolución del
+// tramo que se cierra justo antes (historial_custodia[idx+1]). Antes solo
+// se exportaba la segunda — la nota propia de la entrega se perdía por
+// completo. Ahora se concatenan ambas, cada una con su etiqueta, cuando
+// existen.
+function observacionesActaItem(a, idx){
+  const tramo = a.historial_custodia[idx];
+  const previo = a.historial_custodia[idx+1] || null;
+  const partes = [];
+  if(tramo && tramo.observacion_entrega) partes.push(`Entrega: ${tramo.observacion_entrega}`);
+  if(previo && previo.observacion_devolucion) partes.push(`Devolución: ${previo.observacion_devolucion}`);
+  return partes.join(" | ");
+}
 /* ---------- Portapapeles de activos (para actas de entrega unificadas) ---------- */
 // Solamente frontend, respaldado en localStorage para que sobreviva recargas
 // mientras se van marcando activos dispersos entre distintos filtros/vistas.
 const CLAVE_PORTAPAPELES = "lukmar_portapapeles_acta";
 const MAX_PORTAPAPELES = 6; // igual al máximo de ítems que admite la plantilla TIC-FRM-003
+// Por cada activo marcado, qué tramo de su historial se documenta en el
+// acta: 0 = custodio actual/vigente (default), 1 = el inmediatamente
+// anterior — para poder generar un acta a nombre de quien ya devolvió el
+// activo. Vive fuera de abrirPanelPortapapeles() a propósito, para
+// sobrevivir sus propios re-renders (quitar un ítem o cambiar un
+// dropdown cierran y vuelven a abrir el modal — ver ese patrón más abajo).
+let seleccionCustodioActa = {};
+// Resuelve la opción elegida para un activo a su tramo real. Si se había
+// guardado "anterior" pero ese activo ya no tiene tramo anterior (p.ej.
+// tras borrar historial), cae de vuelta a 0 — el dropdown ya oculta esa
+// opción en ese caso, esto es solo una salvaguarda.
+function tramoSeleccionadoActa(a){
+  const idx = (seleccionCustodioActa[a.id] === 1 && a.historial_custodia.length > 1) ? 1 : 0;
+  return { idx, tramo: a.historial_custodia[idx] || null };
+}
 function cargarPortapapeles(){
   try{ const g = JSON.parse(localStorage.getItem(CLAVE_PORTAPAPELES) || "[]"); return Array.isArray(g) ? g : []; }
   catch(e){ return []; }
@@ -2413,6 +2356,7 @@ function toggleEnPortapapeles(id){
 }
 function vaciarPortapapeles(){
   guardarPortapapelesIds([]);
+  seleccionCustodioActa = {};
   actualizarBadgePortapapeles();
 }
 function actualizarBadgePortapapeles(){
@@ -2426,7 +2370,15 @@ function abrirPanelPortapapeles(){
   const ids = cargarPortapapeles();
   const datos = cargarActivos();
   const items = ids.map(id=>buscarActivo(datos, id)).filter(Boolean);
-  const nombresDistintos = [...new Set(items.map(a=>a.custodio && a.custodio.nombre).filter(Boolean))];
+  // Cada activo resuelve a un tramo puntual del historial (actual o
+  // anterior, según lo elegido — ver tramoSeleccionadoActa). La validación
+  // de "un solo custodio por acta" y el propio generador trabajan sobre
+  // ese tramo resuelto, no sobre el custodio vigente crudo del activo —
+  // así dos activos con custodio ACTUAL distinto pueden igual entrar en
+  // la misma acta si uno de ellos elige documentar a su custodio anterior.
+  const resoluciones = items.map(a=>({ activo:a, ...tramoSeleccionadoActa(a) }));
+  const nombresDistintos = [...new Set(resoluciones.map(r=>r.tramo && r.tramo.nombre).filter(Boolean))];
+  const hayAlternativa = resoluciones.some(r=>r.activo.historial_custodia.length > 1);
   const html = `
     <div class="modal">
       <div class="modal-header"><h3>Activos marcados para acta de entrega</h3><button class="modal-close">✕</button></div>
@@ -2434,21 +2386,30 @@ function abrirPanelPortapapeles(){
         ${items.length===0 ? `
           <div class="empty-state"><div class="big">🔖</div>No has marcado ningún activo todavía.<br>Márcalos desde la tabla o desde la ficha de detalle — hasta ${MAX_PORTAPAPELES} por acta.</div>
         ` : `
+        ${hayAlternativa ? `<div class="field hint" style="margin-bottom:10px;">Por defecto se documenta el custodio actual de cada activo. Si necesitas el acta a nombre de quien lo tuvo justo antes (p.ej. para completar un traspaso pendiente), cambia el selector de esa fila.</div>` : ""}
         <div class="tablewrap">
           <table>
-            <thead><tr><th>Tag</th><th>Tipo</th><th>Marca / Modelo</th><th>Custodio</th><th></th></tr></thead>
+            <thead><tr><th>Tag</th><th>Tipo</th><th>Marca / Modelo</th><th>Custodio del acta</th><th></th></tr></thead>
             <tbody>
-              ${items.map(a=>`<tr>
+              ${resoluciones.map(({activo:a, idx, tramo})=>{
+                const tieneAnterior = a.historial_custodia.length > 1;
+                return `<tr>
                 <td class="mono">${fmtTag(a)}</td>
                 <td>${esc(a.tipo)||'<span class="cell-muted">—</span>'}</td>
                 <td>${esc([a.marca,a.modelo].filter(Boolean).join(" "))||'<span class="cell-muted">—</span>'}</td>
-                <td>${esc(a.custodio ? a.custodio.nombre : "—")}</td>
+                <td>${tieneAnterior ? `
+                  <select data-select-custodio-acta="${a.id}">
+                    <option value="0" ${idx===0?"selected":""}>${esc(a.historial_custodia[0].nombre)} (actual)</option>
+                    <option value="1" ${idx===1?"selected":""}>${esc(a.historial_custodia[1].nombre)} (anterior)</option>
+                  </select>
+                ` : esc(tramo ? tramo.nombre : "—")}</td>
                 <td class="cell-actions"><button class="btn btn-sm btn-danger" data-quitar-portapapeles="${a.id}">Quitar</button></td>
-              </tr>`).join("")}
+              </tr>`;
+              }).join("")}
             </tbody>
           </table>
         </div>
-        ${nombresDistintos.length > 1 ? `<div class="alert alert-error" style="margin-top:10px;">Los activos marcados no tienen todos el mismo custodio (${nombresDistintos.map(esc).join(", ")}). Un acta es para un solo custodio — quita los que no correspondan o genera actas separadas.</div>` : ""}
+        ${nombresDistintos.length > 1 ? `<div class="alert alert-error" style="margin-top:10px;">Los custodios elegidos no coinciden (${nombresDistintos.map(esc).join(", ")}). Un acta es para un solo custodio — ajusta el selector de cada fila o quita las que no correspondan.</div>` : ""}
         `}
       </div>
       <div class="modal-footer">
@@ -2465,6 +2426,12 @@ function abrirPanelPortapapeles(){
         cerrarModal(); abrirPanelPortapapeles();
       });
     });
+    document.querySelectorAll("[data-select-custodio-acta]").forEach(sel=>{
+      sel.addEventListener("change", ()=>{
+        seleccionCustodioActa[Number(sel.dataset.selectCustodioActa)] = Number(sel.value);
+        cerrarModal(); abrirPanelPortapapeles();
+      });
+    });
     const bv = document.getElementById("btn-vaciar-portapapeles");
     if(bv) bv.addEventListener("click", ()=>{
       vaciarPortapapeles(); renderMain(); cerrarModal(); abrirPanelPortapapeles();
@@ -2473,7 +2440,7 @@ function abrirPanelPortapapeles(){
     if(bg) bg.addEventListener("click", async ()=>{
       bg.disabled = true; const txt = bg.textContent; bg.textContent = "Generando…";
       try{
-        await generarActaEntregaDesdeLista(items);
+        await generarActaEntregaDesdeLista(resoluciones);
         vaciarPortapapeles();
         renderMain();
         cerrarModal();
@@ -2484,15 +2451,18 @@ function abrirPanelPortapapeles(){
 }
 
 
-async function generarActaEntregaDesdeLista(activos){
-  if(!activos || activos.length === 0) throw new Error("No hay ningún activo para generar el acta.");
-  if(activos.length > 6) throw new Error("Un acta admite hasta 6 activos — genera dos actas separadas.");
-  const sinCustodio = activos.find(a=>!a.custodio);
-  if(sinCustodio) throw new Error(`El activo ${fmtTag(sinCustodio)} no tiene custodio vigente.`);
-  const nombreRef = activos[0].custodio.nombre;
-  const distinto = activos.find(a=>a.custodio.nombre !== nombreRef);
-  if(distinto) throw new Error(`No todos los activos marcados tienen el mismo custodio ("${nombreRef}" vs "${distinto.custodio.nombre}"). Un acta es para un solo custodio — separa en dos actas.`);
-  const cargoRef = activos[0].custodio.cargo;
+// Recibe la lista ya resuelta por abrirPanelPortapapeles: [{activo, idx,
+// tramo}, ...] — idx/tramo son el tramo del historial elegido (actual o
+// anterior) para cada activo, no necesariamente el custodio vigente.
+async function generarActaEntregaDesdeLista(resoluciones){
+  if(!resoluciones || resoluciones.length === 0) throw new Error("No hay ningún activo para generar el acta.");
+  if(resoluciones.length > 6) throw new Error("Un acta admite hasta 6 activos — genera dos actas separadas.");
+  const sinTramo = resoluciones.find(r=>!r.tramo);
+  if(sinTramo) throw new Error(`El activo ${fmtTag(sinTramo.activo)} no tiene un custodio para documentar en el acta.`);
+  const nombreRef = resoluciones[0].tramo.nombre;
+  const distinto = resoluciones.find(r=>r.tramo.nombre !== nombreRef);
+  if(distinto) throw new Error(`Los custodios elegidos no coinciden ("${nombreRef}" vs "${distinto.tramo.nombre}"). Un acta es para un solo custodio — ajusta el selector de cada activo o separa en dos actas.`);
+  const cargoRef = resoluciones[0].tramo.cargo;
   const fecha = fechaEnPalabras(hoyISO());
 
   const valores = {
@@ -2503,10 +2473,9 @@ async function generarActaEntregaDesdeLista(activos){
     FECHA_FIRMA: `Fecha: ${fecha}`,
   };
   for(let i=1; i<=6; i++){
-    const a = activos[i-1];
-    const anterior = a ? a.historial_custodia[1] : null;
-    valores["ITEM"+i] = a ? descripcionItemActa(a) : "";
-    valores["OBS"+i] = (anterior && anterior.observacion_devolucion) || "";
+    const r = resoluciones[i-1];
+    valores["ITEM"+i] = r ? descripcionItemActa(r.activo) : "";
+    valores["OBS"+i] = r ? observacionesActaItem(r.activo, r.idx) : "";
   }
 
   const resp = await fetch("assets/plantillas/TIC-FRM-003.xlsx");
@@ -2526,7 +2495,7 @@ async function generarActaEntregaDesdeLista(activos){
   const salida = await zip.generateAsync({type:"blob"});
   const url = URL.createObjectURL(salida);
   const link = document.createElement("a");
-  const sufijoTags = activos.map(a=>fmtTag(a)).join("-");
+  const sufijoTags = resoluciones.map(r=>fmtTag(r.activo)).join("-");
   const nombreArchivo = `Acta_Entrega_${(nombreRef||"").replace(/[^a-zA-Z0-9]+/g,"_")}_${sufijoTags}.xlsx`;
   link.href = url; link.download = nombreArchivo;
   document.body.appendChild(link); link.click(); document.body.removeChild(link);
