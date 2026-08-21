@@ -1894,11 +1894,14 @@ function celdaActivo(col, a){
     case "vidautil": return celdaNumeroUnidad(a.vida_util_anios, a.vida_util_anios===1?"año":"años");
     case "color": return celdaTextoRecortado(a.color);
     case "longitud": return celdaNumeroUnidad(a.longitud_m, "m");
-    case "acciones": return `<div class="cell-actions">
-      ${a.custodio ? `<button class="btn btn-sm ${estaEnPortapapeles(a.id)?'btn-primary':''}" data-action="marcar" data-id="${a.id}" title="Marcar para acta de entrega unificada">${estaEnPortapapeles(a.id)?'🔖 Marcado':'🔖'}</button>` : ""}
+    case "acciones": {
+      const marcado = estaEnPortapapeles(a.id);
+      return `<div class="cell-actions">
+      ${a.custodio ? `<button class="btn btn-sm ${marcado?'btn-primary':''}" data-action="marcar" data-id="${a.id}" aria-pressed="${marcado}" title="${marcado?'Marcado para acta — clic para quitar':'Marcar para acta de entrega unificada'}">🔖</button>` : ""}
       ${puede("cambiar_custodio") ? `<button class="btn btn-sm" data-action="custodio" data-id="${a.id}">Custodio</button>`:""}
       ${puede("dar_baja") ? `<button class="btn btn-sm btn-danger" data-action="baja" data-id="${a.id}">Baja</button>`:""}
     </div>`;
+    }
     default: return "";
   }
 }
