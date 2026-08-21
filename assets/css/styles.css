@@ -286,6 +286,8 @@ th{
 }
 .filter-panel-kpi-btn:hover{background:var(--accent-soft-2);}
 .th-filter:hover .filter-panel, .th-filter:focus-within .filter-panel{display:block;}
+.filter-panel-search{width:100%;box-sizing:border-box;padding:6px 8px;margin-bottom:8px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);font-size:12.5px;background:var(--surface);color:var(--ink);}
+.filter-panel-search:focus{outline:none;border-color:var(--accent);}
 .filter-panel-actions{display:flex;gap:6px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border);}
 .filter-panel-actions .btn{flex:1;}
 .filter-panel-list{max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:1px;}

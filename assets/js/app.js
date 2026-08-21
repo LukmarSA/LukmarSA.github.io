@@ -141,7 +141,7 @@ const state = {
   // null en tipo/propiedad/custodioClase = "sin filtrar" (equivale a todas las opciones marcadas).
   filtros: { texto:"", tipo:null, propiedad:null, custodioClase:null, marca:null, empresa:null, estado:null, colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"", colSerie:"", colSo:"", colProveedor:"", colFechaDesde:"", colFechaHasta:"", colModelo:"", colNombre:"" },
   orden: { campo:"id", dir:"asc" },
-  columnasVisibles: new Set(["tag","tipo","marca","estado","custodio","propiedad","acciones"]),
+  columnasVisibles: new Set(["tag","tipo","marca","estado","custodio","propiedad","acciones"]), // debe coincidir con COLUMNAS_VISIBLES_DEFAULT más abajo
   modal: null,         // función que renderiza el modal actual, o null
 };
 
@@ -332,12 +332,12 @@ async function editarActivoBase(id, campos){
 
 // Registrar cambio de custodio: vía RPC (cierra el tramo vigente + abre uno
 // nuevo en una sola transacción atómica en Postgres — ver f_cambiar_custodio).
-async function cambiarCustodio(id, nuevoCustodio, tipoDevolucionSaliente, fechaHasta, observacionSaliente, tipoEntrega, nuevoEstado){
+async function cambiarCustodio(id, nuevoCustodio, tipoDevolucionSaliente, fechaHasta, observacionDevolucionSaliente, tipoEntrega, nuevoEstado, observacionEntrega){
   const { error } = await sb.rpc("f_cambiar_custodio", {
     p_activo_id: id, p_tipo_custodio: nuevoCustodio.tipo_custodio, p_nombre: nuevoCustodio.nombre,
     p_cargo: nuevoCustodio.cargo || null, p_fecha: fechaHasta || hoyISO(),
-    p_tipo_devolucion: tipoDevolucionSaliente || null, p_observacion: observacionSaliente || null,
-    p_tipo_entrega: tipoEntrega || null,
+    p_tipo_devolucion: tipoDevolucionSaliente || null, p_observacion_entrega: observacionEntrega || null,
+    p_tipo_entrega: tipoEntrega || null, p_observacion_devolucion: observacionDevolucionSaliente || null,
   });
   if(error) throw error;
   // Estado ya no se infiere — viene explícito del dropdown de
@@ -749,7 +749,7 @@ const DEFINICION_COLUMNAS = [
   { key:"longitud",   label:"Longitud (m)",    core:false, weight:0.8, sortCampo:"longitud", filterCampo:null,           campoTexto:null,           placeholder:null },
   { key:"acciones",   label:"",                core:true,  weight:2.2, sortCampo:null,       filterCampo:null,           campoTexto:null,           placeholder:null },
 ];
-const COLUMNAS_VISIBLES_DEFAULT = ["tag","tipo","marca","custodio","propiedad","acciones"];
+const COLUMNAS_VISIBLES_DEFAULT = ["tag","tipo","marca","estado","custodio","propiedad","acciones"]; // debe coincidir con state.columnasVisibles más abajo (valor inicial) y con abrirGestorColumnas (botón "Restablecer")
 const LIMITE_COLUMNAS_RECOMENDADO = 7;
 
 // Opciones disponibles por columna filtrable, recalculadas cada vez que se
@@ -960,6 +960,15 @@ function estadoInicialFiltros(){
     colTag:"", colTipo:"", colMarca:"", colCustodio:"", colCargo:"", colPropiedad:"",
     colSerie:"", colSo:"", colProveedor:"", colFechaDesde:"", colFechaHasta:"", colModelo:"", colNombre:"" };
 }
+// Checklist (tipo/propiedad/custodioClase/marca/empresa/estado): null = sin
+// filtrar. Texto (todo lo demás, incluida la búsqueda general): "" = sin
+// filtrar. Cualquier otra cosa cuenta como "hay un filtro puesto".
+function hayFiltrosActivos(){
+  const f = state.filtros;
+  if(["tipo","propiedad","custodioClase","marca","empresa","estado"].some(k=>f[k]!==null)) return true;
+  return ["texto","colTag","colTipo","colMarca","colCustodio","colCargo","colPropiedad",
+    "colSerie","colSo","colProveedor","colFechaDesde","colFechaHasta","colModelo","colNombre"].some(k=>f[k]);
+}
 // "Disponible" ahora es Estado, no Custodio — "Persona"/"Área" siguen
 // siendo Custodio como siempre. Las tres tarjetas se excluyen mutuamente
 // (activar una limpia la otra), para que el click siga sintiéndose como un
@@ -1006,7 +1015,10 @@ function abrirGestorColumnas(){
           </label>`).join("")}
       </div>
     </div>
-    <div class="modal-footer"><button class="btn modal-close">Cerrar</button></div>
+    <div class="modal-footer">
+      <button class="btn" id="btn-restablecer-columnas">↺ Restablecer columnas por defecto</button>
+      <button class="btn modal-close">Cerrar</button>
+    </div>
   </div>`;
   abrirModal(html, ()=>{
     actualizarAvisoColumnas();
@@ -1018,7 +1030,25 @@ function abrirGestorColumnas(){
         renderMain(); // cambia el ancho de todas las columnas: hace falta rehacer el thead completo
       });
     });
+    document.getElementById("btn-restablecer-columnas").addEventListener("click", ()=>{
+      restablecerColumnasPorDefecto();
+      cerrarModal(); renderMain(); abrirGestorColumnas();
+    });
   });
+}
+// Vuelve a las columnas por defecto Y limpia cualquier filtro que hubiera
+// quedado puesto en una columna que deja de ser visible — dejar un filtro
+// "escondido" activo confundiría más que ayudar (la tabla se ve corta y no
+// hay ninguna pista de por qué, si la columna filtrada ya no está a la vista).
+function restablecerColumnasPorDefecto(){
+  DEFINICION_COLUMNAS
+    .filter(c => state.columnasVisibles.has(c.key) && !COLUMNAS_VISIBLES_DEFAULT.includes(c.key))
+    .forEach(c=>{
+      if(c.filterCampo) state.filtros[c.filterCampo] = null;
+      if(c.campoTexto) state.filtros[c.campoTexto] = "";
+      if(c.filtroFecha){ state.filtros.colFechaDesde = ""; state.filtros.colFechaHasta = ""; }
+    });
+  state.columnasVisibles = new Set(COLUMNAS_VISIBLES_DEFAULT);
 }
 function actualizarAvisoColumnas(){
   const holder = document.getElementById("aviso-columnas");
@@ -1178,6 +1208,7 @@ function renderVistaActivos(main){
     <div class="filterbar">
       <input type="text" id="f-texto" placeholder="Buscar por tag, marca, serie, custodio…" value="${esc(state.filtros.texto)}">
       <div class="fb-spacer"></div>
+      <button class="btn" id="btn-limpiar-filtros" ${hayFiltrosActivos()?"":"disabled"} title="Quitar todos los filtros aplicados">✕ Quitar filtros</button>
       <button class="btn" id="btn-columnas">☰ Columnas</button>
       <button class="btn" id="btn-exportar">⭳ Exportar a Excel</button>
       <div class="dropdown-wrap" id="dropdown-resumenes">
@@ -1223,6 +1254,10 @@ function renderVistaActivos(main){
     try{ await exportarActivosExcel(); }
     catch(err){ alert("No se pudo generar el Excel: " + err.message); }
   });
+  document.getElementById("btn-limpiar-filtros").addEventListener("click", ()=>{
+    state.filtros = estadoInicialFiltros();
+    renderMain();
+  });
   document.getElementById("btn-columnas").addEventListener("click", abrirGestorColumnas);
   document.getElementById("btn-exportar-resumenes").addEventListener("click", (e)=>{
     e.stopPropagation();
@@ -1263,6 +1298,8 @@ function agregadosParaKpis(datos){
 function actualizarTablaYResumen(){
   const main = document.getElementById("main");
   if(!main || state.vista !== "activos") return;
+  const btnLimpiar = document.getElementById("btn-limpiar-filtros");
+  if(btnLimpiar) btnLimpiar.disabled = !hayFiltrosActivos();
   // Cualquier cambio de filtro puede achicar la tabla (menos filas, o incluso
   // 0). Sin esto, el navegador puede "clampear" el scroll hacia arriba al
   // reducirse la altura de la página, moviendo el header bajo el cursor y
@@ -1317,10 +1354,12 @@ function panelFiltroHtml(campo, opciones){
   const seleccion = seleccionActiva(campo);
   const lista = listaParaConteo(campo);
   const nombreCol = NOMBRE_COLUMNA_KPI[campo] || campo;
+  const conBuscador = campo === "tipo" || campo === "marca";
   return `<div class="filter-panel">
     <div class="filter-panel-card">
       <div class="filter-panel-titlebar">Filtrar ${esc(nombreCol)}</div>
       <div class="filter-panel-card-inner">
+        ${conBuscador ? `<input type="text" class="filter-panel-search" data-filtro-buscar="${campo}" placeholder="Buscar ${esc(nombreCol.toLowerCase())}…">` : ""}
         <div class="filter-panel-actions">
           <button type="button" class="btn btn-sm" data-filtro-todos="${campo}">Todos</button>
           <button type="button" class="btn btn-sm" data-filtro-ninguno="${campo}">Ninguno</button>
@@ -1478,6 +1517,16 @@ document.addEventListener("click", (e)=>{
     actualizarTablaYResumen();
     return;
   }
+});
+document.addEventListener("input", (e)=>{
+  const buscador = e.target.closest("[data-filtro-buscar]");
+  if(!buscador) return;
+  const campo = buscador.dataset.filtroBuscar;
+  const q = buscador.value.trim().toLowerCase();
+  document.querySelectorAll(`.filter-opt[data-filtro-opt-campo="${campo}"]`).forEach(opt=>{
+    const texto = opt.querySelector(".filter-opt-label").textContent.toLowerCase();
+    opt.style.display = texto.includes(q) ? "" : "none";
+  });
 });
 document.addEventListener("change", (e)=>{
   const cb = e.target.closest("input[data-filtro-campo]");
@@ -2234,7 +2283,7 @@ function abrirCambiarCustodio(id){
         await cambiarCustodio(id, {
           tipo_custodio: document.getElementById("cc-tipo").value,
           nombre, cargo: document.getElementById("cc-cargo").value.trim(),
-        }, tipoDev, fecha, observacionDev, tipoEntrega, nuevoEstado);
+        }, tipoDev, fecha, observacionDev, tipoEntrega, nuevoEstado, observacionEntrega);
         cerrarModal(); renderMain(); abrirDetalle(id);
       } catch(err){ alert("No se pudo cambiar el custodio: " + err.message); }
     });
