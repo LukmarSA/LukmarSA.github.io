@@ -2568,6 +2568,13 @@ async function generarActaEntregaDesdeLista(resoluciones){
   if(distinto) throw new Error(`Los custodios elegidos no coinciden ("${nombreRef}" vs "${distinto.tramo.nombre}"). Un acta es para un solo custodio — ajusta el selector de cada activo o separa en dos actas.`);
   const cargoRef = resoluciones[0].tramo.cargo;
   const fecha = fechaEnPalabras(hoyISO());
+  // Fecha de la entrega (arriba y B37) sigue siendo la de hoy — el día que se
+  // genera/firma el acta. La de la devolución (H37, plantilla nueva) es otra
+  // cosa: es la fecha real en que ESE tramo terminó (historial_custodia.hasta)
+  // — "pendiente" si el tramo documentado es el vigente (todavía no se
+  // devuelve nada), o la fecha real si se eligió el custodio anterior.
+  const hastaTramo = resoluciones[0].tramo.hasta;
+  const fechaDevolucionTexto = hastaTramo ? fechaEnPalabras(hastaTramo) : "pendiente";
 
   const valores = {
     FECHA: fecha,
@@ -2575,6 +2582,7 @@ async function generarActaEntregaDesdeLista(resoluciones){
     CARGO: cargoRef || "",
     FIRMA_USUARIO: `Usuario Responsable: ${nombreRef || ""}`,
     FECHA_FIRMA: `Fecha: ${fecha}`,
+    FECHA_DEVOLUCION: `Fecha: ${fechaDevolucionTexto}`,
   };
   for(let i=1; i<=6; i++){
     const r = resoluciones[i-1];
