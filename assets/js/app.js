@@ -1698,7 +1698,6 @@ async function exportarActivosExcel(){
 // "plotter" es la única excepción: Bootstrap Icons no tiene un ícono de
 // plotter/impresora de gran formato, así que se dejó el diseño original.
 const ICONOS_TIPO = {
-  dron: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-airplane-engines" viewBox="0 0 16 16"> <path d="M8 0c-.787 0-1.292.592-1.572 1.151A4.35 4.35 0 0 0 6 3v3.691l-2 1V7.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.191l-1.17.585A1.5 1.5 0 0 0 0 10.618V12a.5.5 0 0 0 .582.493l1.631-.272.313.937a.5.5 0 0 0 .948 0l.405-1.214 2.21-.369.375 2.253-1.318 1.318A.5.5 0 0 0 5.5 16h5a.5.5 0 0 0 .354-.854l-1.318-1.318.375-2.253 2.21.369.405 1.214a.5.5 0 0 0 .948 0l.313-.937 1.63.272A.5.5 0 0 0 16 12v-1.382a1.5 1.5 0 0 0-.83-1.342L14 8.691V7.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v.191l-2-1V3c0-.568-.14-1.271-.428-1.849C9.292.591 8.787 0 8 0M7 3c0-.432.11-.979.322-1.401C7.542 1.159 7.787 1 8 1s.458.158.678.599C8.889 2.02 9 2.569 9 3v4a.5.5 0 0 0 .276.447l5.448 2.724a.5.5 0 0 1 .276.447v.792l-5.418-.903a.5.5 0 0 0-.575.41l-.5 3a.5.5 0 0 0 .14.437l.646.646H6.707l.647-.646a.5.5 0 0 0 .14-.436l-.5-3a.5.5 0 0 0-.576-.411L1 11.41v-.792a.5.5 0 0 1 .276-.447l5.448-2.724A.5.5 0 0 0 7 7z"/></svg>`,
   laptop: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M13.5 3a.5.5 0 0 1 .5.5V11H2V3.5a.5.5 0 0 1 .5-.5zm-11-1A1.5 1.5 0 0 0 1 3.5V12h14V3.5A1.5 1.5 0 0 0 13.5 2zM0 12.5h16a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 12.5"/></svg>`,
   // Desktop: bi-pc-display (torre + pantalla, el ícono canónico de "PC de escritorio" en Bootstrap Icons).
   desktop: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1zm1 13.5a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0m2 0a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0M9.5 1a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1zM9 3.5a.5.5 0 0 0 .5.5h5a.5.5 0 0 0 0-1h-5a.5.5 0 0 0-.5.5M1.5 2A1.5 1.5 0 0 0 0 3.5v7A1.5 1.5 0 0 0 1.5 12H6v2h-.5a.5.5 0 0 0 0 1H7v-4H1.5a.5.5 0 0 1-.5-.5v-7a.5.5 0 0 1 .5-.5H7V2z"/></svg>`,
@@ -2387,6 +2386,23 @@ function fechaEnPalabras(iso){
   if(!y||!m||!d) return iso;
   return `${d} de ${MESES_ES[m-1]} de ${y}`;
 }
+function fechaDDMMAAAA(iso){
+  if(!iso) return "";
+  const [y,m,d] = iso.split("-");
+  if(!y||!m||!d) return iso;
+  return `${d}-${m}-${y}`;
+}
+// "Luisa Segarra" -> "LSEGARRA" (inicial del primer nombre + el resto del
+// nombre completo pegado, todo en mayúsculas) — mismo patrón que ya usan los
+// PDF firmados/escaneados que se archivan aparte, para que el nombre del
+// .xlsx ya calce sin tener que renombrarlo a mano.
+function inicialMasApellido(nombreCompleto){
+  const partes = (nombreCompleto || "").trim().split(/\s+/).filter(Boolean);
+  if(partes.length === 0) return "";
+  const inicial = partes[0].charAt(0).toUpperCase();
+  const resto = partes.slice(1).join("").toUpperCase();
+  return inicial + resto;
+}
 function descripcionItemActa(a){
   const partes = [];
   const base = [a.tipo, a.marca].filter(Boolean).join(" ");
@@ -2423,6 +2439,14 @@ const MAX_PORTAPAPELES = 6; // igual al máximo de ítems que admite la plantill
 // sobrevivir sus propios re-renders (quitar un ítem o cambiar un
 // dropdown cierran y vuelven a abrir el modal — ver ese patrón más abajo).
 let seleccionCustodioActa = {};
+// Nombre de quien firma como soporte técnico, uno para el lado ENTREGA y otro
+// para DEVOLUCIÓN — pueden ser personas distintas (p.ej. quien entrega hoy no
+// es necesariamente quien procese la devolución más adelante). Arrancan con
+// el nombre que antes estaba fijo en la plantilla, para no cambiar el
+// resultado de nadie que no toque estos campos; viven fuera de
+// abrirPanelPortapapeles() por el mismo motivo que seleccionCustodioActa.
+let soporteTecnicoEntrega = "OSCAR RAMIREZ V";
+let soporteTecnicoDevolucion = "OSCAR RAMIREZ V";
 // Resuelve la opción elegida para un activo a su tramo real. Si se había
 // guardado "anterior" pero ese activo ya no tiene tramo anterior (p.ej.
 // tras borrar historial), cae de vuelta a 0 — el dropdown ya oculta esa
@@ -2462,6 +2486,8 @@ function toggleEnPortapapeles(id){
 function vaciarPortapapeles(){
   guardarPortapapelesIds([]);
   seleccionCustodioActa = {};
+  soporteTecnicoEntrega = "OSCAR RAMIREZ V";
+  soporteTecnicoDevolucion = "OSCAR RAMIREZ V";
   actualizarBadgePortapapeles();
 }
 function actualizarBadgePortapapeles(){
@@ -2515,6 +2541,10 @@ function abrirPanelPortapapeles(){
           </table>
         </div>
         ${nombresDistintos.length > 1 ? `<div class="alert alert-error" style="margin-top:10px;">Los custodios elegidos no coinciden (${nombresDistintos.map(esc).join(", ")}). Un acta es para un solo custodio — ajusta el selector de cada fila o quita las que no correspondan.</div>` : ""}
+        <div style="display:flex;gap:10px;margin-top:14px;">
+          <div class="field" style="flex:1;"><label>Soporte técnico — Entrega</label><input type="text" id="pp-soporte-entrega" value="${esc(soporteTecnicoEntrega)}"></div>
+          <div class="field" style="flex:1;"><label>Soporte técnico — Devolución</label><input type="text" id="pp-soporte-devolucion" value="${esc(soporteTecnicoDevolucion)}"></div>
+        </div>
         `}
       </div>
       <div class="modal-footer">
@@ -2537,12 +2567,23 @@ function abrirPanelPortapapeles(){
         cerrarModal(); abrirPanelPortapapeles();
       });
     });
+    // Estos dos, a diferencia del resto del modal, NO reabren el panel al
+    // cambiar — no afectan ninguna otra parte de lo que se ve acá, así que
+    // un re-render por cada tecla solo cortaría el foco mientras se escribe.
+    const inEntrega = document.getElementById("pp-soporte-entrega");
+    if(inEntrega) inEntrega.addEventListener("input", ()=>{ soporteTecnicoEntrega = inEntrega.value; });
+    const inDevolucion = document.getElementById("pp-soporte-devolucion");
+    if(inDevolucion) inDevolucion.addEventListener("input", ()=>{ soporteTecnicoDevolucion = inDevolucion.value; });
     const bv = document.getElementById("btn-vaciar-portapapeles");
     if(bv) bv.addEventListener("click", ()=>{
       vaciarPortapapeles(); renderMain(); cerrarModal(); abrirPanelPortapapeles();
     });
     const bg = document.getElementById("btn-generar-acta-multiple");
     if(bg) bg.addEventListener("click", async ()=>{
+      if(!soporteTecnicoEntrega.trim() || !soporteTecnicoDevolucion.trim()){
+        mostrarToast("Completa el nombre de soporte técnico (entrega y devolución).", "error");
+        return;
+      }
       bg.disabled = true; const txt = bg.textContent; bg.textContent = "Generando…";
       try{
         await generarActaEntregaDesdeLista(resoluciones);
@@ -2584,6 +2625,8 @@ async function generarActaEntregaDesdeLista(resoluciones){
     FIRMA_USUARIO: `Usuario Responsable: ${nombreRef || ""}`,
     FECHA_FIRMA: `Fecha: ${fecha}`,
     FECHA_DEVOLUCION: `Fecha: ${fechaDevolucionTexto}`,
+    SOPORTE_ENTREGA: `Soporte técnico: ${soporteTecnicoEntrega.trim()}`,
+    SOPORTE_DEVOLUCION: `Soporte técnico: ${soporteTecnicoDevolucion.trim()}`,
   };
   for(let i=1; i<=6; i++){
     const r = resoluciones[i-1];
@@ -2608,8 +2651,7 @@ async function generarActaEntregaDesdeLista(resoluciones){
   const salida = await zip.generateAsync({type:"blob"});
   const url = URL.createObjectURL(salida);
   const link = document.createElement("a");
-  const sufijoTags = resoluciones.map(r=>fmtTag(r.activo)).join("-");
-  const nombreArchivo = `Acta_Entrega_${(nombreRef||"").replace(/[^a-zA-Z0-9]+/g,"_")}_${sufijoTags}.xlsx`;
+  const nombreArchivo = `TIC-FRM-003-${inicialMasApellido(nombreRef)}-${fechaDDMMAAAA(resoluciones[0].tramo.desde)}.xlsx`;
   link.href = url; link.download = nombreArchivo;
   document.body.appendChild(link); link.click(); document.body.removeChild(link);
   URL.revokeObjectURL(url);
