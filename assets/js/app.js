@@ -1698,7 +1698,6 @@ async function exportarActivosExcel(){
 // "plotter" es la única excepción: Bootstrap Icons no tiene un ícono de
 // plotter/impresora de gran formato, así que se dejó el diseño original.
 const ICONOS_TIPO = {
-  dron: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-airplane-engines" viewBox="0 0 16 16"> <path d="M8 0c-.787 0-1.292.592-1.572 1.151A4.35 4.35 0 0 0 6 3v3.691l-2 1V7.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.191l-1.17.585A1.5 1.5 0 0 0 0 10.618V12a.5.5 0 0 0 .582.493l1.631-.272.313.937a.5.5 0 0 0 .948 0l.405-1.214 2.21-.369.375 2.253-1.318 1.318A.5.5 0 0 0 5.5 16h5a.5.5 0 0 0 .354-.854l-1.318-1.318.375-2.253 2.21.369.405 1.214a.5.5 0 0 0 .948 0l.313-.937 1.63.272A.5.5 0 0 0 16 12v-1.382a1.5 1.5 0 0 0-.83-1.342L14 8.691V7.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v.191l-2-1V3c0-.568-.14-1.271-.428-1.849C9.292.591 8.787 0 8 0M7 3c0-.432.11-.979.322-1.401C7.542 1.159 7.787 1 8 1s.458.158.678.599C8.889 2.02 9 2.569 9 3v4a.5.5 0 0 0 .276.447l5.448 2.724a.5.5 0 0 1 .276.447v.792l-5.418-.903a.5.5 0 0 0-.575.41l-.5 3a.5.5 0 0 0 .14.437l.646.646H6.707l.647-.646a.5.5 0 0 0 .14-.436l-.5-3a.5.5 0 0 0-.576-.411L1 11.41v-.792a.5.5 0 0 1 .276-.447l5.448-2.724A.5.5 0 0 0 7 7z"/></svg>`,
   laptop: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M13.5 3a.5.5 0 0 1 .5.5V11H2V3.5a.5.5 0 0 1 .5-.5zm-11-1A1.5 1.5 0 0 0 1 3.5V12h14V3.5A1.5 1.5 0 0 0 13.5 2zM0 12.5h16a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 12.5"/></svg>`,
   // Desktop: bi-pc-display (torre + pantalla, el ícono canónico de "PC de escritorio" en Bootstrap Icons).
   desktop: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1zm1 13.5a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0m2 0a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0M9.5 1a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1zM9 3.5a.5.5 0 0 0 .5.5h5a.5.5 0 0 0 0-1h-5a.5.5 0 0 0-.5.5M1.5 2A1.5 1.5 0 0 0 0 3.5v7A1.5 1.5 0 0 0 1.5 12H6v2h-.5a.5.5 0 0 0 0 1H7v-4H1.5a.5.5 0 0 1-.5-.5v-7a.5.5 0 0 1 .5-.5H7V2z"/></svg>`,
@@ -2611,20 +2610,43 @@ async function generarActaEntregaDesdeLista(resoluciones){
   if(distinto) throw new Error(`Los custodios elegidos no coinciden ("${nombreRef}" vs "${distinto.tramo.nombre}"). Un acta es para un solo custodio — ajusta el selector de cada activo o separa en dos actas.`);
   const cargoRef = resoluciones[0].tramo.cargo;
   const fecha = fechaEnPalabras(hoyISO());
-  // Fecha de la entrega (arriba y B37) sigue siendo la de hoy — el día que se
-  // genera/firma el acta. La de la devolución (H37, plantilla nueva) es otra
-  // cosa: es la fecha real en que ESE tramo terminó (historial_custodia.hasta)
-  // — "pendiente" si el tramo documentado es el vigente (todavía no se
-  // devuelve nada), o la fecha real si se eligió el custodio anterior.
-  const hastaTramo = resoluciones[0].tramo.hasta;
-  const fechaDevolucionTexto = hastaTramo ? fechaEnPalabras(hastaTramo) : "pendiente";
+  // FECHA (arriba, M8) es la de generación del acta — siempre hoy, el día
+  // que se imprime/firma este papel.
+  // FECHA_FIRMA (B37) es otra cosa: la fecha REAL en que se entregaron los
+  // equipos (historial_custodia.desde de cada tramo documentado), no la de
+  // generación — para el caso de un custodio anterior, "hoy" puede ser
+  // semanas o meses después de la entrega real. Si los activos de esta
+  // acta no comparten la misma fecha de entrega, se muestra el rango
+  // (la más antigua - la más reciente) en vez de elegir una sola.
+  const fechasEntregaUnicas = [...new Set(resoluciones.map(r=>r.tramo.desde).filter(Boolean))].sort();
+  const fechaEntregaTexto = fechasEntregaUnicas.length <= 1
+    ? fechaEnPalabras(fechasEntregaUnicas[0])
+    : `${fechaEnPalabras(fechasEntregaUnicas[0])} - ${fechaEnPalabras(fechasEntregaUnicas[fechasEntregaUnicas.length-1])}`;
+  // FECHA_DEVOLUCION (H37): mismo criterio de rango que la entrega, con una
+  // vuelta extra — acá cada activo puede tener un tramo vigente (sin
+  // devolver, "pendiente") o uno cerrado (con fecha real), mezclados en la
+  // misma acta, porque el actual/anterior se elige por activo. "pendiente"
+  // se trata como lo más reciente de todas (un tramo abierto siempre queda
+  // "después" de uno ya cerrado), así que una acta con activos mixtos
+  // muestra "<fecha más antigua> - pendiente" en vez de perder el dato de
+  // que algunos ya se devolvieron y otros no.
+  const hastaValores = resoluciones.map(r=>r.tramo.hasta); // ISO string o null, uno por activo
+  const hastaUnicos = [...new Set(hastaValores)];
+  let fechaDevolucionTexto;
+  if(hastaUnicos.length === 1){
+    fechaDevolucionTexto = hastaUnicos[0] ? fechaEnPalabras(hastaUnicos[0]) : "pendiente";
+  } else {
+    const hastaConocidas = hastaUnicos.filter(h=>h!==null).sort();
+    const masReciente = hastaUnicos.includes(null) ? "pendiente" : fechaEnPalabras(hastaConocidas[hastaConocidas.length-1]);
+    fechaDevolucionTexto = `${fechaEnPalabras(hastaConocidas[0])} - ${masReciente}`;
+  }
 
   const valores = {
     FECHA: fecha,
     NOMBRE: nombreRef || "",
     CARGO: cargoRef || "",
     FIRMA_USUARIO: `Usuario Responsable: ${nombreRef || ""}`,
-    FECHA_FIRMA: `Fecha: ${fecha}`,
+    FECHA_FIRMA: `Fecha: ${fechaEntregaTexto}`,
     FECHA_DEVOLUCION: `Fecha: ${fechaDevolucionTexto}`,
     SOPORTE_ENTREGA: `Soporte técnico: ${soporteTecnicoEntrega.trim()}`,
     SOPORTE_DEVOLUCION: `Soporte técnico: ${soporteTecnicoDevolucion.trim()}`,
