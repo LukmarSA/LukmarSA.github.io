@@ -55,12 +55,33 @@ const ROL_ADMIN = "administrador";
 // mutación, en vez de sembrarse una sola vez desde data.json.
 
 async function refrescarDatos(){
-  const [{ data: activosRaw, error: e1 }, { data: historialRaw, error: e2 }] = await Promise.all([
+  const [
+    { data: activosRaw, error: e1 },
+    { data: historialRaw, error: e2 },
+    { data: tiposActivoRaw, error: e7 },
+    { data: propiedadOpcionesRaw, error: e8 },
+    { data: estadoOpcionesRaw, error: e9 },
+  ] = await Promise.all([
     sb.from("activos").select("*").order("id"),
     sb.from("historial_custodia").select("*").order("activo_id").order("orden"),
+    // Tipo/Propiedad/Estado configurables — reemplazan ICONOS_TIPO/COLOR_TIPO/
+    // CAMPOS_NO_RELEVANTES_DETALLE/CAMPOS_EXTRA_TIPO hardcodeados y los 2 CHECK
+    // que antes limitaban propiedad/estado. Se traen TODAS las filas (incluso
+    // activo=false) porque un activo ya guardado con una opción retirada
+    // todavía necesita poder mostrar su ícono/color/etiqueta — el filtro por
+    // activo=true se aplica solo al armar los <select> de opciones nuevas.
+    sb.from("tipos_activo").select("*").order("orden"),
+    sb.from("propiedad_opciones").select("*").order("orden"),
+    sb.from("estado_opciones").select("*").order("orden"),
   ]);
   if(e1) throw e1;
   if(e2) throw e2;
+  if(e7) throw e7;
+  if(e8) throw e8;
+  if(e9) throw e9;
+  state.tiposActivo = tiposActivoRaw || [];
+  state.propiedadOpciones = propiedadOpcionesRaw || [];
+  state.estadoOpciones = estadoOpcionesRaw || [];
   const historialPorActivo = {};
   (historialRaw||[]).forEach(t=>{
     (historialPorActivo[t.activo_id] ||= []).push({
@@ -117,6 +138,9 @@ function cargarBajas(){ return state.bajas || []; }
 function cargarPermisos(){ return state.permisos || {}; }
 function cargarLog(){ return state.log || []; }
 function cargarPerfiles(){ return state.perfiles || []; }
+function cargarTiposActivo(){ return state.tiposActivo || []; }
+function cargarPropiedadOpciones(){ return state.propiedadOpciones || []; }
+function cargarEstadoOpciones(){ return state.estadoOpciones || []; }
 
 async function guardarPermisos(matriz){
   const filas = [];
@@ -136,6 +160,9 @@ async function guardarPermisos(matriz){
 const state = {
   sesion: null,       // { usuario, rol, nombre_completo }
   sesionUid: null,    // uuid de auth.users — para identificar "soy yo" en Configuración → Usuarios
+  tiposActivo: [],        // filas de tipos_activo (nombre, icono_svg, color, campos_pertinentes, orden)
+  propiedadOpciones: [],  // filas de propiedad_opciones (valor, etiqueta, orden, activo)
+  estadoOpciones: [],     // filas de estado_opciones (valor, etiqueta, color_fg, color_bg, orden, activo)
   vista: "activos",   // activos | bajas | auditoria | config
   configSubtab: "permisos",
   // null en tipo/propiedad/custodioClase = "sin filtrar" (equivale a todas las opciones marcadas).
@@ -180,6 +207,15 @@ function puede(accion){
   const matriz = cargarPermisos();
   const rolPerm = matriz[state.sesion.rol];
   return !!(rolPerm && rolPerm[accion]);
+}
+// A diferencia de puede(accion) — la matriz togglable para acciones "suaves"
+// (ver_bajas, crear_activo, etc.) — esto es un gate duro de rol, igual al que
+// ya usan Configuración/Auditoría/"Borrar tramo": crear un tipo/propiedad/
+// estado nuevo cambia la estructura que todos los demás usan, no es una
+// acción de uso diario que tenga sentido delegar por permiso — solo admin,
+// a pedido explícito ("los registradores solo registran").
+function esAdmin(){
+  return !!(state.sesion && state.sesion.rol === ROL_ADMIN);
 }
 
 /* ============================================================
@@ -255,6 +291,7 @@ function labelTipoDevolucion(v){
 }
 const TIPOS_ENTREGA = [
   {v:"firmada", label:"Firmada (entrega normal con acta)"},
+  {v:"pendiente_firma", label:"Pendiente de firmar (entrega ya realizada, acta aún sin firmar)"},
   {v:"simple", label:"Simple (no aplica firmar)"},
 ];
 function labelTipoEntrega(v){
@@ -434,6 +471,65 @@ async function restaurarBaja(indexBaja){
   const registro = bajas[indexBaja];
   if(!registro) return;
   const { error } = await sb.rpc("f_restaurar_baja", { p_baja_id: registro.id });
+  if(error) throw error;
+  await refrescarDatos();
+}
+
+// ---------- Tipos de activo, propiedad y estado configurables ----------
+// Los tres "+ Nuevo…" (Tipo y Propiedad en el alta/edición de activo, Estado
+// en "Cambiar custodio") escriben acá. Solo se muestran a un administrador
+// (ver esAdmin(), sección 4) — la política RLS de las 3 tablas exige lo
+// mismo del lado del servidor (vía es_admin()), así que esto es defensa en
+// profundidad, no la única barrera.
+async function crearTipoActivo({ nombre, color, icono_svg, campos_pertinentes }){
+  if(!nombre || !nombre.trim()) throw new Error("El nombre no puede quedar vacío.");
+  const existentes = cargarTiposActivo();
+  if(existentes.some(t=>t.nombre.toLowerCase()===nombre.toLowerCase())) throw new Error("Ya existe un tipo con ese nombre.");
+  const orden = existentes.length ? Math.max(...existentes.map(t=>t.orden||0)) + 10 : 10;
+  const { error } = await sb.from("tipos_activo").insert({
+    nombre, color, icono_svg: icono_svg || ICONO_TIPO_GENERICO,
+    campos_pertinentes: campos_pertinentes || [], orden,
+  });
+  if(error) throw error;
+  await refrescarDatos();
+}
+// Convierte una etiqueta libre ("En tránsito") en un valor de texto simple
+// para guardar como clave primaria (propiedad_opciones.valor /
+// estado_opciones.valor) — minúsculas, sin acentos, separado por "_".
+function slugify(texto){
+  return (texto||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"");
+}
+// A partir de UN color "fuerte" (el que elige el admin), genera el tono claro
+// mezclándolo con blanco — mismo criterio visual que ya tenían los estados
+// originales (ej. disponible: texto #2E6B3D sobre fondo #DCEFE0). Así el
+// formulario de "Nuevo estado" solo pide un color, no dos coordinados a mano.
+function tintarClaro(hex, factor){
+  const n = (hex||"#57697C").replace("#","");
+  const r = parseInt(n.substring(0,2),16), g = parseInt(n.substring(2,4),16), b = parseInt(n.substring(4,6),16);
+  const mezclar = c => Math.round(c + (255-c)*factor);
+  const h2 = c => c.toString(16).padStart(2,"0");
+  return "#" + h2(mezclar(r)) + h2(mezclar(g)) + h2(mezclar(b));
+}
+async function crearPropiedadOpcion(etiqueta){
+  const valor = slugify(etiqueta);
+  if(!valor) throw new Error("La etiqueta no puede quedar vacía.");
+  const existentes = cargarPropiedadOpciones();
+  if(existentes.some(o=>o.valor===valor)) throw new Error("Ya existe una propiedad equivalente a esa etiqueta.");
+  const orden = existentes.length ? Math.max(...existentes.map(o=>o.orden||0)) + 10 : 10;
+  const { error } = await sb.from("propiedad_opciones").insert({ valor, etiqueta, orden });
+  if(error) throw error;
+  await refrescarDatos();
+}
+async function crearEstadoOpcion(etiqueta, colorFg){
+  const valor = slugify(etiqueta);
+  if(!valor) throw new Error("La etiqueta no puede quedar vacía.");
+  const existentes = cargarEstadoOpciones();
+  if(existentes.some(o=>o.valor===valor)) throw new Error("Ya existe un estado equivalente a esa etiqueta.");
+  const orden = existentes.length ? Math.max(...existentes.map(o=>o.orden||0)) + 10 : 10;
+  const { error } = await sb.from("estado_opciones").insert({
+    valor, etiqueta, color_fg: colorFg || "#57697C", color_bg: tintarClaro(colorFg, 0.85), orden,
+  });
   if(error) throw error;
   await refrescarDatos();
 }
@@ -832,6 +928,7 @@ const DEFINICION_COLUMNAS = [
   { key:"estado",     label:"Estado",          core:false, weight:1.2, sortCampo:"estado",   filterCampo:"estado",       campoTexto:null,           placeholder:null },
   { key:"custodio",   label:"Custodio",        core:false, weight:2.4, sortCampo:"custodio", filterCampo:"custodioClase",campoTexto:"colCustodio",  placeholder:"Buscar nombre…" },
   { key:"cargo",      label:"Cargo",           core:false, weight:1.5, sortCampo:"cargo",    filterCampo:null,           campoTexto:"colCargo",     placeholder:"Buscar cargo…" },
+  { key:"fechaentrega",label:"Fecha entrega",  core:false, weight:1.3, sortCampo:"fechaentrega",filterCampo:null,        campoTexto:null,           placeholder:null },
   { key:"propiedad",  label:"Propiedad",       core:false, weight:1.1, sortCampo:"propiedad",filterCampo:"propiedad",    campoTexto:"colPropiedad", placeholder:"Buscar propiedad…" },
   { key:"serie",      label:"Serie",           core:false, weight:1.4, sortCampo:"serie",    filterCampo:null,           campoTexto:"colSerie",     placeholder:"Buscar serie…" },
   { key:"so",         label:"Sist. operativo", core:false, weight:1.3, sortCampo:"so",       filterCampo:null,           campoTexto:"colSo",        placeholder:"Buscar SO…" },
@@ -903,12 +1000,20 @@ function actualizarConteosFiltros(){
 }
 
 function claseCustodio(a){ return a.custodio===null ? "disponible" : a.custodio.tipo_custodio; }
+// Tramo vigente completo (con fecha `desde`) — a.custodio ya trae la
+// identidad del custodio vigente (nombre/cargo/tipo) pero no sus fechas;
+// esto se usa para derivar la columna "Fecha entrega". Igual que en
+// refrescarDatos()/tramoHtml(), el vigente es el tramo con hasta===null, NO
+// necesariamente historial_custodia[0].
+function tramoVigente(a){
+  return a.historial_custodia.find(t=>t.hasta===null) || null;
+}
 function labelOpcionFiltro(campo, valor){
   if(campo==="custodioClase"){
     return { disponible:"Disponible", persona:"Persona", area:"Área / depto." }[valor] || valor;
   }
   if(campo==="propiedad"){
-    return LABEL_PROPIEDAD[valor] || valor;
+    return infoPropiedad(valor).label;
   }
   if(campo==="estado"){
     return infoEstado(valor).label;
@@ -921,18 +1026,32 @@ function capitalizar(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
 // columna `empresa` aparte, fusionada acá); "eq" usa el "Marino" real de
 // la paleta de marca EQ Soluciones (Logos_EQ_LUKMAR_v1.zip/LEEME.txt).
 // "rentado"/"externo" son activos que no son propios de ninguna de las dos.
+// Deliberadamente esto NO vive en propiedad_opciones (esa tabla no tiene
+// color_fg/color_bg, a diferencia de estado_opciones — "sin config rica" a
+// propósito) ni es editable desde el "+ Nueva propiedad": son colores de
+// marca real, no algo que deba quedar al criterio de quien esté de admin.
+// Cualquier propiedad nueva (o rentado/externo si algún día se sacan de
+// acá) usa el mismo gris genérico que un tipo/estado sin color propio.
 const COLOR_PROPIEDAD = {
   lukmar:  { fg:"#3A5068", bg:"#E7ECF1" },
   eq:      { fg:"#1A3756", bg:"#DCE6EC" },
   rentado: { fg:"#B35A17", bg:"#FCE3D0" },
   externo: { fg:"#4A3F73", bg:"#E9E4F3" },
 };
-// "lukmar"/"eq" no se pueden capitalizar a secas ("Eq" se ve mal) — de ahí
-// este mapa explícito en vez de solo capitalizar(valor).
-const LABEL_PROPIEDAD = { lukmar:"Lukmar", eq:"EQ Soluciones", rentado:"Rentado", externo:"Externo" };
-function pillPropiedad(valor){
+// La etiqueta ya NO vive en un mapa fijo — propiedad es FK hacia
+// propiedad_opciones (constraint activos_propiedad_fkey), así que
+// a.propiedad coincide EXACTO con propiedad_opciones.valor y su etiqueta
+// real (ej. "EQ Soluciones", o "Comodato" si se crea desde el "+") viene de
+// ahí. capitalizar(valor) queda solo como respaldo defensivo (valor sin
+// fila correspondiente todavía cargada).
+function infoPropiedad(valor){
+  const o = cargarPropiedadOpciones().find(p=>p.valor===valor);
   const c = COLOR_PROPIEDAD[valor] || { fg:"#57697C", bg:"#EEF1F4" };
-  return `<span class="pill" style="background:${c.bg};color:${c.fg};"><span class="pill-dot"></span>${esc(LABEL_PROPIEDAD[valor] || capitalizar(valor))}</span>`;
+  return { label: o ? o.etiqueta : capitalizar(valor), fg:c.fg, bg:c.bg };
+}
+function pillPropiedad(valor){
+  const i = infoPropiedad(valor);
+  return `<span class="pill" style="background:${i.bg};color:${i.fg};"><span class="pill-dot"></span>${esc(i.label)}</span>`;
 }
 // Estado del activo: disponible / en mantenimiento / en uso — INDEPENDIENTE
 // de custodio. Un activo puede estar disponible y aun así tener custodio
@@ -940,15 +1059,44 @@ function pillPropiedad(valor){
 // custodio al que hay que devolvérselo. Una sola fuente de verdad para el
 // color/etiqueta de cada valor, usada tanto por el pill de tabla como por el
 // selector editable del detalle — así no pueden desincronizarse entre sí.
-const ESTADO_INFO = {
-  disponible:    { label:"Disponible",       fg:"#2E6B3D", bg:"#DCEFE0" },
-  mantenimiento: { label:"En mantenimiento",  fg:"#8A5A0F", bg:"#F5E6C8" },
-  uso:           { label:"En uso",            fg:"#004DAB", bg:"#DCE8F7" },
-};
-function infoEstado(valor){ return ESTADO_INFO[valor] || { label: valor || "—", fg:"#57697C", bg:"#EEF1F4" }; }
+// estado ahora es FK hacia estado_opciones (constraint activos_estado_fkey):
+// a.estado coincide EXACTO con estado_opciones.valor. infoEstado()/pillEstado()
+// siguen siendo la única fuente de verdad para color/etiqueta (tabla y
+// detalle), ahora leyendo de Supabase en vez de un objeto fijo — así
+// "Perdido" (o cualquier estado nuevo creado desde "Cambiar custodio") se ve
+// igual de bien que los 3 originales, sin tocar código.
+function infoEstado(valor){
+  const o = cargarEstadoOpciones().find(e=>e.valor===valor);
+  return o ? { label:o.etiqueta, fg:o.color_fg, bg:o.color_bg } : { label: valor || "—", fg:"#57697C", bg:"#EEF1F4" };
+}
 function pillEstado(valor){
   const i = infoEstado(valor);
   return `<span class="pill" style="background:${i.bg};color:${i.fg};"><span class="pill-dot"></span>${esc(i.label)}</span>`;
+}
+// ---------- Listas de <option> para los selects de Tipo/Propiedad/Estado ----------
+// Un solo lugar que arma el HTML de opciones para los 3 selects configurables
+// (Tipo y Propiedad del alta/edición de activo; Estado de "Cambiar custodio"),
+// reutilizado tanto al abrir el formulario como al refrescar después de crear
+// una opción nueva sin cerrar el modal. Propiedad y Estado excluyen las
+// opciones desactivadas (activo=false) salvo que sea justo el valor ya
+// asignado al activo — así no "desaparece" de su propio selector.
+function htmlOpcionesTipo(seleccionado){
+  return `<option value="">— Selecciona —</option>` +
+    cargarTiposActivo().map(t=>`<option value="${esc(t.nombre)}" ${t.nombre===seleccionado?'selected':''}>${esc(t.nombre)}</option>`).join("");
+}
+function opcionesVigentes(todas, seleccionado){
+  const activas = todas.filter(o=>o.activo!==false);
+  if(!seleccionado || activas.some(o=>o.valor===seleccionado)) return activas;
+  return [...activas, ...todas.filter(o=>o.valor===seleccionado)];
+}
+function htmlOpcionesPropiedad(seleccionado){
+  return opcionesVigentes(cargarPropiedadOpciones(), seleccionado)
+    .map(o=>`<option value="${esc(o.valor)}" ${o.valor===seleccionado?'selected':''}>${esc(o.etiqueta)}${o.activo===false?' (inactivo)':''}</option>`).join("");
+}
+function htmlOpcionesEstado(seleccionado){
+  return `<option value="">— Selecciona —</option>` +
+    opcionesVigentes(cargarEstadoOpciones(), seleccionado)
+      .map(o=>`<option value="${esc(o.valor)}" ${o.valor===seleccionado?'selected':''}>${esc(o.etiqueta)}${o.activo===false?' (inactivo)':''}</option>`).join("");
 }
 // Selección efectiva para una columna: null significa "todavía no se tocó
 // el filtro", lo que equivale a "todas las opciones seleccionadas" (sin filtrar).
@@ -988,8 +1136,15 @@ function filtrarActivos(datos){
     }
     if(f.colCustodio){
       const t = f.colCustodio.toLowerCase();
-      const nombre = (a.custodio ? a.custodio.nombre : "Disponible").toLowerCase();
-      if(!nombre.includes(t)) return false;
+      const nombreActual = (a.custodio ? a.custodio.nombre : "Disponible").toLowerCase();
+      // Además del custodio vigente, revisa TODO el historial (que ya incluye
+      // el propio tramo vigente cuando hay custodio) — así un activo aparece
+      // si cualquier custodio PASADO coincide con el nombre buscado, no solo
+      // el actual. "Disponible" no vive en historial_custodia (es solo la
+      // etiqueta de UI cuando no hay tramo vigente), por eso nombreActual se
+      // revisa aparte.
+      const coincideHistorico = a.historial_custodia.some(h => (h.nombre||"").toLowerCase().includes(t));
+      if(!nombreActual.includes(t) && !coincideHistorico) return false;
     }
     if(f.colCargo){
       const t = f.colCargo.toLowerCase();
@@ -1021,6 +1176,7 @@ function compararActivos(a,b,campo,dir){
     case "marca": va=((a.marca||"")+" "+(a.modelo||"")).trim(); vb=((b.marca||"")+" "+(b.modelo||"")).trim(); break;
     case "custodio": va=(a.custodio?a.custodio.nombre:"") ; vb=(b.custodio?b.custodio.nombre:""); break;
     case "cargo": va=(a.custodio&&a.custodio.cargo)?a.custodio.cargo:""; vb=(b.custodio&&b.custodio.cargo)?b.custodio.cargo:""; break;
+    case "fechaentrega": va=(tramoVigente(a)||{}).desde||""; vb=(tramoVigente(b)||{}).desde||""; break;
     case "propiedad": va=a.propiedad||""; vb=b.propiedad||""; break;
     case "serie": va=a.serie||""; vb=b.serie||""; break;
     case "so": va=a.sistema_operativo||""; vb=b.sistema_operativo||""; break;
@@ -1267,10 +1423,63 @@ function abrirModalKpiColumna(campo){
   });
 }
 
+/* ---------- Pendientes de firma (entregas ya realizadas, acta aún sin firmar) ---------- */
+// Recorre TODO el historial de custodia de TODOS los activos, no solo el
+// tramo vigente — mismo principio que la búsqueda histórica de custodio
+// (ver el filtro colCustodio en filtrarActivos): una firma pendiente de un
+// tramo ya cerrado sigue pendiente aunque ese activo ya haya cambiado de
+// manos otra vez, así que debe seguir apareciendo acá hasta que alguien la
+// resuelva editando ese tramo (abrirEditarTramo → Tipo de entrega).
+function listaPendientesFirma(datos){
+  const filas = [];
+  datos.activos.forEach(a=>{
+    a.historial_custodia.forEach(t=>{
+      if(t.tipo_entrega === "pendiente_firma") filas.push({ activo:a, tramo:t, vigente: t.hasta===null });
+    });
+  });
+  // Ordenado por nombre de custodio (y luego fecha) para que "ver todas las
+  // personas con firmas pendientes" se lea de un vistazo, agrupado por persona.
+  filas.sort((x,y)=> (x.tramo.nombre||"").localeCompare(y.tramo.nombre||"",'es') || (x.tramo.desde||"").localeCompare(y.tramo.desde||""));
+  return filas;
+}
+function abrirPendientesFirma(){
+  const filas = listaPendientesFirma(cargarActivos());
+  const html = `<div class="modal modal-wide">
+    <div class="modal-header"><h3>Pendientes de firma (${filas.length})</h3><button class="modal-close">✕</button></div>
+    <div class="modal-body">
+      <div class="field hint" style="margin-bottom:12px;">Entregas ya realizadas cuya acta todavía no se ha firmado — incluye tramos históricos, no solo el custodio actual de cada activo. Para resolver una, abre el activo y edita ese tramo (cambia el tipo de entrega una vez firmada).</div>
+      ${filas.length===0 ? `<div class="empty-state"><div class="big">—</div>No hay ninguna entrega pendiente de firma.</div>` : `
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Custodio</th><th>Cargo</th><th>Tag</th><th>Tipo</th><th>Fecha entrega</th><th>Tramo</th><th></th></tr></thead>
+          <tbody>
+            ${filas.map(({activo:a, tramo:t, vigente})=>`
+              <tr>
+                <td>${esc(t.nombre)}</td>
+                <td class="cell-muted">${esc(t.cargo)||'—'}</td>
+                <td class="mono">${fmtTag(a)}</td>
+                <td>${esc(a.tipo)||'—'}</td>
+                <td>${fmtFecha(t.desde)}</td>
+                <td>${vigente ? '<span class="pill pill-persona">Vigente</span>' : '<span class="pill pill-mantenimiento">Histórico</span>'}</td>
+                <td class="cell-actions"><button class="btn btn-sm" data-ver-pendiente="${a.id}">Ver activo</button></td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>`}
+    </div>
+    <div class="modal-footer"><button class="btn modal-close">Cerrar</button></div>
+  </div>`;
+  abrirModal(html, ()=>{
+    document.querySelectorAll("[data-ver-pendiente]").forEach(b=>{
+      b.addEventListener("click", ()=>abrirDetalle(Number(b.dataset.verPendiente)));
+    });
+  });
+}
 
 function renderVistaActivos(main){
   const datos = cargarActivos();
   recalcularOpcionesFiltro(datos);
+  const nPendientesFirma = listaPendientesFirma(datos).length;
 
   main.innerHTML = `
     <div class="filterbar">
@@ -1287,6 +1496,7 @@ function renderVistaActivos(main){
           <button type="button" class="dropdown-item" data-formato-global="html">Descargar HTML</button>
         </div>
       </div>
+      <button class="btn ${nPendientesFirma?'btn-warn':''}" id="btn-pendientes-firma" title="Entregas ya realizadas cuya acta todavía no se ha firmado">🖊️ Pendientes de firma${nPendientesFirma?` (${nPendientesFirma})`:""}</button>
       ${puede("crear_activo") ? `<button class="btn btn-primary" id="btn-nuevo">+ Nuevo activo</button>` : ""}
     </div>
     <div class="tablewrap tablewrap-activos">
@@ -1318,6 +1528,8 @@ function renderVistaActivos(main){
   });
   const btnNuevo = document.getElementById("btn-nuevo");
   if(btnNuevo) btnNuevo.addEventListener("click", ()=>abrirFormActivo(null));
+  const btnPendientesFirma = document.getElementById("btn-pendientes-firma");
+  if(btnPendientesFirma) btnPendientesFirma.addEventListener("click", abrirPendientesFirma);
   document.getElementById("btn-exportar").addEventListener("click", async ()=>{
     try{ await exportarActivosExcel(); }
     catch(err){ mostrarToast("No se pudo generar el Excel: " + err.message, "error"); }
@@ -1629,7 +1841,7 @@ async function exportarActivosExcel(){
   const filas1 = lista.map((a,i)=>{
     const valores = [
       fmtTag(a), a.propiedad==="eq"?"EQ Soluciones":"Lukmar", a.tipo||"", a.marca||"", a.modelo||"",
-      a.serie||"", a.nombre_dispositivo||"", (LABEL_PROPIEDAD[a.propiedad] || capitalizar(a.propiedad))||"",
+      a.serie||"", a.nombre_dispositivo||"", infoPropiedad(a.propiedad).label||"",
       a.custodio?a.custodio.nombre:"Disponible", a.custodio?etiquetaCustodioTipo(a.custodio.tipo_custodio):"",
       a.custodio?(a.custodio.cargo||""):"", a.sistema_operativo||"", a.ram_gb??"", a.disco_gb??"",
       a.procesador||"", a.mac_wifi||"", a.mac_ethernet||"", a.proveedor||"", a.fecha_adquisicion||"",
@@ -1689,118 +1901,35 @@ async function exportarActivosExcel(){
   URL.revokeObjectURL(url);
 }
 
-// ---------- Iconos SVG por tipo de activo ----------
-// Reemplazados por los SVG reales de Bootstrap Icons (twbs/icons, MIT
-// license) a pedido explícito — bajados directo del repo de GitHub, sin
-// modificar los `path`. Todos usan fill="currentColor" (relleno, no trazo)
-// y viewBox nativo 16x16 — quedan consistentes ENTRE ELLOS, aunque distinto
-// del estilo de línea fina que tenía este set antes.
-// "plotter" es la única excepción: Bootstrap Icons no tiene un ícono de
-// plotter/impresora de gran formato, así que se dejó el diseño original.
-const ICONOS_TIPO = {
-  laptop: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M13.5 3a.5.5 0 0 1 .5.5V11H2V3.5a.5.5 0 0 1 .5-.5zm-11-1A1.5 1.5 0 0 0 1 3.5V12h14V3.5A1.5 1.5 0 0 0 13.5 2zM0 12.5h16a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 12.5"/></svg>`,
-  // Desktop: bi-pc-display (torre + pantalla, el ícono canónico de "PC de escritorio" en Bootstrap Icons).
-  desktop: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1zm1 13.5a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0m2 0a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0M9.5 1a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1zM9 3.5a.5.5 0 0 0 .5.5h5a.5.5 0 0 0 0-1h-5a.5.5 0 0 0-.5.5M1.5 2A1.5 1.5 0 0 0 0 3.5v7A1.5 1.5 0 0 0 1.5 12H6v2h-.5a.5.5 0 0 0 0 1H7v-4H1.5a.5.5 0 0 1-.5-.5v-7a.5.5 0 0 1 .5-.5H7V2z"/></svg>`,
-  celular: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M11 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM5 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/><path d="M8 14a1 1 0 1 0 0-2 1 1 0 0 0 0 2"/></svg>`,
-  impresora: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1"/><path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1"/></svg>`,
-  // Scanner: bi-upc-scan — Bootstrap Icons no tiene un escáner plano/documental, este es el más cercano (escáner de código de barras).
-  scanner: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1zM11 .5a.5.5 0 0 1 .5-.5h3A1.5 1.5 0 0 1 16 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 1-.5-.5M.5 11a.5.5 0 0 1 .5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 .5-.5m15 0a.5.5 0 0 1 .5.5v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 1 .5-.5M3 4.5a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0zm2 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0zm2 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0zm2 0a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v7a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5zm3 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0z"/></svg>`,
-  // Plotter: sin equivalente en Bootstrap Icons — se conserva el diseño original (bandeja + trazo en zigzag + punta del lápiz).
-  plotter: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="14.5" width="18" height="5.5" rx="1"/><path d="M6 14.5l2.6-8.5h2.4l1.8 4.6 1.8-2.6h2.2"/><circle cx="17.8" cy="7.5" r="1" fill="currentColor" stroke="none"/></svg>`,
-  smarttv: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M2.5 13.5A.5.5 0 0 1 3 13h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5M13.991 3l.024.001a1.5 1.5 0 0 1 .538.143.76.76 0 0 1 .302.254c.067.1.145.277.145.602v5.991l-.001.024a1.5 1.5 0 0 1-.143.538.76.76 0 0 1-.254.302c-.1.067-.277.145-.602.145H2.009l-.024-.001a1.5 1.5 0 0 1-.538-.143.76.76 0 0 1-.302-.254C1.078 10.502 1 10.325 1 10V4.009l.001-.024a1.5 1.5 0 0 1 .143-.538.76.76 0 0 1 .254-.302C1.498 3.078 1.675 3 2 3zM14 2H2C0 2 0 4 0 4v6c0 2 2 2 2 2h12c2 0 2-2 2-2V4c0-2-2-2-2-2"/></svg>`,
-  monitor: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M0 4s0-2 2-2h12s2 0 2 2v6s0 2-2 2h-4q0 1 .25 1.5H11a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1h.75Q6 13 6 12H2s-2 0-2-2zm1.398-.855a.76.76 0 0 0-.254.302A1.5 1.5 0 0 0 1 4.01V10c0 .325.078.502.145.602q.105.156.302.254a1.5 1.5 0 0 0 .538.143L2.01 11H14c.325 0 .502-.078.602-.145a.76.76 0 0 0 .254-.302 1.5 1.5 0 0 0 .143-.538L15 9.99V4c0-.325-.078-.502-.145-.602a.76.76 0 0 0-.302-.254A1.5 1.5 0 0 0 13.99 3H2c-.325 0-.502.078-.602.145"/></svg>`,
-  mouse: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 3a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 3m4 8a4 4 0 0 1-8 0V5a4 4 0 1 1 8 0zM8 0a5 5 0 0 0-5 5v6a5 5 0 0 0 10 0V5a5 5 0 0 0-5-5"/></svg>`,
-  // Fuente de alimentación: bi-plug — reemplaza el rectángulo con clavijas dibujado a mano.
-  fuentedealimentacion: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M6 0a.5.5 0 0 1 .5.5V3h3V.5a.5.5 0 0 1 1 0V3h1a.5.5 0 0 1 .5.5v3A3.5 3.5 0 0 1 8.5 10c-.002.434-.01.845-.04 1.22-.041.514-.126 1.003-.317 1.424a2.08 2.08 0 0 1-.97 1.028C6.725 13.9 6.169 14 5.5 14c-.998 0-1.61.33-1.974.718A1.92 1.92 0 0 0 3 16H2c0-.616.232-1.367.797-1.968C3.374 13.42 4.261 13 5.5 13c.581 0 .962-.088 1.218-.219.241-.123.4-.3.514-.55.121-.266.193-.621.23-1.09.027-.34.035-.718.037-1.141A3.5 3.5 0 0 1 4 6.5v-3a.5.5 0 0 1 .5-.5h1V.5A.5.5 0 0 1 6 0M5 4v2.5A2.5 2.5 0 0 0 7.5 9h1A2.5 2.5 0 0 0 11 6.5V4z"/></svg>`,
-  teclado: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M14 5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM2 4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><path d="M13 10.25a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zm0-2a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zm-5 0A.25.25 0 0 1 8.25 8h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 8 8.75zm2 0a.25.25 0 0 1 .25-.25h1.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-1.5a.25.25 0 0 1-.25-.25zm1 2a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zm-5-2A.25.25 0 0 1 6.25 8h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 6 8.75zm-2 0A.25.25 0 0 1 4.25 8h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 4 8.75zm-2 0A.25.25 0 0 1 2.25 8h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 2 8.75zm11-2a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zm-2 0a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zm-2 0A.25.25 0 0 1 9.25 6h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 9 6.75zm-2 0A.25.25 0 0 1 7.25 6h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 7 6.75zm-2 0A.25.25 0 0 1 5.25 6h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5A.25.25 0 0 1 5 6.75zm-3 0A.25.25 0 0 1 2.25 6h1.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-1.5A.25.25 0 0 1 2 6.75zm0 4a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zm2 0a.25.25 0 0 1 .25-.25h5.5a.25.25 0 0 1 .25.25v.5a.25.25 0 0 1-.25.25h-5.5a.25.25 0 0 1-.25-.25z"/></svg>`,
-  ap: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M15.384 6.115a.485.485 0 0 0-.047-.736A12.44 12.44 0 0 0 8 3C5.259 3 2.723 3.882.663 5.379a.485.485 0 0 0-.048.736.52.52 0 0 0 .668.05A11.45 11.45 0 0 1 8 4c2.507 0 4.827.802 6.716 2.164.205.148.49.13.668-.049"/><path d="M13.229 8.271a.482.482 0 0 0-.063-.745A9.46 9.46 0 0 0 8 6c-1.905 0-3.68.56-5.166 1.526a.48.48 0 0 0-.063.745.525.525 0 0 0 .652.065A8.46 8.46 0 0 1 8 7a8.46 8.46 0 0 1 4.576 1.336c.206.132.48.108.653-.065m-2.183 2.183c.226-.226.185-.605-.1-.75A6.5 6.5 0 0 0 8 9c-1.06 0-2.062.254-2.946.704-.285.145-.326.524-.1.75l.015.015c.16.16.407.19.611.09A5.5 5.5 0 0 1 8 10c.868 0 1.69.201 2.42.56.203.1.45.07.61-.091zM9.06 12.44c.196-.196.198-.52-.04-.66A2 2 0 0 0 8 11.5a2 2 0 0 0-1.02.28c-.238.14-.236.464-.04.66l.706.706a.5.5 0 0 0 .707 0l.707-.707z"/></svg>`,
-  // Cable HDMI: bi-hdmi — reemplaza toda la exploración anterior (culebra/bolita, punta de 3 piezas, etc.) por el conector real de Bootstrap Icons.
-  cablehdmi: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M2.5 7a.5.5 0 0 0 0 1h11a.5.5 0 0 0 0-1z"/><path d="M1 5a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h.293l.707.707a1 1 0 0 0 .707.293h10.586a1 1 0 0 0 .707-.293l.707-.707H15a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1zm0 1h14v3h-.293a1 1 0 0 0-.707.293l-.707.707H2.707L2 9.293A1 1 0 0 0 1.293 9H1z"/></svg>`,
-  // Biométrico: huella dactilar de Bootstrap Icons (bi-fingerprint), a pedido explícito.
-  biometrico: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8.06 6.5a.5.5 0 0 1 .5.5v.776a11.5 11.5 0 0 1-.552 3.519l-1.331 4.14a.5.5 0 0 1-.952-.305l1.33-4.141a10.5 10.5 0 0 0 .504-3.213V7a.5.5 0 0 1 .5-.5Z"/><path d="M6.06 7a2 2 0 1 1 4 0 .5.5 0 1 1-1 0 1 1 0 1 0-2 0v.332q0 .613-.066 1.221A.5.5 0 0 1 6 8.447q.06-.555.06-1.115zm3.509 1a.5.5 0 0 1 .487.513 11.5 11.5 0 0 1-.587 3.339l-1.266 3.8a.5.5 0 0 1-.949-.317l1.267-3.8a10.5 10.5 0 0 0 .535-3.048A.5.5 0 0 1 9.569 8m-3.356 2.115a.5.5 0 0 1 .33.626L5.24 14.939a.5.5 0 1 1-.955-.296l1.303-4.199a.5.5 0 0 1 .625-.329"/><path d="M4.759 5.833A3.501 3.501 0 0 1 11.559 7a.5.5 0 0 1-1 0 2.5 2.5 0 0 0-4.857-.833.5.5 0 1 1-.943-.334m.3 1.67a.5.5 0 0 1 .449.546 10.7 10.7 0 0 1-.4 2.031l-1.222 4.072a.5.5 0 1 1-.958-.287L4.15 9.793a9.7 9.7 0 0 0 .363-1.842.5.5 0 0 1 .546-.449Zm6 .647a.5.5 0 0 1 .5.5c0 1.28-.213 2.552-.632 3.762l-1.09 3.145a.5.5 0 0 1-.944-.327l1.089-3.145c.382-1.105.578-2.266.578-3.435a.5.5 0 0 1 .5-.5Z"/><path d="M3.902 4.222a5 5 0 0 1 5.202-2.113.5.5 0 0 1-.208.979 4 4 0 0 0-4.163 1.69.5.5 0 0 1-.831-.556m6.72-.955a.5.5 0 0 1 .705-.052A4.99 4.99 0 0 1 13.059 7v1.5a.5.5 0 1 1-1 0V7a3.99 3.99 0 0 0-1.386-3.028.5.5 0 0 1-.051-.705M3.68 5.842a.5.5 0 0 1 .422.568q-.044.289-.044.59c0 .71-.1 1.417-.298 2.1l-1.14 3.923a.5.5 0 1 1-.96-.279L2.8 8.821A6.5 6.5 0 0 0 3.058 7q0-.375.054-.736a.5.5 0 0 1 .568-.422m8.882 3.66a.5.5 0 0 1 .456.54c-.084 1-.298 1.986-.64 2.934l-.744 2.068a.5.5 0 0 1-.941-.338l.745-2.07a10.5 10.5 0 0 0 .584-2.678.5.5 0 0 1 .54-.456"/><path d="M4.81 1.37A6.5 6.5 0 0 1 14.56 7a.5.5 0 1 1-1 0 5.5 5.5 0 0 0-8.25-4.765.5.5 0 0 1-.5-.865m-.89 1.257a.5.5 0 0 1 .04.706A5.48 5.48 0 0 0 2.56 7a.5.5 0 0 1-1 0c0-1.664.626-3.184 1.655-4.333a.5.5 0 0 1 .706-.04ZM1.915 8.02a.5.5 0 0 1 .346.616l-.779 2.767a.5.5 0 1 1-.962-.27l.778-2.767a.5.5 0 0 1 .617-.346m12.15.481a.5.5 0 0 1 .49.51c-.03 1.499-.161 3.025-.727 4.533l-.07.187a.5.5 0 0 1-.936-.351l.07-.187c.506-1.35.634-2.74.663-4.202a.5.5 0 0 1 .51-.49"/></svg>`,
-  // Cable USB: bi-usb-plug.
-  cableusb: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M6 .5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5v4H6zM7 1v1h1V1zm2 0v1h1V1zM6 5a1 1 0 0 0-1 1v4.394c0 .494.146.976.42 1.387l1.038 1.558c.354.53.542 1.152.542 1.789 0 .481.39.872.872.872h1.256c.481 0 .872-.39.872-.872 0-.637.188-1.26.541-1.789l1.04-1.558A2.5 2.5 0 0 0 12 10.394V6a1 1 0 0 0-1-1zm0 1h5v4.394a1.5 1.5 0 0 1-.252.832L9.71 12.784A4.2 4.2 0 0 0 9.002 15H7.998a4.2 4.2 0 0 0-.707-2.216l-1.04-1.558A1.5 1.5 0 0 1 6 10.394z"/></svg>`,
-  // Router: bi-router — reemplaza la caja+antenas dibujada a mano.
-  router: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M5.525 3.025a3.5 3.5 0 0 1 4.95 0 .5.5 0 1 0 .707-.707 4.5 4.5 0 0 0-6.364 0 .5.5 0 0 0 .707.707"/><path d="M6.94 4.44a1.5 1.5 0 0 1 2.12 0 .5.5 0 0 0 .708-.708 2.5 2.5 0 0 0-3.536 0 .5.5 0 0 0 .707.707ZM2.5 11a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1m4.5-.5a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0m2.5.5a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1m1.5-.5a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0m2 0a.5.5 0 1 0 1 0 .5.5 0 0 0-1 0"/><path d="M2.974 2.342a.5.5 0 1 0-.948.316L3.806 8H1.5A1.5 1.5 0 0 0 0 9.5v2A1.5 1.5 0 0 0 1.5 13H2a.5.5 0 0 0 .5.5h2A.5.5 0 0 0 5 13h6a.5.5 0 0 0 .5.5h2a.5.5 0 0 0 .5-.5h.5a1.5 1.5 0 0 0 1.5-1.5v-2A1.5 1.5 0 0 0 14.5 8h-2.306l1.78-5.342a.5.5 0 1 0-.948-.316L11.14 8H4.86zM14.5 9a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-2a.5.5 0 0 1 .5-.5z"/><path d="M8.5 5.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0"/></svg>`,
-  // Switch de red: bi-hdd-network — Bootstrap Icons no tiene un ícono
-  // dedicado a "switch"; este es el más cercano semánticamente (hardware de
-  // red genérico), bajado sin modificar de icons.getbootstrap.com.
-  switch: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M4.5 5a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1M3 4.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0"/><path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2H8.5v3a1.5 1.5 0 0 1 1.5 1.5h5.5a.5.5 0 0 1 0 1H10A1.5 1.5 0 0 1 8.5 14h-1A1.5 1.5 0 0 1 6 12.5H.5a.5.5 0 0 1 0-1H6A1.5 1.5 0 0 1 7.5 10V7H2a2 2 0 0 1-2-2zm1 0v1a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H2a1 1 0 0 0-1 1m6 7.5v1a.5.5 0 0 0 .5.5h1a.5.5 0 0 0 .5-.5v-1a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5"/></svg>`,
-  // UPS (batería de respaldo): bi-battery-charging, sin modificar.
-  ups: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M9.585 2.568a.5.5 0 0 1 .226.58L8.677 6.832h1.99a.5.5 0 0 1 .364.843l-5.334 5.667a.5.5 0 0 1-.842-.49L5.99 9.167H4a.5.5 0 0 1-.364-.843l5.333-5.667a.5.5 0 0 1 .616-.09z"/><path d="M2 4h4.332l-.94 1H2a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h2.38l-.308 1H2a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2"/><path d="M2 6h2.45L2.908 7.639A1.5 1.5 0 0 0 3.313 10H2zm8.595-2-.308 1H12a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H9.276l-.942 1H12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><path d="M12 10h-1.783l1.542-1.639q.146-.156.241-.34zm0-3.354V6h-.646a1.5 1.5 0 0 1 .646.646M16 8a1.5 1.5 0 0 1-1.5 1.5v-3A1.5 1.5 0 0 1 16 8"/></svg>`,
-  generico: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5 8 5.961 14.154 3.5zM15 4.239l-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.662a1 1 0 0 1-.629.928l-7.185 2.874a.5.5 0 0 1-.372 0L.63 13.09a1 1 0 0 1-.63-.928V3.5a.5.5 0 0 1 .314-.464z"/></svg>`,
+// ---------- Tipos de activo configurables ----------
+// Antes: objetos hardcodeados (ICONOS_TIPO/COLOR_TIPO/CAMPOS_NO_RELEVANTES_
+// DETALLE/CAMPOS_EXTRA_TIPO) + claveTipo() para normalizar acentos/mayúsculas.
+// Ahora: tipo es FK hacia la tabla tipos_activo (constraint activos_tipo_
+// fkey), así que a.tipo coincide EXACTO con tipos_activo.nombre — no hace
+// falta normalizar nada al leer. Cada tipo trae su propio ícono SVG, color y
+// lista de "campos pertinentes" desde Supabase (ver cargarTiposActivo()),
+// editable desde Configuración (solo admin) sin tocar código.
+const ICONO_TIPO_GENERICO = `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5 8 5.961 14.154 3.5zM15 4.239l-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.662a1 1 0 0 1-.629.928l-7.185 2.874a.5.5 0 0 1-.372 0L.63 13.09a1 1 0 0 1-.63-.928V3.5a.5.5 0 0 1 .314-.464z"/></svg>`;
+const COLOR_TIPO_GENERICO = "#8B9AAA";
+// Los 7 campos "bloqueables" (pueden ocultarse según el tipo) y los 2 campos
+// "extra" (solo aparecen si el tipo los pide) — mismo universo que antes,
+// ahora la pertenencia de cada tipo a estas listas vive en Supabase
+// (tipos_activo.campos_pertinentes) en vez de en objetos JS.
+const CAMPOS_BLOQUEABLES = ["serie","so","ram_gb","disco_gb","procesador","mac_wifi","mac_ethernet"];
+const CAMPOS_EXTRA = ["color","longitud_m"];
+// Etiquetas humanas para el mini-formulario "+ Nuevo tipo" (checkboxes de
+// campos pertinentes) — mismo universo que CAMPOS_BLOQUEABLES + CAMPOS_EXTRA.
+const LABEL_CAMPO = {
+  serie:"Serie", so:"Sistema operativo", ram_gb:"RAM", disco_gb:"Almacenamiento",
+  procesador:"Procesador", mac_wifi:"MAC WiFi", mac_ethernet:"MAC Ethernet",
+  color:"Color", longitud_m:"Longitud",
 };
-// Un color propio por tipo, para que se distingan de un vistazo en la columna.
-// Los tres tipos más comunes usan colores reales de la marca Lukmar.
-const COLOR_TIPO = {
-  laptop: "#57697C", desktop: "#004DAB", celular: "#007EB2", impresora: "#EC741D",
-  scanner: "#74883D", plotter: "#5B4B8A", smarttv: "#2E93C7",
-  monitor: "#1F6FA8", mouse: "#8A6D3B", fuentedealimentacion: "#B0651C", ap: "#2E7D5B", teclado: "#6B7C93",
-  cablehdmi: "#B23A6B",
-  biometrico: "#1F8C7A", cableusb: "#4A5A9E", router: "#A67C27",
-  switch: "#3E5C6B", ups: "#D4A017",
-  generico: "#8B9AAA",
-};
-function claveTipo(tipo){
-  return (tipo||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g,"");
-}
-// Qué campos NO son relevantes para cada tipo — la ficha de detalle
-// (abrirDetalle) usa esto para no mostrar "MAC WiFi: —" en un mouse, y la
-// tabla (celdaActivo, vía columnaAplicaATipo) para mostrar "n/a" en vez del
-// valor. Es la misma lista para ambas vistas a propósito: si un campo no
-// aplica en el detalle, tampoco debería fingir que aplica en la tabla.
-// Solo cubre tipos NUEVOS sin datos históricos en riesgo — los tipos ya
-// existentes (laptop/desktop/impresora/etc.) siguen mostrando todo, porque
-// hay activos reales con datos en esos campos (ej. MAC en impresoras).
-const CAMPOS_NO_RELEVANTES_DETALLE = {
-  mouse:               ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
-  teclado:             ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
-  monitor:             ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
-  fuentedealimentacion:["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
-  ap:                  ["so","procesador","ram_gb","disco_gb"], // sí conserva las MAC — un AP real las usa
-  router:              ["so","procesador","ram_gb","disco_gb"], // mismo criterio que AP — MAC sí, cómputo no
-  cablehdmi:           ["serie","so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
-  cableusb:            ["serie","so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"],
-  biometrico:          ["so","procesador","ram_gb","disco_gb"], // sí conserva las MAC, igual que AP — se conecta a red para sincronizar asistencia
-  switch:              ["so","procesador","ram_gb","disco_gb","mac_wifi"], // mismo criterio que AP/router, pero sin wifi — un switch no tiene radio
-  ups:                 ["so","procesador","ram_gb","disco_gb","mac_wifi","mac_ethernet"], // mismo criterio que fuentedealimentacion — solo batería, sin cómputo ni red
-};
-function camposNoRelevantesParaDetalle(tipo){
-  return CAMPOS_NO_RELEVANTES_DETALLE[claveTipo(tipo)] || [];
-}
-// Lo opuesto de lo anterior: campos que NO son genéricos (no existen para
-// casi ningún tipo) y que solo se muestran — en el detalle, y como columna
-// de tabla — para los tipos que sí los usan (vía columnaAplicaATipo). Se
-// parte de "nada visible" en vez de "todo visible, se oculta lo que no
-// aplica", porque son campos de nicho (cables), no la mayoría de los tipos.
-const CAMPOS_EXTRA_TIPO = {
-  cablehdmi: ["color","longitud_m"],
-  cableusb: ["color","longitud_m"],
-};
-function camposExtraParaTipo(tipo){
-  return CAMPOS_EXTRA_TIPO[claveTipo(tipo)] || [];
-}
-// Qué campo de CAMPOS_NO_RELEVANTES_DETALLE / CAMPOS_EXTRA_TIPO corresponde a
-// cada columna de la TABLA — los nombres no siempre coinciden 1:1 (ram_gb en
-// la base de datos, "ram" como key de columna). Configurable acá, no
-// estructural en la base de datos: agregar/sacar un tipo de estas listas ya
-// alcanza para que la tabla (y el detalle, que usa las mismas listas) lo
-// reflejen — no hace falta ninguna columna nueva en Supabase para esto.
-const CAMPO_BLOQUEADO_POR_COLUMNA = {
-  serie:"serie", so:"so", ram:"ram_gb", disco:"disco_gb",
-  procesador:"procesador", macwifi:"mac_wifi", maceth:"mac_ethernet",
-};
-const CAMPO_EXTRA_POR_COLUMNA = { color:"color", longitud:"longitud_m" };
-function columnaAplicaATipo(colKey, tipo){
-  const bloqueado = CAMPO_BLOQUEADO_POR_COLUMNA[colKey];
-  if(bloqueado) return !camposNoRelevantesParaDetalle(tipo).includes(bloqueado);
-  const extra = CAMPO_EXTRA_POR_COLUMNA[colKey];
-  if(extra) return camposExtraParaTipo(tipo).includes(extra);
-  return true; // columnas que no dependen del tipo de activo (tag, marca, valor de compra, etc.)
+function configTipo(tipo){
+  return cargarTiposActivo().find(t=>t.nombre===tipo) || null;
 }
 function iconoTipo(tipo){
-  const key = claveTipo(tipo);
-  return ICONOS_TIPO[key] || ICONOS_TIPO.generico;
+  const t = configTipo(tipo);
+  return (t && t.icono_svg) || ICONO_TIPO_GENERICO;
 }
 // Mismo ícono que en la tabla, pero a cualquier tamaño (se usa grande en el
 // resumen del detalle). Los paths del SVG son iguales; solo cambia el
@@ -1809,8 +1938,47 @@ function iconoTipoTam(tipo, tam){
   return iconoTipo(tipo).replace(/width="16" height="16"/, `width="${tam}" height="${tam}"`);
 }
 function colorTipo(tipo){
-  const key = claveTipo(tipo);
-  return COLOR_TIPO[key] || COLOR_TIPO.generico;
+  const t = configTipo(tipo);
+  return (t && t.color) || COLOR_TIPO_GENERICO;
+}
+// Campos pertinentes para un tipo dado (bloqueables + extra que sí aplican).
+// Sin config (tipo null/desconocido — ej. el formulario de activo nuevo
+// antes de elegir tipo), se muestran todos los bloqueables: mismo criterio
+// seguro que tenían los tipos grandes originales (laptop/desktop/etc.).
+function camposPertinentesParaTipo(tipo){
+  const t = configTipo(tipo);
+  return t ? (t.campos_pertinentes || []) : CAMPOS_BLOQUEABLES;
+}
+// Qué campos NO son relevantes para un tipo — la ficha de detalle
+// (abrirDetalle) usa esto para no mostrar "MAC WiFi: —" en un mouse, y la
+// tabla (celdaActivo, vía columnaAplicaATipo) para mostrar "n/a" en vez del
+// valor.
+function camposNoRelevantesParaDetalle(tipo){
+  const pertinentes = camposPertinentesParaTipo(tipo);
+  return CAMPOS_BLOQUEABLES.filter(c => !pertinentes.includes(c));
+}
+// Lo opuesto: campos que NO son genéricos (no existen para casi ningún tipo)
+// y que solo se muestran — en el detalle, y como columna de tabla — para los
+// tipos que sí los tienen en su lista de campos pertinentes (cables).
+function camposExtraParaTipo(tipo){
+  const pertinentes = camposPertinentesParaTipo(tipo);
+  return CAMPOS_EXTRA.filter(c => pertinentes.includes(c));
+}
+// Qué campo de CAMPOS_BLOQUEABLES/CAMPOS_EXTRA corresponde a cada columna de
+// la TABLA — los nombres no siempre coinciden 1:1 (ram_gb en la base de
+// datos, "ram" como key de columna). Esto sigue siendo configuración propia
+// del frontend (qué columnas tiene la tabla), no de Supabase.
+const CAMPO_BLOQUEADO_POR_COLUMNA = {
+  serie:"serie", so:"so", ram:"ram_gb", disco:"disco_gb",
+  procesador:"procesador", macwifi:"mac_wifi", maceth:"mac_ethernet",
+};
+const CAMPO_EXTRA_POR_COLUMNA = { color:"color", longitud:"longitud_m" };
+function columnaAplicaATipo(colKey, tipo){
+  const bloqueado = CAMPO_BLOQUEADO_POR_COLUMNA[colKey];
+  if(bloqueado) return camposPertinentesParaTipo(tipo).includes(bloqueado);
+  const extra = CAMPO_EXTRA_POR_COLUMNA[colKey];
+  if(extra) return camposExtraParaTipo(tipo).includes(extra);
+  return true; // columnas que no dependen del tipo de activo (tag, marca, valor de compra, etc.)
 }
 
 function pillCustodio(a){
@@ -1879,6 +2047,7 @@ function celdaActivo(col, a){
     case "estado": return pillEstado(a.estado);
     case "custodio": return pillCustodio(a);
     case "cargo": return celdaTextoRecortado(a.custodio ? a.custodio.cargo : null);
+    case "fechaentrega": { const t = tramoVigente(a); return (t && t.desde) ? fmtFecha(t.desde) : '<span class="cell-muted">—</span>'; }
     case "propiedad": return pillPropiedad(a.propiedad);
     case "serie": return celdaTextoRecortado(a.serie, "mono");
     case "so": return celdaTextoRecortado(a.sistema_operativo);
@@ -1937,7 +2106,7 @@ function abrirDetalle(id){
           <div class="detail-badges-grid">
             ${tarjetaBadge("Modelo", esc(a.modelo)||'—', "#004DAB")}
             ${tarjetaBadge("Nombre", esc(a.nombre_dispositivo)||'—', "#007EB2")}
-            ${tarjetaBadge("Propiedad", `<span style="color:${(COLOR_PROPIEDAD[a.propiedad]||{fg:'#57697C'}).fg}">${esc(LABEL_PROPIEDAD[a.propiedad] || capitalizar(a.propiedad))}</span>`, (COLOR_PROPIEDAD[a.propiedad]||{fg:"#57697C"}).fg)}
+            ${tarjetaBadge("Propiedad", `<span style="color:${infoPropiedad(a.propiedad).fg}">${esc(infoPropiedad(a.propiedad).label)}</span>`, infoPropiedad(a.propiedad).fg)}
             ${tarjetaBadge("Tipo", esc(a.tipo)||'—', colorTipo(a.tipo))}
             ${tarjetaBadge("Estado", `<span style="color:${infoEstado(a.estado).fg}">${esc(infoEstado(a.estado).label)}</span>`, infoEstado(a.estado).fg)}
           </div>
@@ -2105,14 +2274,19 @@ function abrirFormActivo(id){
       <div class="modal-body">
         <form id="form-activo">
           <div class="form-grid">
-            <div class="field"><label>Tipo</label><input type="text" id="fa-tipo" value="${esc(a?a.tipo:'')}" placeholder="Laptop, Desktop, Celular, Mouse, Monitor, Fuente de alimentación, Cable HDMI, Cable USB, Biométrico, Router, AP, Switch, UPS…"></div>
-            <div class="field"><label>Propiedad</label>
-              <select id="fa-propiedad" required>
-                <option value="lukmar" ${(!a||a.propiedad==='lukmar')?'selected':''}>Lukmar</option>
-                <option value="eq" ${a&&a.propiedad==='eq'?'selected':''}>EQ Soluciones</option>
-                <option value="rentado" ${a&&a.propiedad==='rentado'?'selected':''}>Rentado</option>
-                <option value="externo" ${a&&a.propiedad==='externo'?'selected':''}>Externo</option>
-              </select>
+            <div class="field">
+              <label>Tipo</label>
+              <div style="display:flex;gap:6px;">
+                <select id="fa-tipo" style="flex:1;">${htmlOpcionesTipo(a?a.tipo:'')}</select>
+                ${esAdmin() ? `<button type="button" class="btn btn-sm" id="btn-nuevo-tipo" title="Crear nuevo tipo de activo">+</button>` : ""}
+              </div>
+            </div>
+            <div class="field">
+              <label>Propiedad</label>
+              <div style="display:flex;gap:6px;">
+                <select id="fa-propiedad" required style="flex:1;">${htmlOpcionesPropiedad(a?a.propiedad:'lukmar')}</select>
+                ${esAdmin() ? `<button type="button" class="btn btn-sm" id="btn-nueva-propiedad" title="Crear nueva propiedad">+</button>` : ""}
+              </div>
             </div>
             <div class="field"><label>Marca</label><input type="text" id="fa-marca" value="${esc(a?a.marca:'')}"></div>
             <div class="field"><label>Modelo</label><input type="text" id="fa-modelo" value="${esc(a?a.modelo:'')}"></div>
@@ -2131,6 +2305,36 @@ function abrirFormActivo(id){
             <div class="field"><label>Valor de compra (USD)</label><input type="number" step="0.01" min="0" id="fa-valorcompra" value="${a&&a.valor_compra?a.valor_compra:''}"></div>
             <div class="field"><label>Vida útil (años)</label><input type="number" step="1" min="1" id="fa-vidautil" value="${a ? (a.vida_util_anios||'') : 3}"></div>
           </div>
+          ${esAdmin() ? `
+          <fieldset style="margin-top:14px;display:none;" id="fs-nuevo-tipo">
+            <legend>Nuevo tipo de activo</legend>
+            <div class="form-grid">
+              <div class="field"><label>Nombre</label><input type="text" id="nt-nombre" placeholder="Ej: Cámara IP"></div>
+              <div class="field"><label>Color</label><input type="color" id="nt-color" value="#57697C"></div>
+              <div class="field span-2"><label>Ícono (SVG, opcional)</label><textarea id="nt-icono" class="mono" placeholder="Pega acá el &lt;svg&gt;...&lt;/svg&gt; de un ícono (ej. de icons.getbootstrap.com). Si se deja vacío, se usa un ícono genérico."></textarea></div>
+              <div class="field span-2">
+                <label>Campos pertinentes para este tipo</label>
+                <div id="nt-campos" style="display:flex;flex-wrap:wrap;gap:8px 16px;">
+                  ${CAMPOS_BLOQUEABLES.concat(CAMPOS_EXTRA).map(c=>`<label style="display:flex;align-items:center;gap:5px;font-weight:400;font-size:13px;"><input type="checkbox" value="${c}" ${CAMPOS_BLOQUEABLES.includes(c)?'checked':''}> ${LABEL_CAMPO[c]}</label>`).join("")}
+                </div>
+                <div class="hint">Marcados por defecto los campos "de cómputo" (serie, SO, RAM, etc.) — desmárcalos si no aplican a este tipo (ej. un cable o una fuente de alimentación).</div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px;">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-crear-tipo">Crear tipo</button>
+              <button type="button" class="btn btn-sm" id="btn-cancelar-tipo">Cancelar</button>
+            </div>
+          </fieldset>
+          <fieldset style="margin-top:14px;display:none;" id="fs-nueva-propiedad">
+            <legend>Nueva propiedad</legend>
+            <div class="form-grid">
+              <div class="field"><label>Etiqueta</label><input type="text" id="np-etiqueta" placeholder="Ej: Comodato"></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px;">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-crear-propiedad">Crear propiedad</button>
+              <button type="button" class="btn btn-sm" id="btn-cancelar-propiedad">Cancelar</button>
+            </div>
+          </fieldset>` : ""}
           <fieldset style="margin-top:14px;" id="fs-celular">
             <legend>Datos de celular (solo si tipo = Celular)</legend>
             <div class="form-grid">
@@ -2153,6 +2357,76 @@ function abrirFormActivo(id){
   abrirModal(html, ()=>{
     document.getElementById("form-activo").addEventListener("submit", e=>e.preventDefault());
     wireGridFotos();
+    // ---------- "+ Nuevo tipo" / "+ Nueva propiedad" (botones solo admin) ----------
+    // No cierran ni reabren el modal — así no se pierde el resto del
+    // formulario que la persona ya haya llenado (marca, modelo, fotos…).
+    // Solo actualizan el <select> correspondiente al terminar.
+    const btnNuevoTipo = document.getElementById("btn-nuevo-tipo");
+    if(btnNuevoTipo){
+      const fsTipo = document.getElementById("fs-nuevo-tipo");
+      btnNuevoTipo.addEventListener("click", ()=>{ fsTipo.style.display = fsTipo.style.display==="none" ? "" : "none"; });
+      document.getElementById("btn-cancelar-tipo").addEventListener("click", ()=>{ fsTipo.style.display = "none"; });
+      document.getElementById("btn-crear-tipo").addEventListener("click", async ()=>{
+        const nombre = document.getElementById("nt-nombre").value.trim();
+        if(!nombre){ mostrarToast("Ingresa el nombre del nuevo tipo.", "error"); return; }
+        // La validación de duplicados vive en crearTipoActivo() (igual que
+        // crearPropiedadOpcion/crearEstadoOpcion) — si ya existe, el catch de
+        // abajo muestra el mismo mensaje.
+        const iconoRaw = document.getElementById("nt-icono").value.trim();
+        if(iconoRaw){
+          if(!/^<svg[\s>]/i.test(iconoRaw)){
+            mostrarToast("El ícono debe empezar con <svg — pega el markup completo o deja el campo vacío.", "error"); return;
+          }
+          // iconoTipoTam() agranda el ícono para la vista grande del detalle
+          // reemplazando width="16" height="16" — si el SVG pegado no trae
+          // esas medidas exactas (el tamaño de icons.getbootstrap.com, igual
+          // que los 19 íconos ya migrados), el reemplazo no encuentra nada y
+          // el ícono queda mal dimensionado ahí. Mejor avisar acá que
+          // arrastrar un ícono roto silenciosamente.
+          if(!/width="16"\s+height="16"/.test(iconoRaw)){
+            mostrarToast('El SVG debe tener width="16" height="16" (mismo tamaño que los íconos existentes, ej. de icons.getbootstrap.com) para verse bien también en la vista grande del detalle.', "error"); return;
+          }
+        }
+        const campos = Array.from(document.querySelectorAll("#nt-campos input:checked")).map(cb=>cb.value);
+        const btn = document.getElementById("btn-crear-tipo");
+        btn.disabled = true; btn.textContent = "Creando…";
+        try{
+          await crearTipoActivo({ nombre, color: document.getElementById("nt-color").value, icono_svg: iconoRaw, campos_pertinentes: campos });
+          document.getElementById("fa-tipo").innerHTML = htmlOpcionesTipo(nombre);
+          fsTipo.style.display = "none";
+          document.getElementById("nt-nombre").value = "";
+          document.getElementById("nt-icono").value = "";
+          mostrarToast("Tipo creado.", "success");
+        } catch(err){
+          mostrarToast("No se pudo crear el tipo: " + err.message, "error");
+        } finally {
+          btn.disabled = false; btn.textContent = "Crear tipo";
+        }
+      });
+    }
+    const btnNuevaPropiedad = document.getElementById("btn-nueva-propiedad");
+    if(btnNuevaPropiedad){
+      const fsPropiedad = document.getElementById("fs-nueva-propiedad");
+      btnNuevaPropiedad.addEventListener("click", ()=>{ fsPropiedad.style.display = fsPropiedad.style.display==="none" ? "" : "none"; });
+      document.getElementById("btn-cancelar-propiedad").addEventListener("click", ()=>{ fsPropiedad.style.display = "none"; });
+      document.getElementById("btn-crear-propiedad").addEventListener("click", async ()=>{
+        const etiqueta = document.getElementById("np-etiqueta").value.trim();
+        if(!etiqueta){ mostrarToast("Ingresa la etiqueta de la nueva propiedad.", "error"); return; }
+        const btn = document.getElementById("btn-crear-propiedad");
+        btn.disabled = true; btn.textContent = "Creando…";
+        try{
+          await crearPropiedadOpcion(etiqueta);
+          document.getElementById("fa-propiedad").innerHTML = htmlOpcionesPropiedad(slugify(etiqueta));
+          fsPropiedad.style.display = "none";
+          document.getElementById("np-etiqueta").value = "";
+          mostrarToast("Propiedad creada.", "success");
+        } catch(err){
+          mostrarToast("No se pudo crear la propiedad: " + err.message, "error");
+        } finally {
+          btn.disabled = false; btn.textContent = "Crear propiedad";
+        }
+      });
+    }
     document.getElementById("btn-guardar-activo").addEventListener("click", async ()=>{
       const campos = {
         tipo: document.getElementById("fa-tipo").value.trim(),
@@ -2245,11 +2519,12 @@ function abrirCambiarCustodio(id){
           <legend>Nuevo tramo</legend>
           <div class="form-grid">
             <div class="field"><label>Fecha</label><input type="date" id="cc-fecha" value="${hoyISO()}"></div>
-            <div class="field"><label>Estado resultante</label>
-              <select id="cc-estado">
-                <option value="">— Selecciona —</option>
-                ${Object.entries(ESTADO_INFO).map(([v,info])=>`<option value="${v}">${esc(info.label)}</option>`).join("")}
-              </select>
+            <div class="field">
+              <label>Estado resultante</label>
+              <div style="display:flex;gap:6px;">
+                <select id="cc-estado" style="flex:1;">${htmlOpcionesEstado("")}</select>
+                ${esAdmin() ? `<button type="button" class="btn btn-sm" id="btn-nuevo-estado" title="Crear nuevo estado">+</button>` : ""}
+              </div>
             </div>
             <div class="field"><label>Tipo de entrega</label>
               <select id="cc-tipoentrega">
@@ -2260,6 +2535,18 @@ function abrirCambiarCustodio(id){
             <div class="field span-2"><label>Observación de la entrega (opcional)</label><textarea id="cc-observacionentrega" placeholder="Ej: se entrega con cargador original y funda…"></textarea></div>
           </div>
         </fieldset>
+        ${esAdmin() ? `
+        <fieldset style="margin-bottom:14px;display:none;" id="fs-nuevo-estado">
+          <legend>Nuevo estado</legend>
+          <div class="form-grid">
+            <div class="field"><label>Etiqueta</label><input type="text" id="ne-etiqueta" placeholder="Ej: En tránsito"></div>
+            <div class="field"><label>Color</label><input type="color" id="ne-color" value="#57697C"></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-crear-estado">Crear estado</button>
+            <button type="button" class="btn btn-sm" id="btn-cancelar-estado">Cancelar</button>
+          </div>
+        </fieldset>` : ""}
         <fieldset>
           <legend>Custodio</legend>
           <div class="form-grid">
@@ -2279,6 +2566,30 @@ function abrirCambiarCustodio(id){
       </div>
     </div>`;
   abrirModal(html, ()=>{
+    // ---------- "+ Nuevo estado" (botón solo admin) ----------
+    const btnNuevoEstado = document.getElementById("btn-nuevo-estado");
+    if(btnNuevoEstado){
+      const fsEstado = document.getElementById("fs-nuevo-estado");
+      btnNuevoEstado.addEventListener("click", ()=>{ fsEstado.style.display = fsEstado.style.display==="none" ? "" : "none"; });
+      document.getElementById("btn-cancelar-estado").addEventListener("click", ()=>{ fsEstado.style.display = "none"; });
+      document.getElementById("btn-crear-estado").addEventListener("click", async ()=>{
+        const etiqueta = document.getElementById("ne-etiqueta").value.trim();
+        if(!etiqueta){ mostrarToast("Ingresa la etiqueta del nuevo estado.", "error"); return; }
+        const btn = document.getElementById("btn-crear-estado");
+        btn.disabled = true; btn.textContent = "Creando…";
+        try{
+          await crearEstadoOpcion(etiqueta, document.getElementById("ne-color").value);
+          document.getElementById("cc-estado").innerHTML = htmlOpcionesEstado(slugify(etiqueta));
+          fsEstado.style.display = "none";
+          document.getElementById("ne-etiqueta").value = "";
+          mostrarToast("Estado creado.", "success");
+        } catch(err){
+          mostrarToast("No se pudo crear el estado: " + err.message, "error");
+        } finally {
+          btn.disabled = false; btn.textContent = "Crear estado";
+        }
+      });
+    }
     document.getElementById("btn-confirmar-cambiar").addEventListener("click", async ()=>{
       const nombre = document.getElementById("cc-nombre").value.trim();
       if(!nombre){ mostrarToast("Ingresa el nombre del custodio — es obligatorio, el activo no puede quedar sin uno.", "error"); return; }

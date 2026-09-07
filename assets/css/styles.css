@@ -131,6 +131,8 @@ a{color:var(--accent-ink);}
 .btn-primary:hover{background:linear-gradient(135deg, var(--accent-ink), var(--accent-ink));border-color:var(--accent-ink);}
 .btn-danger{background:var(--surface);border-color:#e6c3b6;color:var(--danger);}
 .btn-danger:hover{background:var(--danger-soft);}
+.btn-warn{background:var(--surface);border-color:#e6c9a8;color:var(--warn);}
+.btn-warn:hover{background:var(--warn-soft);}
 .topbar .btn-ghost{border-color:rgba(255,255,255,0.35);color:#fff;}
 #badge-portapapeles.badge-activo{background:#fff;color:var(--accent);border-color:#fff;font-weight:600;}
 .topbar .btn-ghost:hover{background:rgba(255,255,255,0.12);}
