@@ -1,0 +1,105 @@
+import { cargarActivos } from "../../nucleo/datos.js";
+import { fmtTag, hoyISO, valorActualActivo } from "../../nucleo/helpers.js";
+import { infoPropiedad } from "../../nucleo/opciones-configurables.js";
+import { fechaEnPalabras } from "../detalle/acta.js";
+import { listaOrdenadaFiltrada } from "./filtros.js";
+import { celdaInline } from "./tabla.js";
+import { mostrarToast } from "../render-raiz.js";
+
+export const COLS_LISTADO_ACTIVOS = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W"];
+
+export const COLS_LISTADO_HISTORIAL = ["A","B","C","D","E","F","G"];
+
+export const ESTILOS_LISTADO_ACTIVOS = [31,28,28,28,28,28,29,30,27,28,29,30,32,32,28,28,29,30,32,34,34,28,33];
+
+export const ESTILOS_LISTADO_HISTORIAL = [45,42,43,44,46,47,48];
+
+export function filaXML(fila, estilos, columnas, valores){
+  const celdas = columnas.map((col,i)=>celdaInline(col, fila, estilos[i], valores[i])).join("");
+  return `<row r="${fila}" spans="1:${columnas.length}" ht="18" customHeight="1" x14ac:dyDescent="0.25">${celdas}</row>`;
+}
+
+export function etiquetaCustodioTipo(tipo){
+  if(tipo==="area") return "Área / departamento";
+  if(tipo==="mantenimiento") return "Mantenimiento";
+  if(tipo==="persona") return "Persona";
+  return "";
+}
+
+export async function exportarActivosExcel(){
+  const datos = cargarActivos();
+  const lista = listaOrdenadaFiltrada(datos);
+  if(lista.length===0){ mostrarToast("No hay activos que coincidan con los filtros actuales.", "error"); return; }
+
+  const resp = await fetch("assets/plantillas/ActivosTecnologicos.xlsx");
+  if(!resp.ok) throw new Error("No se pudo cargar la plantilla (assets/plantillas/ActivosTecnologicos.xlsx).");
+  const buf = await resp.arrayBuffer();
+  const zip = await JSZip.loadAsync(buf);
+
+  // Hoja 1 "Computadores": un renglón por activo filtrado.
+  let xml1 = await zip.file("xl/worksheets/sheet1.xml").async("string");
+  // La fila 8 (nota amarilla "Fila de plantilla — no borrar…") es para quien
+  // abra la plantilla en crudo, no para un reporte ya generado — se quita acá.
+  xml1 = xml1.replace(/<row r="8"[^>]*>.*?<\/row>/s, "");
+  const filas1 = lista.map((a,i)=>{
+    const valores = [
+      fmtTag(a), a.propiedad==="eq"?"EQ Soluciones":"Lukmar", a.tipo||"", a.marca||"", a.modelo||"",
+      a.serie||"", a.nombre_dispositivo||"", infoPropiedad(a.propiedad).label||"",
+      a.custodio?a.custodio.nombre:"Disponible", a.custodio?etiquetaCustodioTipo(a.custodio.tipo_custodio):"",
+      a.custodio?(a.custodio.cargo||""):"", a.sistema_operativo||"", a.ram_gb??"", a.disco_gb??"",
+      a.procesador||"", a.mac_wifi||"", a.mac_ethernet||"", a.proveedor||"", a.fecha_adquisicion||"",
+      a.valor_compra??"", valorActualActivo(a)??"", a.color||"", a.longitud_m??"",
+    ];
+    return filaXML(10+i, ESTILOS_LISTADO_ACTIVOS, COLS_LISTADO_ACTIVOS, valores);
+  }).join("");
+  xml1 = xml1.replace(/<row r="10"[^>]*>.*?<\/row>/s, filas1);
+  xml1 = xml1.replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:W${9+lista.length}"/>`);
+  zip.file("xl/worksheets/sheet1.xml", xml1);
+
+  // tblComputadores es una Tabla real de Excel (no solo celdas con estilo):
+  // su propio ref y el autoFilter que la acompaña también delimitan A9:W10
+  // en la plantilla y hay que expandirlos junto con el <dimension> de la
+  // hoja, o Excel abre el archivo con la Tabla encogida a la fila original.
+  let tabla1 = await zip.file("xl/tables/table1.xml").async("string");
+  tabla1 = tabla1.split('ref="A9:W10"').join(`ref="A9:W${9+lista.length}"`);
+  zip.file("xl/tables/table1.xml", tabla1);
+
+  // Hoja 2 "historial_custodia": un renglón por tramo de cada activo filtrado,
+  // en orden cronológico (1 = más antiguo) — el array en memoria viene más
+  // reciente primero, así que se invierte por activo antes de numerar.
+  let xml2 = await zip.file("xl/worksheets/sheet2.xml").async("string");
+  const filas2 = [];
+  let filaActual = 4;
+  lista.forEach(a=>{
+    const cronologico = [...a.historial_custodia].reverse();
+    cronologico.forEach((t,idx)=>{
+      const valores = [fmtTag(a), t.nombre||"", etiquetaCustodioTipo(t.tipo_custodio), t.cargo||"", t.desde||"", t.hasta||"", idx+1];
+      filas2.push(filaXML(filaActual, ESTILOS_LISTADO_HISTORIAL, COLS_LISTADO_HISTORIAL, valores));
+      filaActual++;
+    });
+  });
+  const totalFilasHist = filaActual - 4;
+  xml2 = xml2.replace(/<row r="4"[^>]*>.*?<\/row>/s, filas2.join(""));
+  xml2 = xml2.replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:G${Math.max(4,3+totalFilasHist)}"/>`);
+  zip.file("xl/worksheets/sheet2.xml", xml2);
+
+  // Mismo motivo que tblComputadores: tblHistorialCustodia también es una
+  // Tabla real (A3:G4 en la plantilla) y necesita su ref/autoFilter propios
+  // expandidos, con el mismo piso mínimo que el dimension de la hoja.
+  let tabla2 = await zip.file("xl/tables/table2.xml").async("string");
+  tabla2 = tabla2.split('ref="A3:G4"').join(`ref="A3:G${Math.max(4,3+totalFilasHist)}"`);
+  zip.file("xl/tables/table2.xml", tabla2);
+
+  // {{FECHA_ACTUALIZACION}} es un marcador único (F7/G7), no uno que se
+  // duplique por fila — este sí se puede reemplazar in-place en sharedStrings.xml.
+  let shared = await zip.file("xl/sharedStrings.xml").async("string");
+  shared = shared.split("{{FECHA_ACTUALIZACION}}").join(fechaEnPalabras(hoyISO()));
+  zip.file("xl/sharedStrings.xml", shared);
+
+  const salida = await zip.generateAsync({type:"blob"});
+  const url = URL.createObjectURL(salida);
+  const link = document.createElement("a");
+  link.href = url; link.download = `Listado_Activos_${hoyISO()}.xlsx`;
+  document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}

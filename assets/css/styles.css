@@ -1,0 +1,834 @@
+:root{
+  --bg:#EEF2F6;
+  --surface:#FFFFFF;
+  --surface-2:#F4F7FA;
+  --ink:#122338;
+  --ink-muted:#57697C;
+  --ink-faint:#8B9AAA;
+  --border:#DCE3EA;
+  --border-strong:#C2CDD8;
+
+  /* Paleta real de Lukmar, extraída del logo */
+  --brand-blue:#004DAB;    /* wordmark / azul profundo */
+  --brand-teal:#007EB2;    /* mitad inferior del ícono */
+  --brand-sky:#68C7F0;     /* mitad superior del ícono */
+  --brand-orange:#EC741D;  /* mitad naranja del ícono */
+
+  --accent:#007EB2;
+  --accent-ink:#004DAB;
+  --accent-soft:#E1F0F8;
+  --accent-soft-2:#BFE1EF;
+
+  --danger:#B3432D;
+  --danger-soft:#F6E4DE;
+  --warn:#EC741D;
+  --warn-soft:#FCE3D0;
+  --good:#3E7D4F;
+  --good-soft:#E1EFE3;
+  --area:#5B4B8A;
+  --area-soft:#E9E4F3;
+  --mantenimiento:#A6710B;
+  --mantenimiento-soft:#F5E6C8;
+  --radius:10px;
+  --radius-sm:6px;
+  --shadow:0 1px 2px rgba(20,30,40,0.06), 0 8px 24px -8px rgba(20,30,40,0.10);
+  --shadow-lg:0 4px 12px rgba(20,30,40,0.08), 0 24px 48px -16px rgba(20,30,40,0.22);
+  --gradient-brand:linear-gradient(135deg, var(--brand-blue) 0%, var(--brand-teal) 55%, var(--brand-sky) 100%);
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:linear-gradient(180deg, #EEF2F6 0%, #E3EBF2 100%);
+  color:var(--ink);
+  font-family:'IBM Plex Sans',system-ui,sans-serif;
+  font-size:14.5px;
+  line-height:1.5;
+  min-height:100vh;
+}
+.inventario-tecnologico-mono{font-family:'IBM Plex Mono',monospace;}
+button{font-family:inherit;cursor:pointer;}
+input,select,textarea{font-family:inherit;font-size:14px;}
+a{color:var(--accent-ink);}
+
+/* ---------- Asset tag (signature element) ---------- */
+.inventario-tecnologico-tag{
+  display:inline-flex;align-items:center;gap:0;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:12.5px;font-weight:600;letter-spacing:0.02em;
+  color:var(--accent-ink);
+  background:linear-gradient(135deg, var(--accent-soft), var(--accent-soft-2));
+  border:1px solid var(--accent-soft-2);
+  border-radius:4px;
+  padding:3px 8px 3px 8px;
+  position:relative;
+  white-space:nowrap;
+}
+.inventario-tecnologico-tag::before{
+  content:"";
+  position:absolute;left:3px;top:50%;transform:translateY(-50%);
+  width:4px;height:4px;border-radius:50%;
+  background:var(--accent);
+  box-shadow:0 0 0 2px var(--surface) inset;
+}
+.inventario-tecnologico-tag{padding-left:14px;}
+.inventario-tecnologico-tag.inventario-tecnologico-tag-lg{font-size:15px;padding:6px 12px 6px 20px;}
+.inventario-tecnologico-tag.inventario-tecnologico-tag-lg::before{width:6px;height:6px;left:6px;}
+.inventario-tecnologico-tag.inventario-tecnologico-tag-baja{color:var(--danger);background:var(--danger-soft);border-color:#e6c3b6;}
+.inventario-tecnologico-tag.inventario-tecnologico-tag-baja::before{background:var(--danger);}
+
+/* ---------- Layout ---------- */
+#inventario-tecnologico-app{min-height:100vh;display:flex;flex-direction:column;position:relative;z-index:1;}
+/* Decoración de fondo de toda la app (post-login): una marca de agua muy
+   sutil, fija, detrás de todo el contenido (que sí tiene su propio fondo
+   opaco, así que esto solo se nota en los márgenes/huecos de la página). */
+#inventario-tecnologico-app-decor{
+  position:fixed;top:-70px;right:-70px;width:340px;height:340px;
+  pointer-events:none;z-index:0;opacity:0.05;
+}
+#inventario-tecnologico-app-decor img{width:100%;height:100%;object-fit:contain;transform:rotate(8deg);}
+.inventario-tecnologico-topbar{
+  background:linear-gradient(115deg, #001B3D 0%, var(--accent-ink) 55%, var(--accent) 100%);
+  padding:0 20px;
+  display:flex;align-items:center;justify-content:space-between;
+  height:56px;flex-shrink:0;
+  box-shadow:0 1px 0 rgba(255,255,255,0.08) inset, 0 2px 10px -4px rgba(0,20,45,0.35);
+}
+.inventario-tecnologico-topbar-left{display:flex;align-items:center;gap:14px;}
+.inventario-tecnologico-brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15.5px;letter-spacing:-0.01em;color:#fff;}
+.inventario-tecnologico-brand-mark{
+  width:26px;height:26px;border-radius:6px;background:var(--accent);
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:12px;
+}
+.inventario-tecnologico-brand-mark-img{width:26px;height:26px;object-fit:contain;flex-shrink:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.25));}
+.inventario-tecnologico-tabs{display:flex;gap:2px;margin-left:8px;}
+.inventario-tecnologico-tab-btn{
+  border:none;background:transparent;color:rgba(255,255,255,0.68);
+  padding:8px 12px;border-radius:var(--radius-sm);font-size:13.5px;font-weight:500;
+  transition:background .12s, color .12s;
+}
+.inventario-tecnologico-tab-btn:hover{background:rgba(255,255,255,0.10);color:#fff;}
+.inventario-tecnologico-tab-btn.inventario-tecnologico-active{background:rgba(255,255,255,0.16);color:#fff;}
+.inventario-tecnologico-topbar-right{display:flex;align-items:center;gap:10px;}
+.inventario-tecnologico-userchip{display:flex;align-items:center;gap:8px;font-size:13px;color:rgba(255,255,255,0.75);}
+.inventario-tecnologico-rolebadge{
+  font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;
+  padding:2px 8px;border-radius:20px;background:var(--surface-2);color:var(--ink-muted);
+  border:1px solid var(--border);
+}
+.inventario-tecnologico-rolebadge.inventario-tecnologico-rol-administrador{background:var(--accent-soft);color:var(--accent-ink);border-color:var(--accent-soft-2);}
+.inventario-tecnologico-rolebadge.inventario-tecnologico-rol-registrador{background:var(--warn-soft);color:var(--warn);border-color:#e6d3a8;}
+.inventario-tecnologico-rolebadge.inventario-tecnologico-rol-visitante{background:var(--surface-2);color:var(--ink-muted);}
+
+.inventario-tecnologico-btn{
+  border:1px solid var(--border-strong);background:var(--surface);color:var(--ink);
+  padding:7px 13px;border-radius:var(--radius-sm);font-size:13.5px;font-weight:500;
+  transition:background .12s, border-color .12s;
+  white-space:nowrap;
+}
+.inventario-tecnologico-btn:hover{background:var(--surface-2);}
+.inventario-tecnologico-btn-primary{background:linear-gradient(135deg, var(--accent-ink), var(--accent));border-color:var(--accent-ink);color:#fff;}
+.inventario-tecnologico-btn-primary:hover{background:linear-gradient(135deg, var(--accent-ink), var(--accent-ink));border-color:var(--accent-ink);}
+.inventario-tecnologico-btn-danger{background:var(--surface);border-color:#e6c3b6;color:var(--danger);}
+.inventario-tecnologico-btn-danger:hover{background:var(--danger-soft);}
+.inventario-tecnologico-btn-warn{background:var(--surface);border-color:#e6c9a8;color:var(--warn);}
+.inventario-tecnologico-btn-warn:hover{background:var(--warn-soft);}
+.inventario-tecnologico-topbar .inventario-tecnologico-btn-ghost{border-color:rgba(255,255,255,0.35);color:#fff;}
+#inventario-tecnologico-badge-portapapeles.inventario-tecnologico-badge-activo{background:#fff;color:var(--accent);border-color:#fff;font-weight:600;}
+.inventario-tecnologico-topbar .inventario-tecnologico-btn-ghost:hover{background:rgba(255,255,255,0.12);}
+.inventario-tecnologico-btn-ghost{border-color:transparent;background:transparent;}
+.inventario-tecnologico-btn-ghost:hover{background:var(--surface-2);}
+.inventario-tecnologico-btn-sm{padding:4px 9px;font-size:12.5px;}
+.inventario-tecnologico-btn:disabled{opacity:0.4;cursor:not-allowed;}
+
+main{flex:1;padding:22px 26px 60px;max-width:1280px;width:100%;margin:0 auto;}
+.inventario-tecnologico-hidden{display:none !important;}
+
+/* ---------- Filters ---------- */
+.inventario-tecnologico-filterbar{
+  display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:10px 12px;margin-bottom:14px;
+}
+.inventario-tecnologico-filterbar select, .inventario-tecnologico-filterbar input[type=text]{
+  border:1px solid var(--border-strong);border-radius:var(--radius-sm);
+  padding:6px 9px;background:var(--surface);color:var(--ink);
+}
+.inventario-tecnologico-filterbar input[type=text]{min-width:220px;flex:1;}
+.inventario-tecnologico-filterbar .inventario-tecnologico-fb-spacer{flex:1;}
+
+/* ---------- Table ---------- */
+.inventario-tecnologico-tablewrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:visible;position:relative;min-height:280px;box-shadow:0 1px 2px rgba(20,30,40,0.04);}
+table{width:100%;border-collapse:collapse;}
+.inventario-tecnologico-tablewrap-activos table{table-layout:fixed;}
+/* Anchos fijos por columna: así ni filtrar a 0 resultados ni ocultar botones
+   por permisos hace que el resto de columnas se desplace y cierre un tooltip
+   de filtro abierto. */
+.inventario-tecnologico-col-tag{width:9%;}
+.inventario-tecnologico-col-tipo{width:18%;}
+.inventario-tecnologico-col-marca{width:16%;}
+.inventario-tecnologico-col-custodio{width:26%;}
+.inventario-tecnologico-col-propiedad{width:13%;}
+.inventario-tecnologico-col-acciones{width:18%;}
+th{
+  text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:0.04em;
+  color:var(--ink-faint);font-weight:600;padding:0;border-bottom:1px solid var(--border);
+  background:var(--surface-2);position:relative;vertical-align:top;
+}
+.inventario-tecnologico-th-inner{display:flex;flex-direction:column;gap:6px;padding:8px 8px 8px 12px;min-width:0;}
+.inventario-tecnologico-th-row1{display:flex;align-items:center;justify-content:space-between;gap:4px;min-width:0;}
+.inventario-tecnologico-th-row2{display:flex;}
+.inventario-tecnologico-th-text-filter{
+  width:100%;border:1px solid var(--border);border-radius:5px;
+  padding:4px 7px;font-size:11.5px;font-weight:400;text-transform:none;letter-spacing:normal;
+  color:var(--ink);background:var(--surface);
+}
+.inventario-tecnologico-th-text-filter:focus{outline:none;border-color:var(--accent);}
+.inventario-tecnologico-th-text-filter::placeholder{color:var(--ink-faint);}
+.inventario-tecnologico-th-row2-fecha{gap:4px;}
+.inventario-tecnologico-th-date-filter{
+  width:100%;min-width:0;border:1px solid var(--border);border-radius:5px;
+  padding:3px 4px;font-size:10.5px;font-weight:400;color:var(--ink);background:var(--surface);
+}
+.inventario-tecnologico-th-date-filter:focus{outline:none;border-color:var(--accent);}
+.inventario-tecnologico-dropdown-wrap{position:relative;display:inline-block;}
+.inventario-tecnologico-dropdown-menu{
+  position:absolute;top:calc(100% + 4px);right:0;z-index:20;min-width:190px;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  box-shadow:0 6px 18px rgba(0,0,0,0.12);padding:4px;
+}
+.inventario-tecnologico-dropdown-item{display:block;width:100%;text-align:left;background:none;border:none;
+  padding:8px 10px;font-size:13px;color:var(--ink);border-radius:5px;cursor:pointer;}
+.inventario-tecnologico-dropdown-item:hover{background:var(--surface-2);}
+.inventario-tecnologico-th-label{cursor:default;display:inline-flex;align-items:center;gap:5px;user-select:none;min-width:0;max-width:100%;}
+.inventario-tecnologico-th-label-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+.inventario-tecnologico-th-label.inventario-tecnologico-th-sortable{cursor:pointer;}
+.inventario-tecnologico-th-label.inventario-tecnologico-th-sortable:hover{color:var(--accent-ink);}
+.inventario-tecnologico-th-arrow{font-size:9px;color:var(--accent);width:9px;display:inline-block;}
+.inventario-tecnologico-th-arrow-active{color:var(--accent-ink);}
+.inventario-tecnologico-th-filter{position:relative;display:inline-flex;flex-shrink:0;}
+.inventario-tecnologico-th-filter-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:24px;height:18px;padding:0 6px;
+  border:1px solid var(--border-strong);border-radius:4px;
+  background:var(--surface);color:var(--ink-faint);font-size:10.5px;font-weight:600;
+  line-height:1;font-family:'IBM Plex Mono',monospace;letter-spacing:0;
+}
+.inventario-tecnologico-th-filter-btn:hover{background:var(--surface-2);border-color:var(--ink-faint);color:var(--ink);}
+.inventario-tecnologico-th-filter-btn.inventario-tecnologico-active{background:var(--accent-soft);border-color:var(--accent-soft-2);color:var(--accent-ink);}
+.inventario-tecnologico-th-filter-btn.inventario-tecnologico-empty{background:var(--danger-soft);border-color:#e6c3b6;color:var(--danger);}
+.inventario-tecnologico-th-filter-btn svg{display:block;}
+.inventario-tecnologico-filter-panel{
+  display:none;position:absolute;top:100%;right:0;margin:0;padding:6px 14px 14px 14px;
+  min-width:190px;max-width:260px;z-index:20;
+}
+.inventario-tecnologico-filter-panel-card{
+  background:linear-gradient(165deg, #E7F1FA 0%, var(--surface) 55%);
+  border:1px solid var(--accent-soft-2);border-radius:var(--radius-sm);
+  box-shadow:var(--shadow-lg);padding:0;text-transform:none;letter-spacing:normal;font-weight:400;
+  overflow:hidden;
+}
+.inventario-tecnologico-filter-panel-card-inner{padding:8px;}
+.inventario-tecnologico-filter-panel-titlebar{
+  background:var(--gradient-brand);color:#fff;font-size:10.5px;font-weight:700;
+  text-transform:uppercase;letter-spacing:0.04em;padding:6px 10px;
+}
+.inventario-tecnologico-filter-panel-kpi-btn{
+  width:100%;margin-top:8px;justify-content:center;display:flex;align-items:center;gap:5px;
+  background:var(--accent-soft);border-color:var(--accent-soft-2);color:var(--accent-ink);font-weight:600;
+  font-size:11.5px;white-space:nowrap;padding:6px 4px;
+}
+.inventario-tecnologico-filter-panel-kpi-btn:hover{background:var(--accent-soft-2);}
+.inventario-tecnologico-th-filter:hover .inventario-tecnologico-filter-panel, .inventario-tecnologico-th-filter:focus-within .inventario-tecnologico-filter-panel{display:block;}
+.inventario-tecnologico-filter-panel-search{width:100%;box-sizing:border-box;padding:6px 8px;margin-bottom:8px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);font-size:12.5px;background:var(--surface);color:var(--ink);}
+.inventario-tecnologico-filter-panel-search:focus{outline:none;border-color:var(--accent);}
+.inventario-tecnologico-filter-panel-actions{display:flex;gap:6px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border);}
+.inventario-tecnologico-filter-panel-actions .inventario-tecnologico-btn{flex:1;}
+.inventario-tecnologico-filter-panel-list{max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:1px;}
+.inventario-tecnologico-filter-opt{
+  display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink);
+  padding:5px 6px;border-radius:4px;cursor:default;font-weight:400;
+}
+.inventario-tecnologico-filter-opt:hover{background:var(--surface-2);}
+.inventario-tecnologico-filter-opt input{margin:0;accent-color:var(--accent);flex-shrink:0;}
+.inventario-tecnologico-filter-opt-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-filter-opt-count{
+  font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink-faint);
+  background:var(--surface-2);border-radius:8px;padding:1px 6px;flex-shrink:0;
+}
+.inventario-tecnologico-filter-panel-hint{font-size:10.5px;color:var(--ink-faint);margin-top:6px;padding-top:6px;border-top:1px solid var(--border);line-height:1.4;}
+
+td{padding:10px 14px;border-bottom:1px solid var(--border);font-size:13.5px;vertical-align:middle;overflow:hidden;}
+tr:last-child td{border-bottom:none;}
+tbody tr.inventario-tecnologico-rowclick:nth-child(even){background:var(--surface-2);}
+tr.inventario-tecnologico-rowclick:hover{background:var(--accent-soft);cursor:pointer;}
+.inventario-tecnologico-tipo-cell{display:flex;align-items:center;gap:7px;max-width:100%;min-width:0;}
+.inventario-tecnologico-tipo-icon{display:inline-flex;flex-shrink:0;}
+.inventario-tecnologico-cell-muted{color:var(--ink-muted);}
+.inventario-tecnologico-cell-na{color:var(--ink-faint);font-style:italic;}
+.inventario-tecnologico-cell-clip{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;min-width:0;}
+
+/* ---------- Modal "Visualizar KPIs" ---------- */
+.inventario-tecnologico-kpi-breakdown{display:flex;flex-direction:column;gap:10px;}
+.inventario-tecnologico-kpi-breakdown-row{display:grid;grid-template-columns:110px 1fr 40px;align-items:center;gap:10px;}
+.inventario-tecnologico-kpi-breakdown-label{font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-kpi-breakdown-bar-track{background:var(--surface-2);border-radius:6px;height:14px;overflow:hidden;}
+.inventario-tecnologico-kpi-breakdown-bar{height:100%;background:var(--gradient-brand);border-radius:6px;transition:width .3s ease;}
+.inventario-tecnologico-kpi-breakdown-num{font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:var(--accent-ink);text-align:right;}
+.inventario-tecnologico-cell-actions{display:flex;gap:5px;justify-content:flex-end;flex-wrap:wrap;}
+
+.inventario-tecnologico-pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;padding:3px 9px;border-radius:20px;max-width:100%;}
+.inventario-tecnologico-pill.inventario-tecnologico-pill-cell{display:flex;min-width:0;}
+.inventario-tecnologico-pill-good{background:var(--good-soft);color:var(--good);}
+.inventario-tecnologico-pill-area{background:var(--area-soft);color:var(--area);}
+.inventario-tecnologico-pill-mantenimiento{background:var(--mantenimiento-soft);color:var(--mantenimiento);}
+.inventario-tecnologico-pill-persona{background:var(--surface-2);color:var(--ink-muted);border:1px solid var(--border);}
+.inventario-tecnologico-pill-dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+
+.inventario-tecnologico-empty-state{padding:50px 20px;text-align:center;color:var(--ink-muted);}
+.inventario-tecnologico-empty-state .inventario-tecnologico-big{font-size:32px;margin-bottom:6px;}
+
+/* ---------- Modal ---------- */
+.inventario-tecnologico-modal-backdrop{
+  position:fixed;inset:0;background:rgba(20,28,36,0.42);
+  display:flex;align-items:flex-start;justify-content:center;
+  padding:40px 16px;overflow-y:auto;z-index:100;
+}
+.inventario-tecnologico-modal{
+  background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow-lg);
+  width:100%;max-width:620px;margin-bottom:40px;overflow:hidden;
+}
+.inventario-tecnologico-modal.inventario-tecnologico-modal-wide{max-width:840px;}
+.inventario-tecnologico-modal-header{
+  padding:16px 20px;display:flex;align-items:center;justify-content:space-between;
+  border-radius:var(--radius) var(--radius) 0 0;position:relative;
+  background:var(--gradient-brand);color:#fff;
+}
+.inventario-tecnologico-modal-header h3{margin:0;font-size:16px;font-weight:600;color:#fff;}
+.inventario-tecnologico-modal-body{padding:18px 20px;max-height:70vh;overflow-y:auto;background:linear-gradient(180deg, #F5F9FC 0%, var(--surface) 90px);}
+.inventario-tecnologico-modal-footer{padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
+.inventario-tecnologico-modal-header .inventario-tecnologico-modal-close{border:none;background:transparent;font-size:18px;color:rgba(255,255,255,0.85);padding:2px 6px;border-radius:4px;}
+.inventario-tecnologico-modal-header .inventario-tecnologico-modal-close:hover{background:rgba(255,255,255,0.16);color:#fff;}
+
+/* ---------- Forms ---------- */
+.inventario-tecnologico-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;}
+.inventario-tecnologico-form-grid.inventario-tecnologico-cols-1{grid-template-columns:1fr;}
+.inventario-tecnologico-field{display:flex;flex-direction:column;gap:4px;}
+.inventario-tecnologico-field.inventario-tecnologico-span-2{grid-column:1/-1;}
+.inventario-tecnologico-field label{font-size:12px;font-weight:600;color:var(--ink-muted);}
+.inventario-tecnologico-field input, .inventario-tecnologico-field select, .inventario-tecnologico-field textarea{
+  border:1px solid var(--border-strong);border-radius:var(--radius-sm);
+  padding:8px 10px;background:var(--surface);color:var(--ink);width:100%;
+}
+.inventario-tecnologico-field textarea{resize:vertical;min-height:60px;}
+.inventario-tecnologico-field .inventario-tecnologico-hint{font-size:11.5px;color:var(--ink-faint);}
+.inventario-tecnologico-field-error{font-size:11.5px;color:var(--danger);}
+fieldset{border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin:0;}
+fieldset legend{font-size:12px;font-weight:600;color:var(--ink-muted);padding:0 4px;}
+.inventario-tecnologico-alert{border-radius:var(--radius-sm);padding:9px 12px;font-size:13px;margin-bottom:12px;}
+.inventario-tecnologico-alert-error{background:var(--danger-soft);color:var(--danger);}
+.inventario-tecnologico-alert-info{background:var(--accent-soft);color:var(--accent-ink);}
+
+/* ---------- Detail / timeline ---------- */
+.inventario-tecnologico-detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--border);}
+.inventario-tecnologico-detail-title{font-size:22px;font-weight:700;letter-spacing:-0.01em;color:var(--accent-ink);line-height:1.25;}
+.inventario-tecnologico-detail-sub{color:var(--ink-muted);font-size:14px;margin-top:5px;font-weight:500;}
+.inventario-tecnologico-detail-sub .inventario-tecnologico-dsep{margin:0 6px;color:var(--border-strong);}
+
+/* Resumen del detalle: tarjeta de perfil (ícono + quién lo tiene) + tarjetas con badge */
+.inventario-tecnologico-detail-head-v2{display:flex;align-items:stretch;gap:16px;margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
+.inventario-tecnologico-detail-profile-card{
+  display:flex;align-items:center;gap:12px;flex-shrink:0;min-width:230px;
+  border:1px solid var(--border);border-radius:14px;padding:12px 16px;
+}
+.inventario-tecnologico-detail-icon-big{
+  flex-shrink:0;width:64px;height:64px;border-radius:14px;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,0.55);border:1px solid rgba(0,0,0,0.06);
+}
+.inventario-tecnologico-detail-icon-big img{width:100%;height:100%;object-fit:cover;cursor:pointer;display:block;}
+.inventario-tecnologico-detail-profile-info{min-width:0;}
+.inventario-tecnologico-detail-profile-name{font-size:16px;font-weight:700;color:var(--ink);line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-detail-profile-cargo{font-size:12.5px;color:var(--ink-muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-detail-badges-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;flex:1;min-width:260px;}
+.inventario-tecnologico-detail-badge-card{
+  border:1px solid var(--border);border-left:3px solid var(--border-strong);
+  border-radius:10px;padding:7px 11px;min-width:0;
+}
+.inventario-tecnologico-detail-badge{
+  display:inline-block;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;
+  color:var(--accent-ink);background:var(--accent-soft);border-radius:4px;padding:1px 6px;margin-bottom:4px;
+}
+.inventario-tecnologico-detail-badge-value{font-size:13.5px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-detail-badge-select{
+  font-size:13.5px;font-weight:600;font-family:inherit;
+  border:none;background:transparent;padding:0;width:100%;cursor:pointer;
+  -webkit-appearance:none;appearance:none;
+}
+
+.inventario-tecnologico-kv-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;margin-bottom:20px;}
+.inventario-tecnologico-fotos-grid{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px;}
+.inventario-tecnologico-foto-thumb{position:relative;width:84px;height:84px;border-radius:8px;overflow:hidden;border:1px solid var(--border);}
+.inventario-tecnologico-foto-thumb img{width:100%;height:100%;object-fit:cover;cursor:pointer;display:block;}
+.inventario-tecnologico-foto-borrar{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,0.55);color:#fff;font-size:11px;line-height:20px;text-align:center;padding:0;cursor:pointer;}
+.inventario-tecnologico-foto-agregar{width:84px;height:84px;border-radius:8px;border:1.5px dashed var(--border-strong);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--ink-muted);cursor:pointer;text-align:center;}
+.inventario-tecnologico-foto-agregar:hover{border-color:var(--accent);color:var(--accent);}
+/* Dentro del formulario de edición las fotos ya no abren el carrusel (ver
+   abrirFormActivo) — sin cursor:pointer ahí para no sugerir un clic que no hace nada. */
+#inventario-tecnologico-fotos-grid-form .inventario-tecnologico-foto-thumb img{cursor:default;}
+.inventario-tecnologico-foto-thumb-pendiente{border:1.5px dashed var(--accent);}
+.inventario-tecnologico-foto-pendiente-tag{position:absolute;left:2px;bottom:2px;background:var(--accent);color:#fff;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.02em;padding:1px 5px;border-radius:4px;}
+.inventario-tecnologico-foto-marcada-borrar img{opacity:0.35;filter:grayscale(1);}
+.inventario-tecnologico-foto-marcada-borrar .inventario-tecnologico-foto-borrar{background:var(--accent);}
+
+/* ---------- Carrusel de fotos (modal grande, no el thumbnail chico) ---------- */
+.inventario-tecnologico-modal-carrusel{max-width:680px;}
+.inventario-tecnologico-carrusel-body{display:flex;align-items:center;justify-content:center;gap:14px;}
+.inventario-tecnologico-carrusel-img{max-width:100%;max-height:60vh;width:auto;height:auto;object-fit:contain;border-radius:8px;background:var(--surface-2);}
+.inventario-tecnologico-carrusel-flecha{
+  flex-shrink:0;width:40px;height:40px;border-radius:50%;border:none;
+  background:var(--surface-2);color:var(--ink);font-size:22px;line-height:1;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+}
+.inventario-tecnologico-carrusel-flecha:hover{background:var(--accent-soft);color:var(--accent-ink);}
+.inventario-tecnologico-carrusel-flecha:disabled{opacity:0.3;cursor:default;}
+.inventario-tecnologico-carrusel-flecha:disabled:hover{background:var(--surface-2);color:var(--ink);}
+.inventario-tecnologico-carrusel-footer{justify-content:center;}
+.inventario-tecnologico-carrusel-contador{font-size:13px;font-weight:600;color:var(--ink-muted);}
+.inventario-tecnologico-kv{display:flex;flex-direction:column;gap:2px;padding:8px 0;border-bottom:1px solid var(--border);}
+.inventario-tecnologico-kv .inventario-tecnologico-k{font-size:11px;text-transform:uppercase;letter-spacing:0.03em;color:var(--ink-faint);}
+.inventario-tecnologico-kv .inventario-tecnologico-v{font-size:13.5px;}
+.inventario-tecnologico-section-title{font-size:13px;font-weight:600;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.03em;margin:18px 0 10px;}
+
+.inventario-tecnologico-timeline{position:relative;padding-left:22px;}
+.inventario-tecnologico-timeline::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:2px;background:var(--border);}
+.inventario-tecnologico-titem{position:relative;padding-bottom:16px;}
+.inventario-tecnologico-titem:last-child{padding-bottom:0;}
+.inventario-tecnologico-titem::before{
+  content:"";position:absolute;left:-22px;top:4px;width:11px;height:11px;border-radius:50%;
+  background:var(--surface);border:2px solid var(--border-strong);
+}
+.inventario-tecnologico-titem.inventario-tecnologico-current::before{background:var(--accent);border-color:var(--accent);}
+.inventario-tecnologico-titem-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.inventario-tecnologico-titem-name{font-weight:600;font-size:13.5px;}
+.inventario-tecnologico-titem-meta{font-size:12px;color:var(--ink-muted);margin-top:2px;}
+.inventario-tecnologico-titem-actions{display:flex;gap:4px;}
+.inventario-tecnologico-titem-observacion{font-size:12.5px;color:var(--ink);font-style:italic;margin-top:6px;padding-left:8px;border-left:2px dashed var(--border-strong);white-space:pre-line;}
+.inventario-tecnologico-titem-obs-tag{display:inline-block;font-style:normal;font-weight:700;font-size:10px;letter-spacing:0.03em;text-transform:uppercase;margin-right:6px;padding:1px 6px;border-radius:4px;vertical-align:1px;}
+.inventario-tecnologico-titem-obs-tipo{display:inline-block;font-style:normal;font-weight:600;font-size:11px;margin-right:6px;padding:1px 7px;border-radius:4px;vertical-align:1px;background:var(--surface-2);color:var(--ink-muted);}
+.inventario-tecnologico-titem-obs-tipo-peligro{background:var(--danger-soft);color:var(--danger);}
+.inventario-tecnologico-titem-obs-entrega{border-left-color:#8FC79C;}
+.inventario-tecnologico-titem-obs-entrega .inventario-tecnologico-titem-obs-tag{background:#DCEFE0;color:#2E6B3D;}
+.inventario-tecnologico-titem-obs-devolucion{border-left-color:#D8B26B;}
+.inventario-tecnologico-titem-obs-devolucion .inventario-tecnologico-titem-obs-tag{background:#F5E6C8;color:#8A5A0F;}
+
+/* ---------- Login ("portada") ---------- */
+.inventario-tecnologico-login-wrap{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:32px 20px;background:var(--gradient-brand);position:relative;overflow:hidden;
+}
+/* Decoración: manchas suaves + marca de agua del ícono, siempre detrás del
+   logo/tarjeta gracias al orden natural del DOM (van primero en el markup). */
+.inventario-tecnologico-login-decor{position:absolute;pointer-events:none;border-radius:50%;filter:blur(8px);}
+.inventario-tecnologico-login-decor-1{width:420px;height:420px;background:rgba(255,255,255,0.14);top:-160px;left:-120px;}
+.inventario-tecnologico-login-decor-2{width:300px;height:300px;background:var(--brand-orange);opacity:0.16;bottom:-120px;right:-90px;}
+.inventario-tecnologico-login-decor-3{width:220px;height:220px;background:rgba(255,255,255,0.10);bottom:12%;left:6%;}
+.inventario-tecnologico-login-watermark{
+  width:520px;height:520px;top:50%;left:50%;border-radius:0;filter:none;
+  transform:translate(-50%,-46%) rotate(-10deg);
+  background-repeat:no-repeat;background-size:contain;background-position:center;
+  opacity:0.07;
+}
+.inventario-tecnologico-login-logo-hero{
+  width:230px;max-width:72vw;margin-bottom:26px;position:relative;
+  filter:drop-shadow(0 8px 20px rgba(0,25,55,0.28));
+}
+.inventario-tecnologico-login-card{
+  background:var(--surface);border:1px solid rgba(255,255,255,0.4);border-radius:14px;
+  box-shadow:var(--shadow-lg);padding:34px 32px;width:100%;max-width:380px;position:relative;
+}
+.inventario-tecnologico-login-title{font-size:19px;font-weight:700;color:var(--accent-ink);}
+.inventario-tecnologico-login-sub{color:var(--ink-muted);font-size:13px;margin-bottom:22px;margin-top:3px;}
+.inventario-tecnologico-login-card .inventario-tecnologico-field{margin-bottom:12px;}
+.inventario-tecnologico-login-hint{
+  margin-top:18px;padding-top:14px;border-top:1px solid var(--border);
+  font-size:11.5px;color:var(--ink-faint);line-height:1.6;
+}
+.inventario-tecnologico-login-hint code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-family:'IBM Plex Mono',monospace;}
+
+/* ---------- Toast ---------- */
+.inventario-tecnologico-toast{
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+  display:flex;align-items:flex-start;gap:12px;
+  background:var(--surface);color:var(--ink);border:1px solid var(--border-strong);
+  border-radius:16px;padding:14px 16px;box-shadow:var(--shadow-lg);
+  z-index:200;max-width:min(420px, calc(100vw - 32px));
+  animation:toast-in .35s ease-out;
+}
+.inventario-tecnologico-toast-icon{display:flex;color:var(--accent);flex-shrink:0;margin-top:1px;}
+.inventario-tecnologico-toast-text{display:flex;flex-direction:column;gap:2px;}
+.inventario-tecnologico-toast-title{font-size:14px;font-weight:700;color:var(--accent-ink);}
+.inventario-tecnologico-toast-sub{font-size:12.5px;color:var(--ink-muted);line-height:1.4;}
+.inventario-tecnologico-toast-close{
+  border:none;background:transparent;color:var(--ink-faint);font-size:13px;
+  padding:2px 4px;border-radius:4px;flex-shrink:0;align-self:flex-start;
+}
+.inventario-tecnologico-toast-close:hover{background:var(--surface-2);color:var(--ink);}
+.inventario-tecnologico-toast-out{animation:toast-out .4s ease-in forwards;}
+@keyframes toast-in{from{opacity:0;transform:translate(-50%,14px);}to{opacity:1;transform:translate(-50%,0);}}
+@keyframes toast-out{from{opacity:1;}to{opacity:0;transform:translate(-50%,10px);}}
+@media (prefers-reduced-motion:reduce){.inventario-tecnologico-toast{animation:none;}.inventario-tecnologico-toast-out{animation:none;opacity:0;}}
+
+/* ---------- Notificaciones apilables (reemplazan alert()) ---------- */
+.inventario-tecnologico-toast-stack{
+  position:fixed;top:16px;right:16px;z-index:200;
+  display:flex;flex-direction:column;gap:10px;
+  max-width:min(380px, calc(100vw - 32px));
+  pointer-events:none;
+}
+.inventario-tecnologico-toast-notif{
+  pointer-events:auto;position:relative;overflow:hidden;
+  display:flex;align-items:flex-start;gap:10px;
+  background:var(--surface);color:var(--ink);
+  border:1px solid var(--border-strong);border-left:4px solid var(--ink-faint);
+  border-radius:12px;padding:12px 30px 13px 14px;box-shadow:var(--shadow-lg);
+  font-size:13px;line-height:1.45;
+  animation:toast-notif-in .25s ease-out;
+}
+.inventario-tecnologico-toast-notif-icon{display:flex;flex-shrink:0;margin-top:1px;color:var(--ink-faint);}
+.inventario-tecnologico-toast-notif-msg{flex:1;min-width:0;}
+.inventario-tecnologico-toast-notif-close{
+  position:absolute;top:8px;right:8px;border:none;background:transparent;
+  color:var(--ink-faint);font-size:12px;padding:3px 5px;border-radius:4px;
+}
+.inventario-tecnologico-toast-notif-close:hover{background:var(--surface-2);color:var(--ink);}
+.inventario-tecnologico-toast-notif-bar{
+  position:absolute;left:0;bottom:0;height:3px;width:100%;
+  background:currentColor;opacity:0.3;transform-origin:left;
+  animation-name:toast-notif-shrink;animation-timing-function:linear;animation-fill-mode:forwards;
+}
+.inventario-tecnologico-toast-notif-success{border-left-color:var(--good);}
+.inventario-tecnologico-toast-notif-success .inventario-tecnologico-toast-notif-icon{color:var(--good);}
+.inventario-tecnologico-toast-notif-error{border-left-color:var(--danger);}
+.inventario-tecnologico-toast-notif-error .inventario-tecnologico-toast-notif-icon{color:var(--danger);}
+.inventario-tecnologico-toast-notif-info{border-left-color:var(--accent);}
+.inventario-tecnologico-toast-notif-info .inventario-tecnologico-toast-notif-icon{color:var(--accent);}
+.inventario-tecnologico-toast-notif-out{animation:toast-notif-out .3s ease-in forwards;}
+@keyframes toast-notif-in{from{opacity:0;transform:translateX(24px);}to{opacity:1;transform:translateX(0);}}
+@keyframes toast-notif-out{from{opacity:1;transform:translateX(0);}to{opacity:0;transform:translateX(24px);}}
+@keyframes toast-notif-shrink{from{transform:scaleX(1);}to{transform:scaleX(0);}}
+@media (prefers-reduced-motion:reduce){
+  .inventario-tecnologico-toast-notif{animation:none;}
+  .inventario-tecnologico-toast-notif-out{animation:none;opacity:0;}
+  .inventario-tecnologico-toast-notif-bar{animation:none;opacity:0;}
+}
+@media (max-width:720px){
+  .inventario-tecnologico-toast-stack{left:10px;right:10px;top:10px;max-width:none;}
+}
+
+/* ---------- Config / permission matrix ---------- */
+.inventario-tecnologico-subtabs{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border);}
+.inventario-tecnologico-subtab-btn{border:none;background:none;padding:9px 4px;margin-right:18px;font-size:13.5px;color:var(--ink-muted);font-weight:500;border-bottom:2px solid transparent;}
+.inventario-tecnologico-subtab-btn.inventario-tecnologico-active{color:var(--accent-ink);border-bottom-color:var(--accent);}
+.inventario-tecnologico-matrix-table th, .inventario-tecnologico-matrix-table td{text-align:center;}
+.inventario-tecnologico-matrix-table th:first-child, .inventario-tecnologico-matrix-table td:first-child{text-align:left;}
+.inventario-tecnologico-matrix-table td input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);}
+
+.inventario-tecnologico-footer-note{color:var(--ink-faint);font-size:11.5px;margin-top:26px;text-align:center;}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:6px;}
+
+/* ---------- Mapa: ubicaciones y radioenlaces (ui/vista-mapa.js) ----------
+   La vista ocupa todo el ancho (sin el max-width de main) y el alto de la
+   ventana: barra arriba, y abajo el mapa + panel lateral. El lienzo del mapa
+   tiene su propio contexto de apilamiento (isolation) para que los z-index
+   internos de Leaflet (400–1000) no compitan con modales ni toasts. */
+main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
+.inventario-tecnologico-mapa-vista{display:flex;flex-direction:column;gap:12px;height:calc(100vh - 56px - 32px);min-height:520px;}
+.inventario-tecnologico-mapa-barra{
+  display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex-shrink:0;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;
+}
+.inventario-tecnologico-mapa-buscador{position:relative;flex:1 1 280px;min-width:220px;max-width:460px;}
+.inventario-tecnologico-mapa-buscador input{width:100%;border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:6px 9px;background:var(--surface);color:var(--ink);}
+.inventario-tecnologico-mapa-buscador input:focus{outline:none;border-color:var(--accent);}
+.inventario-tecnologico-mapa-resultados{
+  position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;list-style:none;margin:0;padding:4px;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow-lg);max-height:340px;overflow-y:auto;
+}
+.inventario-tecnologico-mapa-resultado{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:8px;padding:7px 9px;border-radius:6px;cursor:pointer;}
+.inventario-tecnologico-mapa-resultado:hover,.inventario-tecnologico-mapa-resultado-activo{background:var(--accent-soft);}
+.inventario-tecnologico-mapa-resultado-clase{grid-row:span 2;align-self:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--accent-ink);background:var(--accent-soft);border-radius:4px;padding:2px 6px;}
+.inventario-tecnologico-mapa-resultado-activo .inventario-tecnologico-mapa-resultado-clase,.inventario-tecnologico-mapa-resultado:hover .inventario-tecnologico-mapa-resultado-clase{background:var(--surface);}
+.inventario-tecnologico-mapa-resultado-titulo{font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-mapa-resultado-detalle{font-size:11.5px;color:var(--ink-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-mapa-resultado-vacio{padding:8px 10px;font-size:12.5px;color:var(--ink-muted);}
+.inventario-tecnologico-mapa-chips{display:flex;gap:6px;flex-wrap:wrap;}
+.inventario-tecnologico-mapa-chip{
+  display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border-strong);background:var(--surface);
+  color:var(--ink);border-radius:20px;padding:4px 10px;font-size:12.5px;font-weight:500;
+}
+.inventario-tecnologico-mapa-chip:hover{background:var(--surface-2);}
+.inventario-tecnologico-mapa-chip-punto{width:9px;height:9px;border-radius:50%;background:var(--chip-color);}
+.inventario-tecnologico-mapa-chip-n{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-faint);}
+.inventario-tecnologico-mapa-chip[aria-pressed="false"]{opacity:0.55;background:var(--surface-2);text-decoration:line-through;}
+.inventario-tecnologico-mapa-chip[aria-pressed="false"] .inventario-tecnologico-mapa-chip-punto{background:transparent;box-shadow:inset 0 0 0 2px var(--chip-color);}
+.inventario-tecnologico-mapa-check{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink-muted);cursor:pointer;white-space:nowrap;}
+.inventario-tecnologico-mapa-check input{accent-color:var(--accent);margin:0;}
+.inventario-tecnologico-mapa-layout{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:12px;}
+.inventario-tecnologico-mapa-lienzo-wrap{position:relative;min-height:0;}
+.inventario-tecnologico-mapa-canvas{
+  position:absolute;inset:0;z-index:0;isolation:isolate;
+  border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;background:#DCE5EC;
+}
+.inventario-tecnologico-mapa-canvas.leaflet-container{font-family:'IBM Plex Sans',system-ui,sans-serif;}
+.inventario-tecnologico-mapa-error-lienzo{display:flex;align-items:center;justify-content:center;height:100%;padding:24px;}
+.inventario-tecnologico-mapa-colocando .inventario-tecnologico-mapa-canvas,
+.inventario-tecnologico-mapa-colocando .leaflet-container,
+.inventario-tecnologico-mapa-colocando .leaflet-interactive{cursor:crosshair !important;}
+.inventario-tecnologico-mapa-aviso{
+  position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;align-items:center;gap:10px;background:var(--ink);color:#fff;border-radius:20px;
+  padding:6px 8px 6px 14px;font-size:13px;box-shadow:var(--shadow-lg);white-space:nowrap;
+}
+.inventario-tecnologico-mapa-aviso[hidden]{display:none;}
+
+/* Panel lateral */
+.inventario-tecnologico-mapa-panel{overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);min-height:0;padding:14px 14px 18px;}
+.inventario-tecnologico-mapa-panel-cabecera{display:flex;flex-direction:column;gap:6px;padding-bottom:12px;border-bottom:1px solid var(--border);}
+.inventario-tecnologico-mapa-panel-nav{margin:-4px 0 0 -6px;}
+.inventario-tecnologico-mapa-panel-titulo{font-size:17px;font-weight:700;color:var(--accent-ink);line-height:1.25;word-break:break-word;}
+.inventario-tecnologico-mapa-panel-sub{font-size:12.5px;color:var(--ink-muted);}
+.inventario-tecnologico-mapa-panel-meta{display:flex;gap:6px;flex-wrap:wrap;}
+.inventario-tecnologico-mapa-coords{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12.5px;}
+.inventario-tecnologico-mapa-coords a{text-decoration:none;}
+.inventario-tecnologico-mapa-panel-texto{font-size:13px;color:var(--ink);}
+.inventario-tecnologico-mapa-panel-notas{font-size:12.5px;color:var(--ink-muted);white-space:pre-line;border-left:2px dashed var(--border-strong);padding-left:8px;}
+.inventario-tecnologico-mapa-fotos{margin:2px 0 0;}
+.inventario-tecnologico-mapa-fotos .inventario-tecnologico-foto-thumb{width:64px;height:64px;}
+.inventario-tecnologico-mapa-acciones{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;}
+.inventario-tecnologico-mapa-seccion-cab{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.inventario-tecnologico-mapa-seccion-cab .inventario-tecnologico-section-title{margin:16px 0 8px;}
+.inventario-tecnologico-mapa-lista{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;}
+.inventario-tecnologico-mapa-fila{
+  display:flex;align-items:center;gap:9px;width:100%;min-width:0;text-align:left;
+  border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:8px 10px;color:var(--ink);
+}
+.inventario-tecnologico-mapa-fila:hover{background:var(--surface-2);border-color:var(--border-strong);}
+.inventario-tecnologico-mapa-fila:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+.inventario-tecnologico-mapa-fila-texto{display:flex;flex-direction:column;min-width:0;flex:1;}
+.inventario-tecnologico-mapa-fila-titulo{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-mapa-fila-titulo .inventario-tecnologico-tag{font-size:11.5px;padding-top:1px;padding-bottom:1px;margin-right:2px;}
+.inventario-tecnologico-mapa-fila-sub{font-size:12px;color:var(--ink-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-mapa-punto{display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 2px var(--surface), 0 0 0 3px rgba(0,0,0,0.08);}
+.inventario-tecnologico-mapa-icono-radio{display:inline-flex;color:var(--brand-orange);flex-shrink:0;}
+.inventario-tecnologico-mapa-icono-tipo{display:inline-flex;flex-shrink:0;}
+.inventario-tecnologico-mapa-contador{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink-muted);background:var(--surface-2);border-radius:10px;padding:1px 7px;flex-shrink:0;}
+.inventario-tecnologico-mapa-equipo-sel > .inventario-tecnologico-mapa-fila{border-color:var(--brand-orange);background:var(--warn-soft);}
+.inventario-tecnologico-mapa-equipo-sel .inventario-tecnologico-mapa-contador{background:var(--surface);color:var(--warn);}
+.inventario-tecnologico-mapa-equipo-detalle{margin:6px 0 4px 12px;padding-left:10px;border-left:2px solid var(--brand-orange);display:flex;flex-direction:column;gap:8px;}
+.inventario-tecnologico-mapa-enlace{border:1px solid var(--border);border-radius:8px;padding:9px 10px;background:var(--surface);}
+.inventario-tecnologico-mapa-enlace-destacado{border-color:var(--brand-orange);box-shadow:0 0 0 2px var(--warn-soft);}
+.inventario-tecnologico-mapa-enlace-cab{font-size:13px;}
+.inventario-tecnologico-mapa-enlace-flecha{color:var(--brand-orange);font-weight:700;}
+.inventario-tecnologico-mapa-enlace-datos{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin:8px 0 0;}
+.inventario-tecnologico-mapa-enlace-datos div{min-width:0;}
+.inventario-tecnologico-mapa-enlace-datos dt{font-size:10.5px;text-transform:uppercase;letter-spacing:0.03em;color:var(--ink-faint);}
+.inventario-tecnologico-mapa-enlace-datos dd{margin:0;font-size:13px;font-weight:600;font-family:'IBM Plex Mono',monospace;}
+.inventario-tecnologico-mapa-activo{display:flex;align-items:center;gap:6px;}
+.inventario-tecnologico-mapa-activo > .inventario-tecnologico-mapa-fila{flex:1;}
+.inventario-tecnologico-mapa-activo-destacado > .inventario-tecnologico-mapa-fila{border-color:var(--accent);background:var(--accent-soft);animation:inventario-tecnologico-mapa-destello 1.2s ease-out 2;}
+.inventario-tecnologico-mapa-activo-acciones{display:flex;flex-direction:column;gap:3px;flex-shrink:0;}
+.inventario-tecnologico-mapa-insignia-radio{font-size:11px;font-weight:600;color:var(--warn);background:var(--warn-soft);border-radius:4px;padding:2px 6px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0;}
+.inventario-tecnologico-mapa-vacio{font-size:12.5px;color:var(--ink-muted);padding:6px 2px;}
+.inventario-tecnologico-mapa-muted{color:var(--ink-faint);font-weight:400;}
+.inventario-tecnologico-mapa-nota{font-size:12.5px;color:var(--ink-muted);background:var(--surface-2);border-radius:var(--radius-sm);padding:8px 10px;margin-top:10px;}
+.inventario-tecnologico-mapa-cifras{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;}
+.inventario-tecnologico-mapa-cifra{border:1px solid var(--border);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;}
+.inventario-tecnologico-mapa-cifra-num{font-size:20px;font-weight:700;color:var(--accent-ink);font-family:'IBM Plex Mono',monospace;line-height:1.1;}
+.inventario-tecnologico-mapa-cifra-lbl{font-size:11.5px;color:var(--ink-muted);}
+@keyframes inventario-tecnologico-mapa-destello{0%{box-shadow:0 0 0 0 rgba(0,126,178,0.45);}100%{box-shadow:0 0 0 8px rgba(0,126,178,0);}}
+
+/* Marcadores (L.divIcon). La punta del pin está en (16,36) del ícono de 32×40. */
+.inventario-tecnologico-mapa-icono{background:none;border:none;}
+.inventario-tecnologico-mapa-pin{position:relative;width:32px;height:40px;}
+.inventario-tecnologico-mapa-pin-cuerpo{
+  position:absolute;left:2px;top:2px;width:28px;height:28px;box-sizing:border-box;
+  border-radius:50% 50% 50% 0;background:var(--pin-color);border:2px solid #fff;transform:rotate(-45deg);
+  box-shadow:0 2px 6px rgba(0,20,45,0.35);display:flex;align-items:center;justify-content:center;
+  transition:transform .15s ease, box-shadow .15s ease;
+}
+.inventario-tecnologico-mapa-pin-glifo{transform:rotate(45deg);display:flex;color:#fff;}
+.inventario-tecnologico-mapa-pin-cantidad{
+  position:absolute;top:-5px;right:-6px;min-width:17px;height:17px;padding:0 4px;box-sizing:border-box;
+  border-radius:9px;background:#fff;color:var(--pin-color);border:1.5px solid var(--pin-color);
+  font:700 10px/14px 'IBM Plex Mono',monospace;text-align:center;
+}
+.inventario-tecnologico-mapa-pin-seleccionada .inventario-tecnologico-mapa-pin-cuerpo{transform:rotate(-45deg) scale(1.2);box-shadow:0 0 0 3px #fff, 0 0 0 6px var(--pin-color), 0 4px 12px rgba(0,20,45,0.45);}
+.inventario-tecnologico-mapa-pin-enlazada .inventario-tecnologico-mapa-pin-cuerpo{box-shadow:0 0 0 3px #fff, 0 0 0 6px var(--brand-orange), 0 4px 12px rgba(0,20,45,0.45);}
+.inventario-tecnologico-mapa-pin-enlazada::after{
+  content:"";position:absolute;left:-2px;top:18px;width:36px;height:36px;box-sizing:border-box;border-radius:50%;
+  border:3px solid var(--brand-orange);animation:inventario-tecnologico-mapa-pulso 1.6s ease-out infinite;pointer-events:none;
+}
+.inventario-tecnologico-mapa-pin-archivada{filter:grayscale(1);opacity:0.6;}
+@keyframes inventario-tecnologico-mapa-pulso{0%{transform:scale(0.4);opacity:1;}100%{transform:scale(1.5);opacity:0;}}
+.leaflet-marker-icon.inventario-tecnologico-mapa-icono:focus{outline:none;}
+.leaflet-marker-icon.inventario-tecnologico-mapa-icono:focus-visible .inventario-tecnologico-mapa-pin-cuerpo{box-shadow:0 0 0 3px #fff, 0 0 0 6px var(--accent);}
+.leaflet-tooltip.inventario-tecnologico-mapa-tooltip{font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:12px;font-weight:600;color:var(--ink);border-radius:6px;padding:3px 8px;border-color:var(--border);box-shadow:var(--shadow);}
+.leaflet-tooltip.inventario-tecnologico-mapa-etiqueta-enlace{
+  font-family:'IBM Plex Mono',monospace;font-size:11.5px;font-weight:600;color:#fff;background:var(--brand-orange);
+  border:1.5px solid #fff;border-radius:12px;padding:2px 8px;box-shadow:0 2px 6px rgba(0,20,45,0.3);white-space:nowrap;
+}
+.leaflet-tooltip.inventario-tecnologico-mapa-etiqueta-enlace::before{display:none;}
+
+/* Formularios del mapa */
+.inventario-tecnologico-mapa-select-mas{display:flex;gap:6px;}
+.inventario-tecnologico-mapa-select-mas select{flex:1;min-width:0;}
+.inventario-tecnologico-mapa-mini-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;padding:8px;border:1px dashed var(--border-strong);border-radius:var(--radius-sm);background:var(--surface-2);}
+.inventario-tecnologico-mapa-mini-form[hidden]{display:none;}
+.inventario-tecnologico-mapa-mini-form input[type=text]{flex:1 1 160px;min-width:0;width:auto;}
+.inventario-tecnologico-mapa-mini-form input[type=color]{width:40px;height:34px;padding:2px;}
+.inventario-tecnologico-mapa-mini-form .inventario-tecnologico-field-error{flex-basis:100%;}
+.inventario-tecnologico-mapa-coords-input{display:flex;gap:6px;}
+.inventario-tecnologico-mapa-coords-input input{flex:1;min-width:0;font-family:'IBM Plex Mono',monospace;font-size:13px;}
+.inventario-tecnologico-field .inventario-tecnologico-hint.inventario-tecnologico-mapa-ok{color:var(--good);font-weight:600;}
+.inventario-tecnologico-mapa-campo-fijo{font-size:13.5px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);}
+.inventario-tecnologico-field select[size]{padding:4px;margin-top:6px;}
+.inventario-tecnologico-mapa-asignar-barra{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+.inventario-tecnologico-mapa-asignar-barra input[type=search]{flex:1 1 260px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:7px 9px;}
+.inventario-tecnologico-mapa-asignar-acciones{display:flex;gap:6px;align-items:center;margin:10px 0 6px;flex-wrap:wrap;}
+.inventario-tecnologico-mapa-asignar-lista{list-style:none;margin:0;padding:4px;border:1px solid var(--border);border-radius:var(--radius-sm);max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:1px;}
+.inventario-tecnologico-mapa-asignar-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:5px;cursor:pointer;font-size:13px;min-width:0;}
+.inventario-tecnologico-mapa-asignar-item:hover{background:var(--surface-2);}
+.inventario-tecnologico-mapa-asignar-item input{accent-color:var(--accent);margin:0;flex-shrink:0;}
+.inventario-tecnologico-mapa-asignar-texto{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-mapa-asignar-bloqueado{opacity:0.55;cursor:not-allowed;}
+
+/* Bloque "Ubicación" en el detalle de un activo */
+.inventario-tecnologico-ubicacion-activo{margin-bottom:6px;}
+.inventario-tecnologico-ubicacion-activo-fila{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border);border-radius:10px;padding:9px 12px;}
+.inventario-tecnologico-ubicacion-activo-texto{flex:1;min-width:180px;}
+.inventario-tecnologico-ubicacion-activo-nombre{font-size:14px;font-weight:600;}
+.inventario-tecnologico-ubicacion-activo-meta{font-size:12px;color:var(--ink-muted);}
+.inventario-tecnologico-ubicacion-activo-acciones{display:flex;gap:6px;flex-wrap:wrap;}
+.inventario-tecnologico-ubicacion-activo-historial{margin:12px 0 4px 4px;}
+.inventario-tecnologico-ubicacion-activo-historial[hidden]{display:none;}
+
+@media (max-width:1024px){
+  .inventario-tecnologico-mapa-layout{grid-template-columns:minmax(0,1fr) 320px;}
+}
+@media (max-width:720px){
+  main.inventario-tecnologico-main-mapa{padding:10px 8px 30px;}
+  .inventario-tecnologico-mapa-vista{height:auto;min-height:0;}
+  .inventario-tecnologico-mapa-layout{grid-template-columns:1fr;}
+  .inventario-tecnologico-mapa-lienzo-wrap{height:58vh;min-height:320px;}
+  .inventario-tecnologico-mapa-panel{overflow:visible;}
+  .inventario-tecnologico-mapa-buscador{max-width:none;flex-basis:100%;}
+  .inventario-tecnologico-mapa-aviso{white-space:normal;width:calc(100% - 20px);justify-content:space-between;}
+  .inventario-tecnologico-mapa-enlace-datos{grid-template-columns:1fr;}
+}
+@media (prefers-reduced-motion:reduce){
+  .inventario-tecnologico-mapa-pin-enlazada::after{animation:none;transform:scale(1);opacity:0.8;}
+  .inventario-tecnologico-mapa-activo-destacado > .inventario-tecnologico-mapa-fila{animation:none;}
+  .inventario-tecnologico-mapa-pin-cuerpo{transition:none;}
+}
+
+/* ============================================================
+   RESPONSIVE
+   Los cortes van de mayor a menor pantalla. La tabla de activos
+   colapsa a Tipo + Custodio en celular (según se pidió); el resto
+   de vistas (Bajas, Auditoría, Config) mantiene sus columnas pero
+   con tipografía/paddings más compactos.
+   ============================================================ */
+
+/* ---- Pantallas grandes / TV: más aire, texto ligeramente mayor ---- */
+@media (min-width:1600px){
+  main{max-width:1500px;font-size:15.5px;}
+}
+
+/* ---- SmartTV / pantallas enormes: pensado para verse desde lejos, no desde
+   un escritorio — texto e íconos notablemente más grandes, más espacio de
+   respiro, sin volverse un mar de columnas angostas y letra chica. ---- */
+@media (min-width:2200px){
+  main{max-width:1900px;font-size:19px;}
+  .inventario-tecnologico-tipo-icon svg{width:22px;height:22px;}
+  .inventario-tecnologico-btn{font-size:15px;padding:9px 16px;}
+  .inventario-tecnologico-modal{max-width:720px;}
+  .inventario-tecnologico-modal.inventario-tecnologico-modal-wide{max-width:980px;}
+  .inventario-tecnologico-modal-header h3{font-size:19px;}
+  th,td{padding:12px 14px;}
+}
+
+/* ---- Tablet: ajusta paddings, el grid de 2 columnas de formularios se mantiene ---- */
+@media (max-width:1024px){
+  main{padding:18px 16px 50px;}
+  .inventario-tecnologico-modal.inventario-tecnologico-modal-wide{max-width:94vw;}
+}
+
+/* ---- Celular / tablet angosta: colapsa la tabla a Tipo + Custodio ---- */
+@media (max-width:720px){
+  main{padding:14px 10px 44px;}
+
+  /* Topbar: permite que envuelva en vez de recortar */
+  .inventario-tecnologico-topbar{height:auto;flex-wrap:wrap;padding:10px 12px;gap:8px;}
+  .inventario-tecnologico-topbar-left{flex-wrap:wrap;gap:8px;width:100%;}
+  .inventario-tecnologico-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;}
+  .inventario-tecnologico-tab-btn{flex-shrink:0;}
+  .inventario-tecnologico-topbar-right{width:100%;justify-content:space-between;}
+
+  /* Barra de filtros: apila y prioriza el botón de nuevo activo */
+  .inventario-tecnologico-filterbar{flex-direction:column;align-items:stretch;}
+  .inventario-tecnologico-filterbar input[type=text]{min-width:0;width:100%;}
+  .inventario-tecnologico-filterbar .inventario-tecnologico-fb-spacer{display:none;}
+  .inventario-tecnologico-filterbar #inventario-tecnologico-btn-exportar{order:2;}
+  .inventario-tecnologico-filterbar #inventario-tecnologico-btn-nuevo{order:1;width:100%;padding:11px 13px;font-size:14.5px;}
+  .inventario-tecnologico-filterbar #inventario-tecnologico-btn-exportar{width:100%;}
+  .inventario-tecnologico-filterbar #inventario-tecnologico-dropdown-resumenes{order:3;width:100%;}
+  .inventario-tecnologico-filterbar #inventario-tecnologico-btn-exportar-resumenes{width:100%;}
+  .inventario-tecnologico-dropdown-menu{left:0;right:auto;}
+
+  /* Tabla: solo Tipo y Custodio visibles; el resto se consulta abriendo el detalle */
+  /* Cualquier columna que no sea Tipo o Custodio se oculta en celular, sin
+     importar cuáles haya elegido el usuario en "Columnas" — el diseño para
+     pantallas chicas siempre prioriza esas dos. */
+  .inventario-tecnologico-tablewrap-activos th:not(.inventario-tecnologico-col-tipo):not(.inventario-tecnologico-col-custodio),
+  .inventario-tecnologico-tablewrap-activos td:not(.inventario-tecnologico-col-tipo):not(.inventario-tecnologico-col-custodio){display:none;}
+  /* Los anchos inline se calculan sobre el set completo de columnas elegidas
+     en escritorio; en celular solo quedan estas dos, así que se fuerzan a un
+     reparto fijo sin importar cuántas columnas haya en total. */
+  .inventario-tecnologico-tablewrap-activos .inventario-tecnologico-col-tipo{width:46% !important;}
+  .inventario-tecnologico-tablewrap-activos .inventario-tecnologico-col-custodio{width:54% !important;}
+  /* Tipo pasa a ser la primera columna visible: su panel de filtro debe abrir
+     hacia la derecha (anclado a la izquierda), no hacia la izquierda como en
+     escritorio, o se sale de la pantalla. */
+  .inventario-tecnologico-col-tipo .inventario-tecnologico-filter-panel{left:0;right:auto;}
+  .inventario-tecnologico-th-inner{padding:7px 6px 7px 10px;}
+  td{padding:9px 10px;}
+  .inventario-tecnologico-tipo-icon svg{width:15px;height:15px;}
+  .inventario-tecnologico-th-filter-btn{padding:5px 7px;font-size:13px;}
+  .inventario-tecnologico-filter-panel{min-width:170px;}
+
+  /* Modal: casi a pantalla completa, con menos relleno */
+  .inventario-tecnologico-modal-backdrop{padding:0;align-items:stretch;}
+  .inventario-tecnologico-modal{max-width:100%;width:100%;min-height:100%;border-radius:0;margin-bottom:0;display:flex;flex-direction:column;}
+  .inventario-tecnologico-modal.inventario-tecnologico-modal-wide{max-width:100%;}
+  .inventario-tecnologico-modal-body{flex:1;max-height:none;}
+  .inventario-tecnologico-form-grid{grid-template-columns:1fr;}
+  .inventario-tecnologico-kv-grid{grid-template-columns:1fr;}
+
+  /* Login: menos relleno lateral */
+  .inventario-tecnologico-login-card{padding:26px 20px;}
+
+  /* Config: matriz de permisos con scroll horizontal propio */
+  .inventario-tecnologico-matrix-table{display:block;overflow-x:auto;white-space:nowrap;}
+  /* Bajas y Auditoría no colapsan columnas como Activos: en vez de eso,
+     permiten scroll horizontal propio para no romper su tabla en pantallas
+     angostas. */
+  .inventario-tecnologico-tablewrap:not(.inventario-tecnologico-tablewrap-activos){overflow-x:auto;}
+  .inventario-tecnologico-tablewrap:not(.inventario-tecnologico-tablewrap-activos) table{min-width:520px;}
+}
+
+/* ---- Celular chico ---- */
+@media (max-width:400px){
+  .inventario-tecnologico-login-card{padding:22px 16px;}
+}

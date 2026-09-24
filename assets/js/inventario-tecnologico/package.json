@@ -1,0 +1,5 @@
+{
+  "type": "module",
+  "private": true,
+  "description": "No es un paquete npm de verdad — solo declara que estos .js son módulos ES nativos, para que herramientas de Node (los tests en ../../../tests, linters, etc.) los interpreten igual que el navegador. No afecta al sitio en producción: el navegador decide por el <script type=\"module\"> de index.html, no por este archivo."
+}
