@@ -8,10 +8,15 @@
 //   * quien no tiene "ver_mapa" no paga cinco consultas extra en cada guardado.
 // El patrón de acceso es el mismo que en datos.js: refrescar*() trae de
 // Supabase y deja todo en state; cargar*() lo lee sin volver a consultar.
+//
+// La jerarquía (migración 003) viaja en equipos_radioenlace.servidor_id; los
+// respaldos, en enlaces_respaldo. La simulación de fallas vive solo aquí, en
+// memoria (state.mapa.simulacion): nunca se escribe en Supabase.
 import { sb } from "./config.js";
 import { cargarActivos } from "./datos.js";
 import { state } from "./estado.js";
 import { indexarMapa } from "./mapa-logica.js";
+import { analizarRed, simularFallas } from "./mapa-jerarquia.js";
 
 export function crearEstadoMapa(){
   return {
@@ -19,11 +24,19 @@ export function crearEstadoMapa(){
     error: null,
     tiposUbicacion: [],   // filas de tipos_ubicacion (valor, etiqueta, color, orden, activo)
     ubicaciones: [],      // filas de ubicaciones (incluye archivadas: activa=false)
-    equipos: [],          // filas de equipos_radioenlace
-    enlaces: [],          // filas de enlaces
+    equipos: [],          // filas de equipos_radioenlace (con servidor_id, banda, frecuencia_mhz)
+    respaldos: [],        // filas de enlaces_respaldo
     vigentes: [],         // tramos de historial_ubicacion con hasta = null
-    seleccion: { ubicacionId: null, equipoId: null, enlaceId: null, activoId: null },
-    filtros: { tiposOcultos: [], verTodosEnlaces: false, verArchivadas: false },
+    seleccion: { ubicacionId: null, equipoId: null, activoId: null },
+    filtros: {
+      tiposOcultos: [],   // tipos de ubicación ocultos
+      verArchivadas: false,
+      lineas: { backbone: true, p2mp: true, respaldos: false },
+      rolesOcultos: [],   // raiz / backbone / distribucion / cliente
+      estadosOcultos: [], // servicio / respaldo / sin_conexion / caido (solo en simulación)
+    },
+    expandidos: [],       // servidores agrupados (muchos clientes) con sus líneas desplegadas
+    simulacion: { activa: false, caidos: [] },
     foco: null,           // { ubicacionId, activoId } pendiente de aplicar al abrir el mapa (p. ej. "Ver en mapa")
   };
 }
@@ -35,27 +48,29 @@ export function estadoMapa(){
 
 export async function refrescarDatosMapa(){
   const m = estadoMapa();
-  const [t, u, e, l, h] = await Promise.all([
+  const [t, u, e, r, h] = await Promise.all([
     sb.from("tipos_ubicacion").select("*").order("orden"),
     sb.from("ubicaciones").select("*").order("nombre"),
     sb.from("equipos_radioenlace").select("*").order("nombre"),
-    sb.from("enlaces").select("*").order("id"),
+    sb.from("enlaces_respaldo").select("*").order("prioridad").order("id"),
     sb.from("historial_ubicacion").select("id, activo_id, ubicacion_id, desde, notas").is("hasta", null),
   ]);
-  const error = t.error || u.error || e.error || l.error || h.error;
+  const error = t.error || u.error || e.error || r.error || h.error;
   if(error){ m.error = error; throw error; }
   m.tiposUbicacion = t.data || [];
   m.ubicaciones = u.data || [];
   m.equipos = e.data || [];
-  m.enlaces = l.data || [];
+  m.respaldos = r.data || [];
   m.vigentes = h.data || [];
   m.cargado = true;
   m.error = null;
-  // Si una selección apunta a algo que ya no existe (lo borró otra persona), se suelta.
+  // Lo que apunta a algo que ya no existe (lo borró otra persona) se suelta.
   const s = m.seleccion;
-  if(s.ubicacionId && !m.ubicaciones.some(x=>x.id===s.ubicacionId)) Object.assign(s, { ubicacionId:null, equipoId:null, enlaceId:null, activoId:null });
-  if(s.equipoId && !m.equipos.some(x=>x.id===s.equipoId)) Object.assign(s, { equipoId:null, enlaceId:null });
-  if(s.enlaceId && !m.enlaces.some(x=>x.id===s.enlaceId)) s.enlaceId = null;
+  const hayEquipo = id=>m.equipos.some(x=>x.id === id);
+  if(s.ubicacionId && !m.ubicaciones.some(x=>x.id === s.ubicacionId)) Object.assign(s, { ubicacionId: null, equipoId: null, activoId: null });
+  if(s.equipoId && !hayEquipo(s.equipoId)) s.equipoId = null;
+  m.expandidos = m.expandidos.filter(hayEquipo);
+  m.simulacion.caidos = m.simulacion.caidos.filter(hayEquipo);
 }
 
 export function cargarTiposUbicacion(){ return estadoMapa().tiposUbicacion; }
@@ -64,7 +79,7 @@ export function cargarUbicaciones(){ return estadoMapa().ubicaciones; }
 
 export function cargarEquiposRadioenlace(){ return estadoMapa().equipos; }
 
-export function cargarEnlaces(){ return estadoMapa().enlaces; }
+export function cargarRespaldos(){ return estadoMapa().respaldos; }
 
 export function cargarUbicacionesVigentes(){ return estadoMapa().vigentes; }
 
@@ -73,7 +88,18 @@ export function cargarUbicacionesVigentes(){ return estadoMapa().vigentes; }
 // en lugar de mantener una caché que habría que invalidar.
 export function indicesMapa(){
   const m = estadoMapa();
-  return indexarMapa({ ubicaciones: m.ubicaciones, equipos: m.equipos, enlaces: m.enlaces, vigentes: m.vigentes, activos: cargarActivos().activos });
+  return indexarMapa({ ubicaciones: m.ubicaciones, equipos: m.equipos, vigentes: m.vigentes, activos: cargarActivos().activos });
+}
+
+export function redMapa(){
+  const m = estadoMapa();
+  return analizarRed({ equipos: m.equipos, ubicaciones: m.ubicaciones, respaldos: m.respaldos });
+}
+
+// Resultado de la simulación, o null si está apagada.
+export function simulacionMapa(red = redMapa()){
+  const s = estadoMapa().simulacion;
+  return s.activa ? simularFallas(red, s.caidos) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,10 +107,13 @@ export function indicesMapa(){
 // abierto el mapa antes).
 // ---------------------------------------------------------------------------
 
+// El equipo de radio se pide a equipo_radio_de_activo() (migración 004) y no a
+// la tabla: equipos_radioenlace (la red) solo la lee quien tiene «Ver mapa», y
+// el detalle lo ve también quien solo tiene «Ver listado».
 export async function obtenerUbicacionDeActivo(activoId){
   const [vig, eq, cuenta, tipos] = await Promise.all([
     sb.from("historial_ubicacion").select("id, desde, notas, ubicacion:ubicaciones(id, nombre, tipo, activa)").eq("activo_id", activoId).is("hasta", null).maybeSingle(),
-    sb.from("equipos_radioenlace").select("id, nombre, ubicacion_id").eq("activo_id", activoId).maybeSingle(),
+    sb.rpc("equipo_radio_de_activo", { p_activo_id: activoId }).then(r=>({ data: Array.isArray(r.data) ? (r.data[0] || null) : (r.data || null), error: r.error })),
     sb.from("historial_ubicacion").select("id", { count: "exact", head: true }).eq("activo_id", activoId),
     estadoMapa().tiposUbicacion.length ? Promise.resolve({ data: estadoMapa().tiposUbicacion, error: null }) : sb.from("tipos_ubicacion").select("*").order("orden"),
   ]);

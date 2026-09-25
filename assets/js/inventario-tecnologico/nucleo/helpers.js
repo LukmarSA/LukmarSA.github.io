@@ -41,7 +41,19 @@ export function fmtFechaHora(iso){
   return d.toLocaleString('es-EC', {year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit'});
 }
 
-export function hoyISO(){ return new Date().toISOString().slice(0,10); }
+// Zona horaria del negocio. La base usa la misma para "hoy":
+// (now() AT TIME ZONE 'America/Guayaquil')::date (migraciones 002 y 004).
+export const ZONA_HORARIA = "America/Guayaquil";
+
+// Fecha de HOY (AAAA-MM-DD) en Ecuador. No usar toISOString(): da la fecha
+// UTC, y después de las 19:00 en Guayaquil ya es la de mañana. Se arma con
+// formatToParts (y no con toLocaleDateString) para no depender del formato
+// de fecha de un idioma.
+export function hoyISO(fecha = new Date()){
+  const partes = {};
+  for(const p of new Intl.DateTimeFormat("en-US", { timeZone: ZONA_HORARIA, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(fecha)) partes[p.type] = p.value;
+  return `${partes.year}-${partes.month}-${partes.day}`;
+}
 
 export function esc(s){
   if(s===null||s===undefined) return "";

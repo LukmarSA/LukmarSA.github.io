@@ -1,11 +1,14 @@
-// Pruebas unitarias de la lógica pura del mapa (nucleo/geo.js y
-// nucleo/mapa-logica.js). No necesitan navegador ni Supabase.
+// Pruebas unitarias de la lógica pura del mapa (nucleo/geo.js,
+// nucleo/mapa-logica.js y nucleo/mapa-jerarquia.js). No necesitan navegador
+// ni Supabase.
 //   node mapa-unit.mjs        (o: npm run test:mapa)
 process.env.TZ = "America/Guayaquil"; // para probar el caso "después de las 19:00" de hoyLocalISO
 
 import assert from "node:assert/strict";
 import * as geo from "../assets/js/inventario-tecnologico/nucleo/geo.js";
+import * as H from "../assets/js/inventario-tecnologico/nucleo/helpers.js";
 import * as L from "../assets/js/inventario-tecnologico/nucleo/mapa-logica.js";
+import * as J from "../assets/js/inventario-tecnologico/nucleo/mapa-jerarquia.js";
 
 let ok = 0, total = 0;
 const fallas = [];
@@ -90,14 +93,10 @@ const ubicaciones = [
   { id:4, nombre:"Bodega vieja", tipo:"bodega", lat:-2.2, lng:-79.9, activa:false },
 ];
 const equipos = [
-  { id:10, ubicacion_id:1, nombre:"PTP CA-SA", modelo:"Cambium PTP 550", activo_id:null },
-  { id:11, ubicacion_id:1, nombre:"AP Sector Norte", modelo:"Cambium ePMP 3000", activo_id:null },
-  { id:20, ubicacion_id:2, nombre:"PTP SA-CA", modelo:"Cambium PTP 550", activo_id:null },
-  { id:30, ubicacion_id:3, nombre:"SM Oficina", modelo:"Force 300", activo_id:7 },
-];
-const enlaces = [
-  { id:100, equipo_origen_id:10, equipo_destino_id:20, banda:"5 GHz", frecuencia_mhz:5745 },
-  { id:101, equipo_origen_id:30, equipo_destino_id:11, banda:"5 GHz", frecuencia_mhz:null },
+  { id:10, ubicacion_id:1, nombre:"PTP CA-SA", modelo:"Cambium PTP 550", activo_id:null, servidor_id:null },
+  { id:11, ubicacion_id:1, nombre:"AP Sector Norte", modelo:"Cambium ePMP 3000", activo_id:null, servidor_id:10 },
+  { id:20, ubicacion_id:2, nombre:"PTP SA-CA", modelo:"Cambium PTP 550", activo_id:null, servidor_id:10 },
+  { id:30, ubicacion_id:3, nombre:"SM Oficina", modelo:"Force 300", activo_id:7, servidor_id:11 },
 ];
 const activos = [
   { id:7, propiedad:"lukmar", tipo:"Antena", marca:"Cambium", modelo:"Force 300", serie:"SN-777", custodio:{ nombre:"Área de Sistemas" } },
@@ -109,16 +108,11 @@ const vigentes = [
   { id:1001, activo_id:8, ubicacion_id:1, desde:"2026-09-10" },
   { id:1002, activo_id:99, ubicacion_id:2, desde:"2026-09-11" }, // activo que ya no está en el listado
 ];
-const idx = L.indexarMapa({ ubicaciones, equipos, enlaces, vigentes, activos });
+const idx = L.indexarMapa({ ubicaciones, equipos, vigentes, activos });
 
 prueba("índices: equipos por ubicación, ordenados por nombre", ()=>{
   assert.deepEqual(idx.equiposPorUbicacion.get(1).map(e=>e.id), [11, 10]);
   assert.equal(idx.equiposPorUbicacion.get(4), undefined);
-});
-prueba("índices: cada enlace queda en los dos equipos", ()=>{
-  assert.deepEqual(idx.enlacesPorEquipo.get(10).map(l=>l.id), [100]);
-  assert.deepEqual(idx.enlacesPorEquipo.get(20).map(l=>l.id), [100]);
-  assert.deepEqual(idx.enlacesPorEquipo.get(11).map(l=>l.id), [101]);
 });
 prueba("índices: tramos vigentes solo de activos que existen en el listado", ()=>{
   assert.ok(idx.vigentePorActivo.has(7) && idx.vigentePorActivo.has(8));
@@ -127,20 +121,6 @@ prueba("índices: tramos vigentes solo de activos que existen en el listado", ()
   assert.deepEqual(idx.activosPorUbicacion.get(3).map(a=>a.id), [7]);
 });
 prueba("índices: equipo por activo vinculado", ()=>assert.equal(idx.equipoPorActivo.get(7).id, 30));
-prueba("extremo opuesto de un enlace", ()=>{
-  assert.equal(L.extremoOpuesto(enlaces[0], 10), 20);
-  assert.equal(L.extremoOpuesto(enlaces[0], 20), 10);
-});
-prueba("enlaces de un equipo: otro extremo, distancia y azimuts", ()=>{
-  const [d] = L.enlacesDeEquipo(idx, 20);
-  assert.equal(d.otro.id, 10); assert.equal(d.otraUbicacion.id, 1);
-  cerca(d.distanciaKm, geo.distanciaKm(ubicaciones[1], ubicaciones[0]), 1e-9);
-  cerca(((d.azimutVuelta - d.azimutIda) + 360) % 360, 180, 0.01);
-});
-prueba("ubicaciones enlazadas desde un equipo (para resaltar el otro extremo)", ()=>{
-  assert.deepEqual([...L.ubicacionesEnlazadas(idx, 10)], [2]);
-  assert.deepEqual([...L.ubicacionesEnlazadas(idx, 11)], [3]);
-});
 prueba("filtros: tipos ocultos y archivadas", ()=>{
   assert.deepEqual(L.ubicacionesVisibles(ubicaciones, {}).map(u=>u.id), [1,2,3]);
   assert.deepEqual(L.ubicacionesVisibles(ubicaciones, { verArchivadas:true }).map(u=>u.id), [1,2,3,4]);
@@ -149,8 +129,9 @@ prueba("filtros: tipos ocultos y archivadas", ()=>{
 prueba("orden: por orden del tipo y luego por nombre", ()=>{
   assert.deepEqual(L.ordenarUbicaciones([ubicaciones[2], ubicaciones[1], ubicaciones[0]], tipos).map(u=>u.id), [1,2,3]);
 });
-prueba("resumen: cifras del panel", ()=>{
-  const r = L.resumenMapa(idx, { ubicaciones, equipos, enlaces, activos });
+prueba("resumen: cifras del panel (enlaces = radioenlaces de la jerarquía, sin los de cable)", ()=>{
+  const red = J.analizarRed({ equipos, ubicaciones, respaldos: [] });
+  const r = L.resumenMapa(idx, { ubicaciones, equipos, activos, red });
   assert.deepEqual(r, { ubicaciones:3, archivadas:1, equipos:4, enlaces:2, activosUbicados:2, activosSinUbicacion:1 });
 });
 prueba("tipo desconocido: etiqueta = valor y color neutro", ()=>{
@@ -205,16 +186,10 @@ prueba("validar equipo: un activo no puede ser dos equipos", ()=>{
   assert.ok(L.validarEquipo({ nombre:"Otro", ubicacion_id:2, activo_id:7 }, equipos).errores.activo_id);
   assert.equal(L.validarEquipo({ nombre:"SM Oficina", ubicacion_id:3, activo_id:7 }, equipos, 30).ok, true);
 });
-prueba("validar enlace: misma ubicación, consigo mismo, par repetido (en cualquier sentido)", ()=>{
-  assert.match(L.validarEnlace({ equipo_origen_id:10, equipo_destino_id:11 }, idx, enlaces).errores.equipo_destino_id, /distintas/);
-  assert.match(L.validarEnlace({ equipo_origen_id:10, equipo_destino_id:10 }, idx, enlaces).errores.equipo_destino_id, /consigo mismo/);
-  assert.match(L.validarEnlace({ equipo_origen_id:20, equipo_destino_id:10 }, idx, enlaces).errores.equipo_destino_id, /ya están enlazados/);
-  assert.equal(L.validarEnlace({ equipo_origen_id:20, equipo_destino_id:10 }, idx, enlaces, 100).ok, true);
-  assert.equal(L.validarEnlace({ equipo_origen_id:11, equipo_destino_id:20 }, idx, enlaces).ok, true); // PtMP: AP con un segundo enlace
-});
-prueba("validar enlace: frecuencia no positiva rechazada, vacía permitida", ()=>{
-  assert.ok(L.validarEnlace({ equipo_origen_id:11, equipo_destino_id:20, frecuencia_mhz:"-5" }, idx, enlaces).errores.frecuencia_mhz);
-  assert.equal(L.validarEnlace({ equipo_origen_id:11, equipo_destino_id:20, frecuencia_mhz:"" }, idx, enlaces).ok, true);
+prueba("validar equipo: no puede ser su propio servidor; frecuencia no positiva rechazada, vacía permitida", ()=>{
+  assert.match(L.validarEquipo({ nombre:"PTP CA-SA", ubicacion_id:1, servidor_id:10 }, equipos, 10).errores.servidor_id, /propio servidor/);
+  assert.ok(L.validarEquipo({ nombre:"Nuevo", ubicacion_id:2, frecuencia_mhz:"-5" }, equipos).errores.frecuencia_mhz);
+  assert.equal(L.validarEquipo({ nombre:"Nuevo", ubicacion_id:2, frecuencia_mhz:"" }, equipos).ok, true);
 });
 prueba("validar tipo de ubicación: vacío y equivalente existente", ()=>{
   assert.equal(L.validarTipoUbicacion("", "  ", tipos).ok, false);
@@ -232,10 +207,27 @@ prueba("hoyLocalISO usa la fecha local: 20:00 en Ecuador sigue siendo el mismo d
   assert.equal(noche.toISOString().slice(0,10), "2026-09-25");
   assert.equal(L.hoyLocalISO(noche), "2026-09-24");
 });
+prueba("hoyISO (toda la app): la fecha de Ecuador en los bordes del día y del año", ()=>{
+  assert.equal(H.hoyISO(new Date(Date.UTC(2026, 8, 25, 1, 0))), "2026-09-24");   // 20:00 del 24 en Guayaquil
+  assert.equal(H.hoyISO(new Date(Date.UTC(2026, 8, 25, 4, 59))), "2026-09-24");  // 23:59
+  assert.equal(H.hoyISO(new Date(Date.UTC(2026, 8, 25, 5, 0))), "2026-09-25");   // 00:00 del 25
+  assert.equal(H.hoyISO(new Date(Date.UTC(2027, 0, 1, 4, 59))), "2026-12-31");   // Año Nuevo en UTC, no en Ecuador
+  assert.match(H.hoyISO(), /^\d{4}-\d{2}-\d{2}$/);
+});
+prueba("hoyISO no depende de la zona horaria del equipo (un navegador en Madrid da la fecha de Ecuador)", ()=>{
+  const antes = process.env.TZ;
+  try{
+    process.env.TZ = "Europe/Madrid";
+    const instante = new Date(Date.UTC(2026, 8, 25, 1, 0)); // 03:00 del 25 en Madrid, 20:00 del 24 en Guayaquil
+    assert.equal(instante.getDate(), 25, "el TZ de prueba no se aplicó");
+    assert.equal(H.hoyISO(instante), "2026-09-24");
+    assert.equal(L.hoyLocalISO(instante), "2026-09-24");
+  } finally { process.env.TZ = antes; }
+});
 
 prueba("errores: restricciones únicas y checks → mensaje en español", ()=>{
   assert.equal(L.traducirErrorMapa({ code:"23505", message:'duplicate key value violates unique constraint "ubicaciones_nombre_unico"' }), "Ya existe una ubicación con ese nombre.");
-  assert.equal(L.traducirErrorMapa({ code:"23505", message:'duplicate key value violates unique constraint "enlaces_par_unico"' }), "Esos dos equipos ya están enlazados.");
+  assert.equal(L.traducirErrorMapa({ code:"23505", message:'duplicate key value violates unique constraint "enlaces_respaldo_par_unico"' }), "Ese servidor ya está entre sus respaldos.");
   assert.equal(L.traducirErrorMapa({ code:"23505", message:'duplicate key value violates unique constraint "equipos_radioenlace_activo_unico"' }), "Ese activo ya está vinculado a otro equipo de radioenlace.");
 });
 prueba("errores: borrar ubicación en uso (FK RESTRICT) sugiere archivar", ()=>{
@@ -245,12 +237,257 @@ prueba("errores: RLS vs. falta de GRANT se distinguen (el GRANT fue la caída de
   assert.match(L.traducirErrorMapa({ code:"42501", message:'new row violates row-level security policy for table "ubicaciones"' }), /No tienes permiso/);
   assert.match(L.traducirErrorMapa({ code:"42501", message:"permission denied for table ubicaciones" }), /GRANT/);
 });
-prueba("errores: tablas inexistentes apuntan a la migración 002", ()=>{
+prueba("errores: tablas inexistentes apuntan a la migración que falta (002 o 003)", ()=>{
   assert.match(L.traducirErrorMapa({ code:"PGRST205", message:"Could not find the table 'public.ubicaciones' in the schema cache" }), /migraciones\/002/);
+  assert.match(L.traducirErrorMapa({ code:"PGRST205", message:"Could not find the table 'public.enlaces_respaldo' in the schema cache" }), /migraciones\/003/);
+  assert.match(L.traducirErrorMapa({ code:"PGRST204", message:"Could not find the 'servidor_id' column of 'equipos_radioenlace' in the schema cache" }), /migraciones\/003/);
+  assert.match(L.traducirErrorMapa({ code:"42501", message:"permission denied for table enlaces_respaldo" }), /GRANT de la migración 003/);
+  assert.match(L.traducirErrorMapa({ code:"PGRST202", message:"Could not find the function public.equipo_radio_de_activo(p_activo_id) in the schema cache" }), /migraciones\/004_permisos_y_fechas/);
+});
+prueba("errores: borrar un equipo que es servidor de otros (FK NO ACTION) pide reasignar", ()=>{
+  assert.match(L.traducirErrorMapa({ code:"23503", message:'update or delete on table "equipos_radioenlace" violates foreign key constraint "equipos_radioenlace_servidor_fk" on table "equipos_radioenlace"' }), /otros equipos lo tienen como servidor/);
 });
 prueba("errores: mensajes de los triggers pasan tal cual", ()=>{
   const m = "Este activo está instalado como equipo de radioenlace «SM Oficina» en «Oficína Centro»: muévelo editando ese equipo.";
   assert.equal(L.traducirErrorMapa({ code:"23514", message:m }), m);
+});
+
+
+// ---------------------------------------------------------------- jerarquía (migración 003)
+// La misma red de db/pruebas/mapa_datos_prueba.sql, con ids fijos.
+const ub = [
+  { id:1, nombre:"Oficina Matriz", tipo:"oficina", lat:-2.1894, lng:-79.8891, activa:true },
+  { id:2, nombre:"Torre Norte", tipo:"torre", lat:-2.1180, lng:-79.9050, activa:true },
+  { id:3, nombre:"Torre Cerro Azul", tipo:"torre", lat:-2.1735, lng:-79.9587, activa:true },
+  { id:4, nombre:"Torre Santa Ana", tipo:"torre", lat:-2.1839, lng:-79.8756, activa:true },
+];
+const coordsPiscinas = [[-2.22,-79.97],[-2.22,-80.00],[-2.22,-80.03],[-2.24,-79.97],[-2.24,-80.00],[-2.24,-80.03],[-2.26,-79.97],[-2.26,-80.00],[-2.26,-80.03],[-2.23,-79.86],[-2.245,-79.88],[-2.095,-79.93],[-2.085,-79.895]];
+coordsPiscinas.forEach(([lat, lng], i)=>ub.push({ id:10 + i, nombre:`Piscina ${i + 1}`, tipo:"otro", lat, lng, activa:true }));
+const eq = (id, ubicacion_id, nombre, servidor_id = null, banda = null, frecuencia_mhz = null)=>({ id, ubicacion_id, nombre, servidor_id, banda, frecuencia_mhz, activo_id:null });
+const red0 = [
+  eq(100, 1, "Router Matriz"), eq(101, 1, "PTP Matriz → CA", 100, "5 GHz", 5745),
+  eq(200, 2, "Router LTE Norte"), eq(201, 2, "PTP Norte → CA", 200, "5 GHz", 5825), eq(202, 2, "AP Norte", 200, "5 GHz", 5500),
+  eq(300, 3, "PTP CA ← Matriz", 101, "5 GHz", 5745), eq(301, 3, "PTP CA ← Norte", 201), eq(302, 3, "Router CA", 300),
+  eq(303, 3, "AP CA", 302, "5 GHz", 5180), eq(304, 3, "PTP CA → SA", 302, "5 GHz", 5300),
+  eq(400, 4, "PTP SA ← CA", 304), eq(401, 4, "AP SA", 400, "5 GHz", 5220),
+];
+for(let i = 1; i <= 13; i++) red0.push(eq(500 + i, 9 + i, `CPE Piscina ${i}`, i <= 9 ? 303 : (i <= 11 ? 401 : 202)));
+const resp0 = [
+  { id:1, equipo_id:302, servidor_alternativo_id:301, prioridad:1 },
+  { id:3, equipo_id:501, servidor_alternativo_id:202, prioridad:2 },
+  { id:2, equipo_id:501, servidor_alternativo_id:401, prioridad:1 },
+];
+const red = J.analizarRed({ equipos: red0, ubicaciones: ub, respaldos: resp0 });
+const ids = arr=>arr.map(x=>x.id);
+
+prueba("red: clientes por servidor (WHERE servidor_id = X), sin guardar listas", ()=>{
+  assert.deepEqual(ids(red.clientes.get(302)).sort(), [303, 304]);
+  assert.equal(red.clientes.get(303).length, 9);
+  assert.equal(red.clientes.get(501), undefined);
+});
+prueba("red: el servidor en la misma ubicación es cable y no genera línea", ()=>{
+  assert.equal(red.enlacePorCliente.has(302), false); // Router CA ← PTP CA ← Matriz, ambos en la torre
+  assert.equal(J.esPorCable(red, 302, 300), true);
+  assert.equal(red.enlaces.length, 16);
+});
+prueba("red: 1 cliente remoto = backbone; varios = P2MP (el cable no cuenta)", ()=>{
+  assert.equal(red.enlacePorCliente.get(300).clase, "backbone");  // PTP Matriz → CA (su cliente por cable no existe)
+  assert.equal(red.enlacePorCliente.get(400).clase, "backbone");  // PTP CA → SA: 1 remoto aunque el router tenga más por cable
+  assert.equal(red.enlacePorCliente.get(510).clase, "p2mp");
+  assert.equal(red.enlacePorCliente.get(501).clase, "p2mp");
+});
+prueba(`red: más de ${J.UMBRAL_AGRUPAR_CLIENTES} clientes remotos se agrupan (AP CA con 9); 2 no`, ()=>{
+  assert.deepEqual([...red.agrupados], [303]);
+  assert.equal(red.enlacePorCliente.get(501).agrupado, true);
+  assert.equal(red.enlacePorCliente.get(510).agrupado, false);
+});
+prueba("red: respaldos ordenados por prioridad (y en empate, por id)", ()=>{
+  assert.deepEqual(red.respaldosPorEquipo.get(501).map(r=>r.servidor_alternativo_id), [401, 202]);
+  const empate = J.analizarRed({ equipos: red0, ubicaciones: ub, respaldos: [{ id:9, equipo_id:501, servidor_alternativo_id:202, prioridad:1 }, { id:4, equipo_id:501, servidor_alternativo_id:401, prioridad:1 }] });
+  assert.deepEqual(empate.respaldosPorEquipo.get(501).map(r=>r.id), [4, 9]);
+  assert.deepEqual(red.respaldadosPor.get(401).map(r=>r.equipo_id), [501]);
+});
+prueba("roles automáticos: raíz, backbone (extremos PTP y equipos de torre), distribución, cliente", ()=>{
+  const rol = id=>red.rol.get(id);
+  assert.equal(rol(100), "raiz"); assert.equal(rol(200), "raiz");
+  assert.equal(rol(101), "backbone"); assert.equal(rol(300), "backbone"); assert.equal(rol(302), "backbone"); assert.equal(rol(400), "backbone");
+  assert.equal(rol(303), "distribucion"); assert.equal(rol(401), "distribucion"); assert.equal(rol(202), "distribucion");
+  assert.equal(rol(501), "cliente"); assert.equal(rol(513), "cliente");
+  assert.equal(rol(301), "backbone"); // extremo de un PTP que hoy solo sirve de respaldo
+  assert.deepEqual(J.contarRoles(red), { raiz:2, backbone:7, distribucion:3, cliente:13 });
+});
+prueba("resumen de la red: raíces, backbone, P2MP, respaldos, agrupados", ()=>{
+  assert.deepEqual(J.resumenRed(red), { raices:2, backbone:3, p2mp:13, respaldos:3, agrupados:1 });
+});
+prueba("conexión: distancia/azimut desde el equipo hacia su servidor; banda del servidor; cable sin distancia", ()=>{
+  const d = J.describirConexion(red, 501, 303);
+  cerca(d.distanciaKm, geo.distanciaKm(ub[4], ub[2]), 1e-9);
+  cerca(d.azimutIda, geo.azimutGrados(ub[4], ub[2]), 1e-9);
+  assert.equal(d.banda, "5 GHz"); assert.equal(d.frecuencia, 5180);
+  const c = J.describirConexion(red, 302, 300);
+  assert.equal(c.cable, true); assert.equal(c.distanciaKm, null);
+});
+prueba("descendientes y servidores posibles: nunca uno propio ni del subárbol (ciclo)", ()=>{
+  const d = J.descendientes(red, 302);
+  assert.equal(d.size, 2 + 9 + 2 + 2); // AP CA, PTP CA → SA, 9 piscinas, PTP SA ← CA, AP SA, piscinas 10-11
+  assert.ok(d.has(511) && !d.has(512) && !d.has(302));
+  const cand = new Set(ids(J.candidatosServidor(red, 302)));
+  assert.ok(!cand.has(302) && !cand.has(401) && !cand.has(501) && cand.has(300) && cand.has(202));
+  assert.equal(J.candidatosServidor(red, null).length, red0.length);
+});
+prueba("validar servidor: propio, del subárbol (ciclo), inexistente, válido", ()=>{
+  assert.match(J.validarServidor(red, 302, 302), /propio servidor/);
+  assert.match(J.validarServidor(red, 302, 401), /ciclo/);
+  assert.match(J.validarServidor(red, 302, 9999), /ya no existe/);
+  assert.equal(J.validarServidor(red, 302, 301), null);
+  assert.equal(J.validarServidor(red, 302, null), null); // sin servidor = raíz
+});
+prueba("respaldos posibles y validación: ni él, ni su servidor, ni repetidos; prioridad desde 1", ()=>{
+  const cand = new Set(ids(J.candidatosRespaldo(red, 501)));
+  assert.ok(!cand.has(501) && !cand.has(303) && !cand.has(401) && !cand.has(202) && cand.has(304));
+  assert.ok(new Set(ids(J.candidatosRespaldo(red, 501, 2))).has(401)); // al editar el respaldo 2, su servidor sigue elegible
+  const v = (f, id = null)=>J.validarRespaldo(f, red, id);
+  assert.match(v({ equipo_id:501, servidor_alternativo_id:501, prioridad:1 }).errores.servidor_alternativo_id, /propio respaldo/);
+  assert.match(v({ equipo_id:501, servidor_alternativo_id:303, prioridad:1 }).errores.servidor_alternativo_id, /principal/);
+  assert.match(v({ equipo_id:501, servidor_alternativo_id:401, prioridad:3 }).errores.servidor_alternativo_id, /ya está/);
+  assert.equal(v({ equipo_id:501, servidor_alternativo_id:401, prioridad:3 }, 2).ok, true);
+  assert.match(v({ equipo_id:501, servidor_alternativo_id:304, prioridad:0 }).errores.prioridad, /desde 1/);
+  assert.match(v({ equipo_id:501, servidor_alternativo_id:304, prioridad:1.5 }).errores.prioridad, /entero/);
+  assert.equal(J.siguientePrioridad(red, 501), 3); assert.equal(J.siguientePrioridad(red, 400), 1);
+});
+prueba("camino a la raíz (con los saltos por cable marcados)", ()=>{
+  const c = J.caminoARaiz(red, 501);
+  assert.deepEqual(c, [501, 303, 302, 300, 101, 100]);
+  assert.deepEqual(J.tramosDeCamino(red, c).map(t=>t.cable), [false, true, true, false, true]);
+});
+
+const cuentas = sim=>sim.cuentas;
+prueba("simulación sin caídas: todo en servicio por su camino normal", ()=>{
+  const sim = J.simularFallas(red, []);
+  assert.deepEqual(cuentas(sim), { servicio:25, respaldo:0, sin_conexion:0, caido:0 });
+  assert.equal(sim.estado.get(501).via, 303);
+  assert.equal(sim.estado.get(100).via, null);
+});
+prueba("caída con respaldo: el equipo conmuta solo a su respaldo de prioridad 1", ()=>{
+  const sim = J.simularFallas(red, [501]);
+  const st = sim.estado.get(501);
+  assert.equal(st.caido, true); assert.equal(st.conectado, true); assert.equal(st.via, 401); assert.equal(st.respaldo.prioridad, 1);
+  assert.equal(st.estado, "caido"); assert.equal(st.rutaAlterna, true);
+  assert.deepEqual(cuentas(sim), { servicio:24, respaldo:0, sin_conexion:0, caido:1 });
+  assert.deepEqual(J.caminoARaiz(red, 501, sim), [501, 401, 400, 304, 302, 300, 101, 100]);
+});
+prueba("fallas encadenadas: si el respaldo 1 también cayó, pasa al 2", ()=>{
+  const sim = J.simularFallas(red, [501, 400]); // cae el PTP de Santa Ana: el AP Santa Ana queda sin servicio
+  assert.equal(sim.estado.get(501).via, 202);
+  assert.equal(sim.estado.get(501).respaldo.prioridad, 2);
+  assert.equal(sim.estado.get(401).estado, "sin_conexion");
+  assert.deepEqual(cuentas(sim), { servicio:20, respaldo:0, sin_conexion:3, caido:2 });
+});
+prueba("sin ningún respaldo: el equipo y todo su subárbol quedan sin conectividad", ()=>{
+  const sim = J.simularFallas(red, [400]);
+  for(const id of [401, 510, 511]) assert.equal(sim.estado.get(id).estado, "sin_conexion", String(id));
+  assert.equal(sim.estado.get(400).conectado, false);
+  assert.equal(sim.estado.get(501).estado, "servicio"); // cuelga del AP CA, no de Santa Ana
+  assert.deepEqual(cuentas(sim), { servicio:21, respaldo:0, sin_conexion:3, caido:1 });
+});
+prueba("un cliente conmuta por cable y todo lo que cuelga de él lo sigue (sigue en servicio, por ruta alterna)", ()=>{
+  const sim = J.simularFallas(red, [300]); // se corta PTP CA ← Matriz; el Router CA tiene respaldo por el PTP de Norte
+  const r = sim.estado.get(302);
+  assert.equal(r.estado, "respaldo"); assert.equal(r.via, 301);
+  assert.equal(sim.estado.get(501).estado, "servicio"); assert.equal(sim.estado.get(501).rutaAlterna, true);
+  assert.deepEqual(cuentas(sim), { servicio:23, respaldo:1, sin_conexion:0, caido:1 });
+  assert.deepEqual(J.caminoARaiz(red, 501, sim), [501, 303, 302, 301, 201, 200]);
+});
+prueba("si también cae la raíz del respaldo, la torre entera queda sin conectividad", ()=>{
+  const sim = J.simularFallas(red, [300, 200]);
+  assert.deepEqual(cuentas(sim), { servicio:2, respaldo:0, sin_conexion:21, caido:2 });
+  assert.equal(sim.estado.get(501).conectado, false); // sus dos respaldos también dependen de lo caído
+  assert.deepEqual(J.caminoARaiz(red, 501, sim), [501, 303, 302, 300]); // se ve dónde se corta
+  assert.deepEqual(J.tramosDeCamino(red, [501, 303, 302, 300], sim).map(t=>t.funciona), [false, false, false]);
+});
+prueba("una raíz caída arrastra a su subárbol hasta donde haya respaldo", ()=>{
+  const sim = J.simularFallas(red, [100]);
+  assert.equal(sim.estado.get(101).estado, "sin_conexion");
+  assert.equal(sim.estado.get(302).estado, "respaldo");
+  assert.deepEqual(cuentas(sim), { servicio:21, respaldo:1, sin_conexion:2, caido:1 });
+});
+prueba("prioridad: si primero quedó en un respaldo peor, al final se pasa al mejor disponible", ()=>{
+  // A(1) raíz; Z(2)←A; N(3) caído con respaldos [Y prio 1, Z prio 2]; X(4)←A; Y(5)←X.
+  // En la primera ronda N solo ve a Z con servicio (Y todavía no): termina en Y.
+  const u = [{ id:1, nombre:"U", tipo:"torre", lat:0, lng:0 }, { id:2, nombre:"V", tipo:"torre", lat:0.1, lng:0.1 }];
+  const e = [eq(1, 1, "A"), eq(2, 2, "Z", 1), eq(3, 2, "N", 1), eq(4, 1, "X", 1), eq(5, 1, "Y", 4)];
+  const r = J.analizarRed({ equipos: e, ubicaciones: u, respaldos: [{ id:1, equipo_id:3, servidor_alternativo_id:5, prioridad:1 }, { id:2, equipo_id:3, servidor_alternativo_id:2, prioridad:2 }] });
+  const sim = J.simularFallas(r, [3]);
+  assert.equal(sim.estado.get(3).via, 5);
+});
+prueba("nunca sale por alguien que depende de él (sin ciclos), pero sí por una malla válida", ()=>{
+  const u = [{ id:1, nombre:"U", tipo:"torre", lat:0, lng:0 }, { id:2, nombre:"V", tipo:"torre", lat:0.1, lng:0.1 }];
+  // E(2)←A(1); D(3)←E. E caído con respaldo = D: D solo tenía servicio a través de E.
+  const r1 = J.analizarRed({ equipos: [eq(1, 1, "A"), eq(2, 2, "E", 1), eq(3, 1, "D", 2)], ubicaciones: u, respaldos: [{ id:1, equipo_id:2, servidor_alternativo_id:3, prioridad:1 }] });
+  const s1 = J.simularFallas(r1, [2]);
+  assert.equal(s1.estado.get(2).conectado, false); assert.equal(s1.estado.get(3).conectado, false);
+  // Igual, pero D tiene su propio respaldo Z(4)←A: D sale por Z y E por D.
+  const r2 = J.analizarRed({ equipos: [eq(1, 1, "A"), eq(2, 2, "E", 1), eq(3, 1, "D", 2), eq(4, 1, "Z", 1)], ubicaciones: u, respaldos: [{ id:1, equipo_id:2, servidor_alternativo_id:3, prioridad:1 }, { id:2, equipo_id:3, servidor_alternativo_id:4, prioridad:1 }] });
+  const s2 = J.simularFallas(r2, [2]);
+  assert.equal(s2.estado.get(3).via, 4); assert.equal(s2.estado.get(2).via, 3);
+  assert.deepEqual(J.caminoARaiz(r2, 2, s2), [2, 3, 4, 1]);
+});
+prueba("estado por ubicación (para pintar los pines en la simulación)", ()=>{
+  const sim = J.simularFallas(red, [400]);
+  const e = J.estadoPorUbicacion(red, sim);
+  assert.deepEqual(e.get(4), { total:2, sinConexion:2, caidos:1, respaldo:0 });
+  assert.deepEqual(e.get(19), { total:1, sinConexion:1, caidos:0, respaldo:0 }); // Piscina 10
+});
+prueba("filtro de equipos: rol oculto y estado oculto (este solo con simulación)", ()=>{
+  assert.equal(J.equipoVisible(red, 501, { rolesOcultos:["cliente"] }), false);
+  assert.equal(J.equipoVisible(red, 303, { rolesOcultos:["cliente"] }), true);
+  const sim = J.simularFallas(red, [400]);
+  assert.equal(J.equipoVisible(red, 401, { estadosOcultos:["sin_conexion"] }, sim), false);
+  assert.equal(J.equipoVisible(red, 401, { estadosOcultos:["sin_conexion"] }, null), true);
+});
+
+const plan = (o = {})=>J.planDeLineas(red, o);
+const porEstilo = lineas=>lineas.reduce((a, l)=>(a[l.estilo] = (a[l.estilo] || 0) + 1, a), {});
+prueba("plan de líneas por defecto: backbone y P2MP; el AP con 9 clientes queda agrupado; respaldos ocultos", ()=>{
+  assert.deepEqual(porEstilo(plan()), { backbone:3, p2mp:4 });
+});
+prueba("toggles de líneas: sin P2MP quedan solo backbone; con Respaldos aparecen los de otra ubicación (no los de cable)", ()=>{
+  assert.deepEqual(porEstilo(plan({ lineas:{ backbone:true, p2mp:false, respaldos:false } })), { backbone:3 });
+  assert.deepEqual(porEstilo(plan({ lineas:{ backbone:false, p2mp:false, respaldos:true } })), { respaldo:2 });
+});
+prueba("expandir el AP agrupado (fijado o seleccionado) dibuja sus 9 líneas", ()=>{
+  assert.equal(porEstilo(plan({ expandidos:new Set([303]) })).p2mp, 13);
+  const sel = plan({ seleccionId:303 });
+  assert.equal(sel.filter(l=>l.servidorId === 303 && !l.atenuada).length, 9); // sus clientes no se atenúan
+});
+prueba("seleccionar un equipo resalta su camino a la raíz y atenúa el resto", ()=>{
+  const p = plan({ seleccionId:501 });
+  const cadena = p.filter(l=>l.enCadena);
+  assert.deepEqual(cadena.map(l=>l.clave).sort(), ["p:300", "p:501"]); // los saltos por cable no tienen línea
+  assert.ok(cadena.every(l=>l.estilo === "cadena" && !l.atenuada));
+  assert.ok(p.filter(l=>!l.enCadena).every(l=>l.atenuada));
+});
+prueba("simulación: enlace cortado, línea recuperada vía respaldo (sin activar el toggle) y subárbol sin conectividad", ()=>{
+  const s1 = plan({ sim:J.simularFallas(red, [501]), seleccionId:501 });
+  assert.equal(s1.find(l=>l.clave === "p:501").estilo, "cortado");
+  const rec = s1.find(l=>l.tipo === "respaldo" && l.enUso);
+  assert.ok(rec && rec.servidorId === 401 && rec.estilo === "cadenaRespaldo" && rec.ubicacionRespaldo === "Torre Santa Ana");
+  const s2 = plan({ sim:J.simularFallas(red, [501]) });
+  assert.equal(s2.find(l=>l.tipo === "respaldo" && l.enUso).estilo, "recuperado");
+  assert.equal(s2.some(l=>l.tipo === "respaldo" && !l.enUso), false); // los que no se usan siguen ocultos
+  const s3 = plan({ sim:J.simularFallas(red, [400]) });
+  assert.equal(s3.find(l=>l.clave === "p:400").estilo, "cortado");
+  assert.deepEqual(["p:510", "p:511"].map(k=>s3.find(l=>l.clave === k).estilo), ["sinConexion", "sinConexion"]);
+});
+prueba("camino roto en la simulación: los tramos que no funcionan salen como cadenaRota", ()=>{
+  const p = plan({ sim:J.simularFallas(red, [300, 200]), seleccionId:510 });
+  assert.equal(p.find(l=>l.clave === "p:510").estilo, "cadenaRota");
+});
+prueba("indicadores de agrupados: nombre, cantidad y cuántos clientes quedaron sin conectividad", ()=>{
+  const [g] = J.planDeAgrupados(red);
+  assert.deepEqual({ id:g.servidorId, n:g.clientes, exp:g.expandido }, { id:303, n:9, exp:false });
+  const [g2] = J.planDeAgrupados(red, { sim:J.simularFallas(red, [300, 200]), seleccionId:303 });
+  assert.equal(g2.servidorSinConexion, true); assert.equal(g2.clientesSinConexion, 9); assert.equal(g2.expandido, true);
 });
 
 console.log(`\n=== ${ok}/${total} pruebas OK ===`);

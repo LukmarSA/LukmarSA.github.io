@@ -1,14 +1,16 @@
-// Modales del mapa: ubicación, equipo, enlace, asignar activos y mover un
-// activo. Usan el mismo sistema de modales de la app (abrirModal/cerrarModal)
-// y, al guardar, avisan con mostrarToast y devuelven el control con alGuardar.
+// Modales del mapa: ubicación, equipo (con su servidor), respaldo, asignar
+// activos y mover un activo. Usan el mismo sistema de modales de la app
+// (abrirModal/cerrarModal) y, al guardar, avisan con mostrarToast y devuelven
+// el control con alGuardar.
 import { cargarActivos } from "../../nucleo/datos.js";
-import { cargarEnlaces, cargarEquiposRadioenlace, cargarTiposUbicacion, cargarUbicaciones, estadoMapa, indicesMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
+import { cargarEquiposRadioenlace, cargarRespaldos, cargarTiposUbicacion, cargarUbicaciones, estadoMapa, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
 import { azimutGrados, distanciaKm, fmtAzimut, fmtCoordenadas, fmtDistancia, parsearCoordenadas } from "../../nucleo/geo.js";
 import { esc, fmtFecha, fmtTag } from "../../nucleo/helpers.js";
 import { coincideActivo, hoyLocalISO, infoTipoUbicacion, ordenarUbicaciones, validarFechaMovimiento } from "../../nucleo/mapa-logica.js";
+import { candidatosRespaldo, candidatosServidor, describirConexion, siguientePrioridad } from "../../nucleo/mapa-jerarquia.js";
 import { opcionesVigentes } from "../../nucleo/opciones-configurables.js";
 import { esAdmin } from "../../nucleo/permisos.js";
-import { ErrorValidacion, asignarActivosAUbicacion, crearEnlace, crearEquipo, crearTipoUbicacion, crearUbicacion, editarEnlace, editarEquipo, editarUbicacion } from "../../negocio/operaciones-mapa.js";
+import { ErrorValidacion, asignarActivosAUbicacion, crearEquipo, crearRespaldo, crearTipoUbicacion, crearUbicacion, editarEquipo, editarRespaldo, editarUbicacion } from "../../negocio/operaciones-mapa.js";
 import { urlFoto } from "../../negocio/operaciones.js";
 import { abrirModal, cerrarModal, mostrarToast } from "../render-raiz.js";
 
@@ -48,6 +50,31 @@ function opcionesUbicacion(seleccionada, { excluir = null } = {}){
   const tipos = cargarTiposUbicacion();
   const lista = ordenarUbicaciones(cargarUbicaciones().filter(u=>(u.activa !== false || u.id === seleccionada) && u.id !== excluir), tipos);
   return lista.map(u=>`<option value="${u.id}" ${u.id === seleccionada ? "selected" : ""}>${esc(u.nombre)} (${esc(infoTipoUbicacion(tipos, u.tipo).etiqueta)})${u.activa === false ? " — archivada" : ""}</option>`).join("");
+}
+
+// <optgroup> por ubicación con los equipos dados. La ubicación "local" (la del
+// equipo) va primero: un servidor ahí es una conexión por cable.
+function opcionesEquiposPorUbicacion(equipos, seleccionado, ubicacionLocal){
+  const indices = indicesMapa();
+  const tipos = cargarTiposUbicacion();
+  const porUbicacion = new Map();
+  for(const e of equipos){
+    if(!porUbicacion.has(e.ubicacion_id)) porUbicacion.set(e.ubicacion_id, []);
+    porUbicacion.get(e.ubicacion_id).push(e);
+  }
+  const ubics = ordenarUbicaciones([...porUbicacion.keys()].map(id=>indices.ubicacionPorId.get(id)).filter(Boolean), tipos)
+    .sort((a, b)=>(a.id === ubicacionLocal ? -1 : 0) - (b.id === ubicacionLocal ? -1 : 0));
+  return ubics.map(u=>{
+    const lista = porUbicacion.get(u.id).sort((a, b)=>String(a.nombre).localeCompare(String(b.nombre), "es"));
+    const local = u.id === ubicacionLocal;
+    return `<optgroup label="${esc(u.nombre)}${local ? " — misma ubicación (por cable)" : ""}">${lista.map(e=>`<option value="${e.id}" ${e.id === seleccionado ? "selected" : ""}>${esc(e.nombre)}${e.modelo ? ` — ${esc(e.modelo)}` : ""}</option>`).join("")}</optgroup>`;
+  }).join("");
+}
+
+function textoConexion(d){
+  if(!d) return "";
+  if(d.cable) return `Por cable: «${d.servidor.nombre}» está en la misma ubicación (no se dibuja línea).`;
+  return `Radioenlace con «${d.servidor.nombre}» en «${d.ubicacionServidor ? d.ubicacionServidor.nombre : "—"}»: ${fmtDistancia(d.distanciaKm)} · azimut desde aquí ${fmtAzimut(d.azimutIda)} · desde allá ${fmtAzimut(d.azimutVuelta)}`;
 }
 
 // ===========================================================================
@@ -264,6 +291,10 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
     return etiquetaActivo(a) + (u ? ` — en ${u.nombre}` : "");
   };
   let activoElegido = actual ? actual.activo_id : null;
+  const red = redMapa();
+  const posiblesServidores = candidatosServidor(red, id);
+  const servidorActual = actual && actual.servidor_id !== null && actual.servidor_id !== undefined ? actual.servidor_id : null;
+  const clientesActuales = id ? (red.clientes.get(id) || []).length : 0;
 
   const html = `<div class="${P}modal">
     ${cabecera(id ? "Editar equipo de radioenlace" : "Nuevo equipo de radioenlace")}
@@ -283,6 +314,22 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
         <div class="${P}field">
           <label for="${P}equipo-modelo">Modelo <span class="${P}mapa-muted">(opcional)</span></label>
           <input type="text" id="${P}equipo-modelo" maxlength="120" value="${esc(actual && actual.modelo || "")}" placeholder="Ej.: Cambium PTP 550">
+        </div>
+        <div class="${P}field ${P}span-2">
+          <label for="${P}equipo-servidor">Servidor <span class="${P}mapa-muted">(de dónde recibe la conexión)</span></label>
+          <select id="${P}equipo-servidor"></select>
+          <div class="${P}hint" id="${P}equipo-servidor-calculo"></div>
+          <div class="${P}field-error" data-error="servidor_id"></div>
+        </div>
+        <div class="${P}field">
+          <label for="${P}equipo-banda">Banda <span class="${P}mapa-muted">(opcional)</span></label>
+          <input type="text" id="${P}equipo-banda" list="${P}equipo-bandas" maxlength="40" value="${esc(actual && actual.banda || "")}" placeholder="Ej.: 5 GHz">
+          <datalist id="${P}equipo-bandas">${BANDAS_SUGERIDAS.map(b=>`<option value="${b}">`).join("")}</datalist>
+        </div>
+        <div class="${P}field">
+          <label for="${P}equipo-frecuencia">Frecuencia en MHz <span class="${P}mapa-muted">(opcional)</span></label>
+          <input type="number" id="${P}equipo-frecuencia" min="0" step="any" inputmode="decimal" value="${actual && actual.frecuencia_mhz !== null && actual.frecuencia_mhz !== undefined ? esc(Number(actual.frecuencia_mhz)) : ""}" placeholder="Ej.: 5745">
+          <div class="${P}field-error" data-error="frecuencia_mhz"></div>
         </div>
         <div class="${P}field ${P}span-2">
           <label for="${P}equipo-activo-filtro">Activo del inventario <span class="${P}mapa-muted">(opcional)</span></label>
@@ -326,10 +373,32 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
         ? `Al guardar, ${fmtTag(a)} pasará de «${origen.nombre}» a «${destino.nombre}» (queda registrado en su historial de ubicación).`
         : origen ? `${fmtTag(a)} ya está en «${destino.nombre}».` : `Al guardar, ${fmtTag(a)} quedará ubicado en «${destino.nombre}».`;
     };
+    // Servidor: sin él es una raíz. Se ofrecen todos menos el propio equipo y
+    // los que dependen de él (armarían un ciclo; la base también lo rechaza).
+    const selServ = $(`#${P}equipo-servidor`);
+    const calculoServ = $(`#${P}equipo-servidor-calculo`);
+    let servidorElegido = servidorActual;
+    const pintarServidores = ()=>{
+      selServ.innerHTML = `<option value="" ${servidorElegido === null ? "selected" : ""}>— Ninguno: es una raíz (entrada de internet) —</option>`
+        + opcionesEquiposPorUbicacion(posiblesServidores, servidorElegido, Number(selUbic.value));
+    };
+    const pintarCalculoServ = ()=>{
+      const sid = selServ.value ? Number(selServ.value) : null;
+      if(sid === null){ calculoServ.textContent = clientesActuales ? `Queda como raíz. Sus ${clientesActuales} cliente(s) siguen colgando de él.` : "Queda como raíz: punto de entrada de internet."; return; }
+      const s2 = indices.equipoPorId.get(sid);
+      const uA = indices.ubicacionPorId.get(Number(selUbic.value));
+      const uS = s2 ? indices.ubicacionPorId.get(s2.ubicacion_id) : null;
+      if(!s2 || !uA || !uS){ calculoServ.textContent = ""; return; }
+      calculoServ.textContent = textoConexion({ servidor: s2, ubicacionServidor: uS, cable: uA.id === uS.id, distanciaKm: distanciaKm(uA, uS), azimutIda: azimutGrados(uA, uS), azimutVuelta: azimutGrados(uS, uA) });
+    };
+    pintarServidores();
+    pintarCalculoServ();
+    selServ.addEventListener("change", ()=>{ servidorElegido = selServ.value ? Number(selServ.value) : null; pintarCalculoServ(); });
+
     pintarCandidatos();
     pintarAviso();
     filtro.addEventListener("input", pintarCandidatos);
-    selUbic.addEventListener("change", pintarAviso);
+    selUbic.addEventListener("change", ()=>{ pintarAviso(); pintarServidores(); pintarCalculoServ(); });
     sel.addEventListener("change", ()=>{
       activoElegido = sel.value ? Number(sel.value) : null;
       const modelo = $(`#${P}equipo-modelo`);
@@ -346,11 +415,18 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
         modelo: $(`#${P}equipo-modelo`).value,
         activo_id: activoElegido,
         notas: $(`#${P}equipo-notas`).value,
+        servidor_id: selServ.value ? Number(selServ.value) : null,
+        banda: $(`#${P}equipo-banda`).value,
+        frecuencia_mhz: $(`#${P}equipo-frecuencia`).value,
       };
+      // Si el servidor elegido era uno de sus respaldos, la base lo quita de los respaldos.
+      const promovido = id && campos.servidor_id !== null && campos.servidor_id !== servidorActual
+        && cargarRespaldos().some(r=>r.equipo_id === id && r.servidor_alternativo_id === campos.servidor_id);
       try{
         const nuevoId = await conBotonOcupado(e.currentTarget, "Guardando…", ()=>id ? editarEquipo(id, campos).then(()=>id) : crearEquipo(campos));
         cerrarModal();
         mostrarToast(id ? "Equipo actualizado." : `Equipo «${campos.nombre.trim()}» creado.`, "success");
+        if(promovido) mostrarToast("Ese servidor era uno de sus respaldos: pasó a ser el principal y salió de la lista de respaldos.", "info");
         if(alGuardar) alGuardar(nuevoId);
       }catch(err){
         manejarErrorGuardado(raiz, err);
@@ -360,92 +436,74 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
 }
 
 // ===========================================================================
-// Enlace (desde un equipo hacia un equipo de OTRA ubicación)
+// Respaldo: a qué otro servidor puede conmutar un equipo si pierde el suyo.
 // ===========================================================================
-export function abrirFormEnlace({ id = null, equipoOrigenId = null } = {}, { alGuardar } = {}){
-  const actual = id ? cargarEnlaces().find(l=>l.id === id) : null;
-  if(id && !actual){ mostrarToast("Ese enlace ya no existe. Recarga el mapa.", "error"); return; }
-  const indices = indicesMapa();
-  const origenId = actual
-    ? (equipoOrigenId === actual.equipo_destino_id ? actual.equipo_destino_id : actual.equipo_origen_id)
-    : equipoOrigenId;
-  const origen = indices.equipoPorId.get(origenId);
-  if(!origen){ mostrarToast("No se encontró el equipo de origen. Recarga el mapa.", "error"); return; }
-  const destinoActual = actual ? (actual.equipo_origen_id === origenId ? actual.equipo_destino_id : actual.equipo_origen_id) : null;
-  const uOrigen = indices.ubicacionPorId.get(origen.ubicacion_id);
-  const yaEnlazados = new Set((indices.enlacesPorEquipo.get(origenId) || []).filter(l=>l.id !== id).map(l=>l.equipo_origen_id === origenId ? l.equipo_destino_id : l.equipo_origen_id));
-  const tipos = cargarTiposUbicacion();
-  const grupos = ordenarUbicaciones(cargarUbicaciones().filter(u=>u.id !== origen.ubicacion_id), tipos)
-    .map(u=>({ u, equipos: (indices.equiposPorUbicacion.get(u.id) || []).filter(e=>!yaEnlazados.has(e.id)) }))
-    .filter(g=>g.equipos.length);
-  const opciones = grupos.map(g=>`<optgroup label="${esc(g.u.nombre)} (${esc(infoTipoUbicacion(tipos, g.u.tipo).etiqueta)})">${g.equipos.map(e=>`<option value="${e.id}" ${e.id === destinoActual ? "selected" : ""}>${esc(e.nombre)}${e.modelo ? ` — ${esc(e.modelo)}` : ""}</option>`).join("")}</optgroup>`).join("");
+export function abrirFormRespaldo({ id = null, equipoId = null } = {}, { alGuardar } = {}){
+  const actual = id ? cargarRespaldos().find(r=>r.id === id) : null;
+  if(id && !actual){ mostrarToast("Ese respaldo ya no existe. Recarga el mapa.", "error"); return; }
+  const eqId = actual ? actual.equipo_id : equipoId;
+  const red = redMapa();
+  const equipo = red.equipoPorId.get(eqId);
+  if(!equipo){ mostrarToast("No se encontró el equipo. Recarga el mapa.", "error"); return; }
+  const u = red.ubicacionPorId.get(equipo.ubicacion_id);
+  const principal = equipo.servidor_id !== null && equipo.servidor_id !== undefined ? red.equipoPorId.get(equipo.servidor_id) : null;
+  const opciones = opcionesEquiposPorUbicacion(candidatosRespaldo(red, eqId, id), actual ? actual.servidor_alternativo_id : null, equipo.ubicacion_id);
+  const prioridad = actual ? actual.prioridad : siguientePrioridad(red, eqId);
 
   const html = `<div class="${P}modal">
-    ${cabecera(id ? "Editar enlace" : "Nuevo enlace")}
+    ${cabecera(id ? "Editar respaldo" : "Nuevo respaldo")}
     <div class="${P}modal-body">
       <div class="${P}alert ${P}alert-error" data-alerta hidden></div>
       <div class="${P}form-grid">
         <div class="${P}field ${P}span-2">
-          <label>Desde</label>
-          <div class="${P}mapa-campo-fijo"><strong>${esc(origen.nombre)}</strong> <span class="${P}mapa-muted">en ${esc(uOrigen ? uOrigen.nombre : "—")}</span></div>
+          <label>Equipo</label>
+          <div class="${P}mapa-campo-fijo"><strong>${esc(equipo.nombre)}</strong> <span class="${P}mapa-muted">en ${esc(u ? u.nombre : "—")} · servidor actual: ${principal ? esc(principal.nombre) : "ninguno (es raíz)"}</span></div>
         </div>
         <div class="${P}field ${P}span-2">
-          <label for="${P}enlace-destino">Hacia (equipo del otro extremo)</label>
+          <label for="${P}respaldo-servidor">Servidor de respaldo</label>
           ${opciones
-            ? `<select id="${P}enlace-destino"><option value="">— Elige un equipo —</option>${opciones}</select>`
-            : `<div class="${P}alert ${P}alert-info">No hay equipos disponibles en otras ubicaciones. Crea primero el equipo del otro extremo en su ubicación.</div>`}
-          <div class="${P}hint" id="${P}enlace-calculo"></div>
-          <div class="${P}field-error" data-error="equipo_destino_id"></div>
+            ? `<select id="${P}respaldo-servidor"><option value="">— Elige un equipo —</option>${opciones}</select>`
+            : `<div class="${P}alert ${P}alert-info">No hay otros equipos que puedan ser respaldo (ya están todos registrados, o solo existe su servidor actual).</div>`}
+          <div class="${P}hint" id="${P}respaldo-calculo"></div>
+          <div class="${P}field-error" data-error="servidor_alternativo_id"></div>
         </div>
         <div class="${P}field">
-          <label for="${P}enlace-banda">Banda <span class="${P}mapa-muted">(opcional)</span></label>
-          <input type="text" id="${P}enlace-banda" list="${P}enlace-bandas" maxlength="40" value="${esc(actual && actual.banda || "")}" placeholder="Ej.: 5 GHz">
-          <datalist id="${P}enlace-bandas">${BANDAS_SUGERIDAS.map(b=>`<option value="${b}">`).join("")}</datalist>
+          <label for="${P}respaldo-prioridad">Prioridad</label>
+          <input type="number" id="${P}respaldo-prioridad" min="1" step="1" inputmode="numeric" value="${prioridad}">
+          <div class="${P}hint">1 = primera opción. Al simular una caída se prueba en este orden.</div>
+          <div class="${P}field-error" data-error="prioridad"></div>
         </div>
         <div class="${P}field">
-          <label for="${P}enlace-frecuencia">Frecuencia en MHz <span class="${P}mapa-muted">(opcional)</span></label>
-          <input type="number" id="${P}enlace-frecuencia" min="0" step="any" inputmode="decimal" value="${actual && actual.frecuencia_mhz !== null && actual.frecuencia_mhz !== undefined ? esc(Number(actual.frecuencia_mhz)) : ""}" placeholder="Ej.: 5745">
-          <div class="${P}field-error" data-error="frecuencia_mhz"></div>
-        </div>
-        <div class="${P}field ${P}span-2">
-          <label for="${P}enlace-notas">Notas <span class="${P}mapa-muted">(opcional)</span></label>
-          <textarea id="${P}enlace-notas" maxlength="1000" placeholder="Ancho de canal, SSID, capacidad, nivel de señal…">${esc(actual && actual.notas || "")}</textarea>
+          <label for="${P}respaldo-notas">Notas <span class="${P}mapa-muted">(opcional)</span></label>
+          <input type="text" id="${P}respaldo-notas" maxlength="300" value="${esc(actual && actual.notas || "")}" placeholder="Ej.: requiere reapuntar la antena">
         </div>
       </div>
     </div>
     <div class="${P}modal-footer">
       <button type="button" class="${P}btn ${P}modal-close">Cancelar</button>
-      <button type="button" class="${P}btn ${P}btn-primary" id="${P}enlace-guardar" ${opciones ? "" : "disabled"}>Guardar</button>
+      <button type="button" class="${P}btn ${P}btn-primary" id="${P}respaldo-guardar" ${opciones ? "" : "disabled"}>Guardar</button>
     </div>
   </div>`;
 
   abrirModal(html, ()=>{
     const raiz = raizModal();
     const $ = sel=>raiz.querySelector(sel);
-    const selDestino = $(`#${P}enlace-destino`);
-    const calculo = $(`#${P}enlace-calculo`);
-    const pintarCalculo = ()=>{
-      const d = selDestino ? indices.equipoPorId.get(Number(selDestino.value)) : null;
-      const u2 = d ? indices.ubicacionPorId.get(d.ubicacion_id) : null;
-      calculo.textContent = uOrigen && u2
-        ? `Distancia ${fmtDistancia(distanciaKm(uOrigen, u2))} · azimut desde aquí ${fmtAzimut(azimutGrados(uOrigen, u2))} · desde allá ${fmtAzimut(azimutGrados(u2, uOrigen))}`
-        : "";
-    };
-    if(selDestino){ selDestino.addEventListener("change", pintarCalculo); pintarCalculo(); }
-
-    $(`#${P}enlace-guardar`).addEventListener("click", async e=>{
+    const sel = $(`#${P}respaldo-servidor`);
+    const calculo = $(`#${P}respaldo-calculo`);
+    const pintarCalculo = ()=>{ calculo.textContent = sel && sel.value ? textoConexion(describirConexion(red, eqId, Number(sel.value))) : ""; };
+    if(sel){ sel.addEventListener("change", pintarCalculo); pintarCalculo(); }
+    $(`#${P}respaldo-guardar`).addEventListener("click", async e=>{
       mostrarErrores(raiz, {}, "");
       const campos = {
-        equipo_origen_id: origenId,
-        equipo_destino_id: selDestino ? Number(selDestino.value) : null,
-        banda: $(`#${P}enlace-banda`).value,
-        frecuencia_mhz: $(`#${P}enlace-frecuencia`).value,
-        notas: $(`#${P}enlace-notas`).value,
+        equipo_id: eqId,
+        servidor_alternativo_id: sel && sel.value ? Number(sel.value) : null,
+        prioridad: $(`#${P}respaldo-prioridad`).value,
+        notas: $(`#${P}respaldo-notas`).value,
       };
       try{
-        const nuevoId = await conBotonOcupado(e.currentTarget, "Guardando…", ()=>id ? editarEnlace(id, campos).then(()=>id) : crearEnlace(campos));
+        const nuevoId = await conBotonOcupado(e.currentTarget, "Guardando…", ()=>id ? editarRespaldo(id, campos).then(()=>id) : crearRespaldo(campos));
         cerrarModal();
-        mostrarToast(id ? "Enlace actualizado." : "Enlace creado.", "success");
+        mostrarToast(id ? "Respaldo actualizado." : "Respaldo registrado.", "success");
         if(alGuardar) alGuardar(nuevoId);
       }catch(err){
         manejarErrorGuardado(raiz, err);

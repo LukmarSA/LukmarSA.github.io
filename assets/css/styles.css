@@ -628,7 +628,6 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
 .inventario-tecnologico-mapa-equipo-sel .inventario-tecnologico-mapa-contador{background:var(--surface);color:var(--warn);}
 .inventario-tecnologico-mapa-equipo-detalle{margin:6px 0 4px 12px;padding-left:10px;border-left:2px solid var(--brand-orange);display:flex;flex-direction:column;gap:8px;}
 .inventario-tecnologico-mapa-enlace{border:1px solid var(--border);border-radius:8px;padding:9px 10px;background:var(--surface);}
-.inventario-tecnologico-mapa-enlace-destacado{border-color:var(--brand-orange);box-shadow:0 0 0 2px var(--warn-soft);}
 .inventario-tecnologico-mapa-enlace-cab{font-size:13px;}
 .inventario-tecnologico-mapa-enlace-flecha{color:var(--brand-orange);font-weight:700;}
 .inventario-tecnologico-mapa-enlace-datos{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin:8px 0 0;}
@@ -714,6 +713,107 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
 .inventario-tecnologico-ubicacion-activo-historial{margin:12px 0 4px 4px;}
 .inventario-tecnologico-ubicacion-activo-historial[hidden]{display:none;}
 
+/* Jerarquía de radioenlaces (migración 003): filtros, líneas, simulación */
+.inventario-tecnologico-mapa-filtros-det{flex-basis:100%;}
+.inventario-tecnologico-mapa-filtros-resumen{display:none;}
+.inventario-tecnologico-mapa-filtros{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;border-top:1px solid var(--border);padding-top:8px;margin-top:2px;}
+.inventario-tecnologico-mapa-filtro-grupo{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;}
+.inventario-tecnologico-mapa-filtro-titulo{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--ink-faint);}
+.inventario-tecnologico-mapa-chips[hidden]{display:none;}
+.inventario-tecnologico-mapa-chip-linea{display:inline-block;width:18px;height:0;border-top:4px solid #004DAB;border-radius:2px;}
+.inventario-tecnologico-mapa-chip-linea-p2mp{border-top:2px solid #007EB2;}
+.inventario-tecnologico-mapa-chip-linea-respaldos{border-top:3px dotted #5B4B8A;}
+.inventario-tecnologico-mapa-chip[aria-pressed="false"] .inventario-tecnologico-mapa-chip-linea{opacity:0.45;}
+.inventario-tecnologico-mapa-chip-sim{font-weight:600;}
+.inventario-tecnologico-mapa-chip-sim::before{content:"";width:9px;height:9px;border-radius:50%;box-shadow:inset 0 0 0 2px var(--danger);}
+.inventario-tecnologico-mapa-chip-sim[aria-pressed="false"]{opacity:1;text-decoration:none;background:var(--surface);}
+.inventario-tecnologico-mapa-chip-sim[aria-pressed="true"]{background:var(--danger-soft);border-color:var(--danger);color:var(--danger);}
+.inventario-tecnologico-mapa-chip-sim[aria-pressed="true"]::before{background:var(--danger);}
+.inventario-tecnologico-mapa-aviso-sim{background:var(--danger);top:10px;}
+.inventario-tecnologico-mapa-aviso-sim .inventario-tecnologico-btn{background:#fff;}
+.inventario-tecnologico-mapa-leyenda{position:absolute;left:10px;bottom:36px;z-index:5;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);font-size:12px;max-width:230px;}
+.inventario-tecnologico-mapa-leyenda summary{cursor:pointer;padding:5px 10px;font-weight:600;color:var(--ink-muted);}
+.inventario-tecnologico-mapa-leyenda ul{list-style:none;margin:0;padding:2px 10px 8px;display:flex;flex-direction:column;gap:4px;}
+.inventario-tecnologico-mapa-leyenda li{display:flex;align-items:center;gap:8px;}
+.inventario-tecnologico-mapa-leyenda-linea{display:inline-block;width:26px;flex-shrink:0;border-top:4px solid #004DAB;border-radius:2px;}
+.inventario-tecnologico-mapa-leyenda-p2mp{border-top:2px solid #007EB2;}
+.inventario-tecnologico-mapa-leyenda-respaldo{border-top:3px dotted #5B4B8A;}
+.inventario-tecnologico-mapa-leyenda-cadena{border-top:5px solid #EC741D;}
+.inventario-tecnologico-mapa-leyenda-recuperado{border-top:4px dashed #1E8A5A;}
+.inventario-tecnologico-mapa-leyenda-cortado{border-top:3px dotted #B3432D;}
+.inventario-tecnologico-mapa-leyenda-sinConexion{border-top:3px dashed #8B9AAA;}
+
+/* Pines en la jerarquía y la simulación */
+.inventario-tecnologico-mapa-pin-atenuada{opacity:0.35;}
+.inventario-tecnologico-mapa-pin-sin-conexion .inventario-tecnologico-mapa-pin-cuerpo{filter:grayscale(1);opacity:0.75;box-shadow:0 0 0 2px #fff, 0 0 0 4px var(--danger), 0 2px 6px rgba(0,20,45,0.35);}
+.inventario-tecnologico-mapa-pin-caida .inventario-tecnologico-mapa-pin-cuerpo{box-shadow:0 0 0 2px #fff, 0 0 0 5px var(--danger), 0 2px 6px rgba(0,20,45,0.35);}
+.inventario-tecnologico-mapa-pin-alerta{position:absolute;left:-5px;top:-5px;width:15px;height:15px;border-radius:50%;background:var(--danger);color:#fff;border:1.5px solid #fff;font:700 10px/12px 'IBM Plex Sans',sans-serif;text-align:center;}
+.inventario-tecnologico-mapa-icono-agrupado{background:none;border:none;}
+.inventario-tecnologico-mapa-agrupado{
+  position:absolute;left:0;top:calc(6px + var(--fila, 0) * 24px);transform:translateX(-50%);white-space:nowrap;cursor:pointer;
+  display:inline-flex;align-items:center;gap:5px;background:#fff;color:var(--accent-ink);border:1.5px solid #007EB2;border-radius:12px;
+  padding:2px 9px;font:600 11.5px/16px 'IBM Plex Sans',system-ui,sans-serif;box-shadow:0 2px 6px rgba(0,20,45,0.25);
+}
+.inventario-tecnologico-mapa-agrupado:hover{background:var(--accent-soft);}
+.inventario-tecnologico-mapa-agrupado-glifo{font-size:10px;color:#007EB2;}
+.inventario-tecnologico-mapa-agrupado-expandido{border-color:var(--brand-orange);}
+.inventario-tecnologico-mapa-agrupado-alerta{border-color:var(--danger);color:var(--danger);}
+.inventario-tecnologico-mapa-agrupado-detalle{font-weight:700;}
+.inventario-tecnologico-mapa-agrupado-detalle::before{content:"· ";}
+.leaflet-tooltip.inventario-tecnologico-mapa-etiqueta-recuperado,
+.leaflet-tooltip.inventario-tecnologico-mapa-etiqueta-cadenaRespaldo{background:#1E8A5A;}
+.leaflet-tooltip.inventario-tecnologico-mapa-etiqueta-cadenaRota{background:var(--danger);}
+
+/* Panel: rol, estado, camino, clientes, respaldos, simulación */
+.inventario-tecnologico-mapa-fila-marcas{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;}
+.inventario-tecnologico-mapa-rol{font-size:10.5px;font-weight:700;color:var(--rol-color);border:1px solid var(--rol-color);border-radius:10px;padding:0 7px;line-height:16px;white-space:nowrap;background:var(--surface);}
+.inventario-tecnologico-mapa-estado{font-size:10.5px;font-weight:700;color:#fff;background:var(--estado-color, var(--ink-muted));border-radius:10px;padding:0 7px;line-height:16px;white-space:nowrap;}
+.inventario-tecnologico-mapa-estado-caido{--estado-color:#8B1E12;}
+.inventario-tecnologico-mapa-estado-respaldo{--estado-color:#1E8A5A;}
+.inventario-tecnologico-mapa-estado-sin_conexion{--estado-color:#B3432D;}
+.inventario-tecnologico-mapa-estado-servicio{--estado-color:#3E7D4F;}
+.inventario-tecnologico-mapa-equipo-sin_conexion > .inventario-tecnologico-mapa-fila,
+.inventario-tecnologico-mapa-equipo-caido > .inventario-tecnologico-mapa-fila{background:var(--danger-soft);}
+.inventario-tecnologico-mapa-equipo-respaldo > .inventario-tecnologico-mapa-fila{background:var(--good-soft);}
+.inventario-tecnologico-mapa-equipo-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;}
+.inventario-tecnologico-mapa-bloque{display:flex;flex-direction:column;gap:6px;}
+.inventario-tecnologico-mapa-bloque-cab{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+.inventario-tecnologico-mapa-bloque-titulo{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--ink-muted);}
+.inventario-tecnologico-mapa-bloque-titulo .inventario-tecnologico-mapa-muted{text-transform:none;letter-spacing:0;}
+.inventario-tecnologico-mapa-enlace-texto{background:none;border:none;padding:0;color:var(--accent-ink);font:inherit;text-align:left;cursor:pointer;}
+.inventario-tecnologico-mapa-enlace-texto:hover{text-decoration:underline;}
+.inventario-tecnologico-mapa-enlace-texto[aria-current="true"]{font-weight:700;color:var(--brand-orange);}
+.inventario-tecnologico-mapa-enlace-cortado{border-color:var(--danger);border-style:dashed;}
+.inventario-tecnologico-mapa-camino{list-style:none;margin:0;padding:0 0 0 12px;border-left:2px solid var(--brand-orange);display:flex;flex-direction:column;gap:4px;font-size:12.5px;}
+.inventario-tecnologico-mapa-camino li{position:relative;}
+.inventario-tecnologico-mapa-camino li::before{content:"";position:absolute;left:-17px;top:6px;width:8px;height:8px;border-radius:50%;background:var(--brand-orange);box-shadow:0 0 0 2px var(--surface);}
+.inventario-tecnologico-mapa-camino-roto::before{background:var(--danger) !important;}
+.inventario-tecnologico-mapa-camino-roto{color:var(--danger);}
+.inventario-tecnologico-mapa-camino-marca{display:inline-block;font-size:10px;font-weight:700;color:var(--ink-muted);background:var(--surface-2);border-radius:4px;padding:0 5px;margin-right:5px;}
+.inventario-tecnologico-mapa-camino-respaldo{color:#fff;background:#1E8A5A;}
+.inventario-tecnologico-mapa-sublista{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12.5px;}
+.inventario-tecnologico-mapa-respaldos{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px;}
+.inventario-tecnologico-mapa-respaldo{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;border:1px dashed var(--border-strong);border-radius:8px;padding:6px 8px;}
+.inventario-tecnologico-mapa-respaldo-en-uso{border-style:solid;border-color:#1E8A5A;background:var(--good-soft);}
+.inventario-tecnologico-mapa-respaldo-prioridad{flex-shrink:0;width:20px;height:20px;border-radius:50%;background:#5B4B8A;color:#fff;font:700 11px/20px 'IBM Plex Mono',monospace;text-align:center;}
+.inventario-tecnologico-mapa-respaldo-texto{flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:2px 6px;align-items:center;}
+.inventario-tecnologico-mapa-respaldo-notas{flex-basis:100%;font-size:11.5px;color:var(--ink-muted);}
+.inventario-tecnologico-mapa-respaldo-acciones{display:flex;gap:4px;flex-shrink:0;}
+.inventario-tecnologico-mapa-nota-red{margin-top:8px;}
+.inventario-tecnologico-mapa-sim-control{display:flex;gap:6px;flex-wrap:wrap;}
+.inventario-tecnologico-mapa-btn-simular{border-color:var(--danger);color:var(--danger);}
+.inventario-tecnologico-mapa-btn-simular[aria-pressed="true"]{background:var(--danger);color:#fff;}
+.inventario-tecnologico-mapa-sim-estado{font-size:12.5px;border-radius:var(--radius-sm);padding:7px 9px;background:var(--surface-2);}
+.inventario-tecnologico-mapa-sim-estado-caido,.inventario-tecnologico-mapa-sim-estado-sin_conexion{background:var(--danger-soft);color:#7A2A1C;}
+.inventario-tecnologico-mapa-sim-estado-respaldo{background:var(--good-soft);color:#24502F;}
+.inventario-tecnologico-mapa-sim-resumen{margin-top:12px;border:1.5px solid var(--danger);border-radius:10px;padding:10px 12px;background:#FFF8F6;display:flex;flex-direction:column;gap:6px;}
+.inventario-tecnologico-mapa-sim-titulo{font-size:13px;font-weight:700;color:var(--danger);}
+.inventario-tecnologico-mapa-sim-titulo .inventario-tecnologico-mapa-muted{font-size:11.5px;}
+.inventario-tecnologico-mapa-sim-cifras{display:flex;gap:10px;flex-wrap:wrap;font-size:12.5px;font-weight:600;}
+.inventario-tecnologico-mapa-sim-sub{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--ink-faint);}
+.inventario-tecnologico-mapa-sim-lista{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:12.5px;}
+.inventario-tecnologico-mapa-sim-recuperado{color:var(--good);font-weight:600;}
+.inventario-tecnologico-mapa-sim-barra{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding:7px 10px;border:1.5px solid var(--danger);border-radius:8px;background:#FFF8F6;font-size:12px;font-weight:600;}
 @media (max-width:1024px){
   .inventario-tecnologico-mapa-layout{grid-template-columns:minmax(0,1fr) 320px;}
 }
@@ -726,6 +826,10 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
   .inventario-tecnologico-mapa-buscador{max-width:none;flex-basis:100%;}
   .inventario-tecnologico-mapa-aviso{white-space:normal;width:calc(100% - 20px);justify-content:space-between;}
   .inventario-tecnologico-mapa-enlace-datos{grid-template-columns:1fr;}
+  .inventario-tecnologico-mapa-filtros{gap:8px;}
+  .inventario-tecnologico-mapa-filtros-resumen{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--ink-muted);padding:4px 0;border-top:1px solid var(--border);}
+  .inventario-tecnologico-mapa-filtros-det[open] .inventario-tecnologico-mapa-filtros{border-top:none;padding-top:0;}
+  .inventario-tecnologico-mapa-leyenda{max-width:calc(100% - 20px);}
 }
 @media (prefers-reduced-motion:reduce){
   .inventario-tecnologico-mapa-pin-enlazada::after{animation:none;transform:scale(1);opacity:0.8;}

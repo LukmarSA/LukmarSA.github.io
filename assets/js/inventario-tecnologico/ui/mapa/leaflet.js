@@ -1,5 +1,6 @@
 // Leaflet (vía unpkg, sin API key) y todo lo visual que depende de él:
-// capas base, íconos de ubicación y estilos de las líneas de enlace.
+// capas base, íconos de ubicación, indicadores de servidores agrupados y
+// estilos de las líneas (backbone, P2MP, respaldos y simulación).
 //
 // Leaflet se carga al abrir la pestaña Mapa por primera vez, no en
 // index.html: si unpkg.com está bloqueado o lento (firewall, proxy), el
@@ -109,14 +110,19 @@ export function glifoTipoUbicacion(tipo){
   return GLIFOS_TIPO_UBICACION[tipo] || GLIFO_UBICACION_GENERICO;
 }
 
-export function htmlPin({ color, tipo, cantidad = 0, seleccionada = false, enlazada = false, archivada = false }){
+export function htmlPin({ color, tipo, cantidad = 0, seleccionada = false, enlazada = false, archivada = false, atenuada = false, sinConexion = false, parcial = false, caida = false }){
   const clases = ["inventario-tecnologico-mapa-pin"];
   if(seleccionada) clases.push("inventario-tecnologico-mapa-pin-seleccionada");
   if(enlazada) clases.push("inventario-tecnologico-mapa-pin-enlazada");
   if(archivada) clases.push("inventario-tecnologico-mapa-pin-archivada");
+  if(atenuada) clases.push("inventario-tecnologico-mapa-pin-atenuada");
+  if(sinConexion) clases.push("inventario-tecnologico-mapa-pin-sin-conexion");
+  else if(parcial) clases.push("inventario-tecnologico-mapa-pin-parcial");
+  if(caida) clases.push("inventario-tecnologico-mapa-pin-caida");
   return `<div class="${clases.join(" ")}" style="--pin-color:${color}">`
     + `<span class="inventario-tecnologico-mapa-pin-cuerpo"><span class="inventario-tecnologico-mapa-pin-glifo">${glifoTipoUbicacion(tipo)}</span></span>`
     + (cantidad > 0 ? `<span class="inventario-tecnologico-mapa-pin-cantidad">${cantidad > 99 ? "99+" : cantidad}</span>` : "")
+    + (sinConexion || parcial ? `<span class="inventario-tecnologico-mapa-pin-alerta" aria-hidden="true">!</span>` : "")
     + `</div>`;
 }
 
@@ -131,11 +137,37 @@ export function iconoUbicacion(L, opciones){
   });
 }
 
+// Indicador de un servidor con muchos clientes ("AP Cerro Azul · 23 clientes"),
+// debajo del pin de su ubicación. El ícono mide 0×0 en la coordenada y la
+// etiqueta se dibuja por CSS; "indice" apila varias de la misma ubicación.
+export function iconoAgrupado(L, { texto, detalle = "", expandido = false, alerta = false, indice = 0 }){
+  const clases = ["inventario-tecnologico-mapa-agrupado"];
+  if(expandido) clases.push("inventario-tecnologico-mapa-agrupado-expandido");
+  if(alerta) clases.push("inventario-tecnologico-mapa-agrupado-alerta");
+  return L.divIcon({
+    className: "inventario-tecnologico-mapa-icono-agrupado",
+    html: `<div class="${clases.join(" ")}" style="--fila:${indice}"><span class="inventario-tecnologico-mapa-agrupado-glifo">${expandido ? "▾" : "▸"}</span><span>${texto}</span>${detalle ? `<span class="inventario-tecnologico-mapa-agrupado-detalle">${detalle}</span>` : ""}</div>`,
+    iconSize: [0, 0],
+    iconAnchor: [0, 0],
+  });
+}
+
 // Estilos de línea (opciones de L.polyline). bubblingMouseEvents:false para
-// que el clic en una línea no llegue al mapa (que deselecciona).
-export const ESTILOS_ENLACE = {
-  borde:        { color: "#FFFFFF", weight: 8, opacity: 0.9, lineCap: "round", interactive: false },
-  seleccionado: { color: "#EC741D", weight: 4, opacity: 1, lineCap: "round", bubblingMouseEvents: false, className: "inventario-tecnologico-mapa-linea-enlace" },
-  destacado:    { color: "#EC741D", weight: 6, opacity: 1, lineCap: "round", bubblingMouseEvents: false, className: "inventario-tecnologico-mapa-linea-enlace inventario-tecnologico-mapa-linea-destacada" },
-  fondo:        { color: "#004DAB", weight: 2.5, opacity: 0.55, dashArray: "6 6", lineCap: "round", bubblingMouseEvents: false, className: "inventario-tecnologico-mapa-linea-fondo" },
+// que el clic en una línea no llegue al mapa (que deselecciona). Cada estilo
+// lleva su clase CSS (mapa-linea-<estilo>) para las pruebas y la leyenda.
+const linea = (estilo, opciones)=>({ lineCap: "round", bubblingMouseEvents: false, className: `inventario-tecnologico-mapa-linea inventario-tecnologico-mapa-linea-${estilo}`, ...opciones });
+export const ESTILOS_LINEA = {
+  backbone:       linea("backbone",       { color: "#004DAB", weight: 5,   opacity: 0.9 }),
+  p2mp:           linea("p2mp",           { color: "#007EB2", weight: 2.2, opacity: 0.85 }),
+  cadena:         linea("cadena",         { color: "#EC741D", weight: 6,   opacity: 1 }),
+  cadenaRespaldo: linea("cadenaRespaldo", { color: "#1E8A5A", weight: 6,   opacity: 1, dashArray: "12 7" }),
+  cadenaRota:     linea("cadenaRota",     { color: "#B3432D", weight: 5,   opacity: 1, dashArray: "8 9" }),
+  cortado:        linea("cortado",        { color: "#B3432D", weight: 3,   opacity: 0.95, dashArray: "3 8" }),
+  sinConexion:    linea("sinConexion",    { color: "#8B9AAA", weight: 2.5, opacity: 0.9, dashArray: "6 7" }),
+  respaldo:       linea("respaldo",       { color: "#5B4B8A", weight: 2.4, opacity: 0.9, dashArray: "1 7" }),
+  recuperado:     linea("recuperado",     { color: "#1E8A5A", weight: 4,   opacity: 1, dashArray: "12 7" }),
 };
+// Borde blanco debajo de las líneas que tienen que resaltar sobre el mapa.
+export const ESTILOS_CON_HALO = new Set(["cadena", "cadenaRespaldo", "cadenaRota", "recuperado", "backbone"]);
+export const HALO = { color: "#FFFFFF", opacity: 0.9, lineCap: "round", interactive: false };
+export const OPACIDAD_ATENUADA = 0.18;

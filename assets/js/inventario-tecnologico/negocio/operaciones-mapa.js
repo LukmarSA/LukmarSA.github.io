@@ -3,12 +3,13 @@
 // recarga los datos del mapa. Los errores de Supabase se traducen a un
 // mensaje legible (traducirErrorMapa); el original queda en error.original.
 //
-// Quién puede qué lo decide la RLS de la migración 002 (ubicaciones, equipos,
-// enlaces y tipos: solo administrador; historial_ubicacion: acción
+// Quién puede qué lo decide la RLS de las migraciones 002/003 (ubicaciones,
+// equipos, respaldos y tipos: solo administrador; historial_ubicacion: acción
 // "asignar_ubicacion" de la matriz). La UI solo esconde los botones.
 import { sb } from "../nucleo/config.js";
-import { cargarTiposUbicacion, cargarUbicaciones, cargarEnlaces, cargarEquiposRadioenlace, estadoMapa, indicesMapa, refrescarDatosMapa } from "../nucleo/datos-mapa.js";
-import { hoyLocalISO, traducirErrorMapa, validarEnlace, validarEquipo, validarFechaMovimiento, validarTipoUbicacion, validarUbicacion } from "../nucleo/mapa-logica.js";
+import { cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, estadoMapa, indicesMapa, redMapa, refrescarDatosMapa } from "../nucleo/datos-mapa.js";
+import { hoyLocalISO, traducirErrorMapa, validarEquipo, validarFechaMovimiento, validarTipoUbicacion, validarUbicacion } from "../nucleo/mapa-logica.js";
+import { validarRespaldo, validarServidor } from "../nucleo/mapa-jerarquia.js";
 import { slugify } from "../nucleo/opciones-configurables.js";
 import { redimensionarImagen } from "./operaciones.js";
 
@@ -139,14 +140,23 @@ export async function eliminarUbicacion(id){
   exigirFilas(await sb.from("ubicaciones").delete().eq("id", id).select("id"), "eliminó la ubicación");
   if(fotos.length) await sb.storage.from(BUCKET_FOTOS).remove(fotos);
   const s = estadoMapa().seleccion;
-  if(s.ubicacionId === id) Object.assign(s, { ubicacionId: null, equipoId: null, enlaceId: null, activoId: null });
+  if(s.ubicacionId === id) Object.assign(s, { ubicacionId: null, equipoId: null, activoId: null });
   await refrescarDatosMapa();
 }
 
 // ---------------------------------------------------------------------------
 // Equipos de radioenlace. Vincular un activo lo mueve solo a la ubicación
 // del equipo (trigger de la base), con su tramo en historial_ubicacion.
+// servidor_id = servidor activo (NULL = raíz); banda/frecuencia = las de
+// operación del radio. La base rechaza los ciclos (trigger de la 003); aquí se
+// avisa antes para no gastar el viaje.
 // ---------------------------------------------------------------------------
+function numeroOpcional(v){
+  if(v === "" || v === null || v === undefined) return null;
+  const n = Number(String(v).replace(",", "."));
+  return Number.isFinite(n) ? n : NaN;
+}
+
 function filaEquipo(c){
   return {
     ubicacion_id: Number(c.ubicacion_id),
@@ -154,70 +164,85 @@ function filaEquipo(c){
     modelo: textoOpcional(c.modelo),
     activo_id: (c.activo_id === "" || c.activo_id === null || c.activo_id === undefined) ? null : Number(c.activo_id),
     notas: textoOpcional(c.notas),
+    servidor_id: (c.servidor_id === "" || c.servidor_id === null || c.servidor_id === undefined) ? null : Number(c.servidor_id),
+    banda: textoOpcional(c.banda),
+    frecuencia_mhz: numeroOpcional(c.frecuencia_mhz),
   };
+}
+
+function validarFilaEquipo(fila, idActual){
+  const v = validarEquipo(fila, cargarEquiposRadioenlace(), idActual);
+  const errores = { ...v.errores };
+  const errorServidor = validarServidor(redMapa(), idActual, fila.servidor_id);
+  if(errorServidor && !errores.servidor_id) errores.servidor_id = errorServidor;
+  if(Number.isNaN(fila.frecuencia_mhz)) errores.frecuencia_mhz = "La frecuencia debe ser un número mayor que cero.";
+  if(Object.keys(errores).length) throw new ErrorValidacion(errores);
 }
 
 export async function crearEquipo(campos){
   const fila = filaEquipo(campos);
-  const v = validarEquipo(fila, cargarEquiposRadioenlace(), null);
-  if(!v.ok) throw new ErrorValidacion(v.errores);
+  validarFilaEquipo(fila, null);
   const { id } = exigir(await sb.from("equipos_radioenlace").insert(fila).select("id").single());
   await refrescarDatosMapa();
   return id;
 }
 
+// Si el servidor nuevo era uno de sus respaldos, la base quita esa fila de
+// respaldo (quedó promovido a principal).
 export async function editarEquipo(id, campos){
   const fila = filaEquipo(campos);
-  const v = validarEquipo(fila, cargarEquiposRadioenlace(), id);
-  if(!v.ok) throw new ErrorValidacion(v.errores);
+  validarFilaEquipo(fila, id);
   exigirFilas(await sb.from("equipos_radioenlace").update(fila).eq("id", id).select("id"), "guardó el equipo");
   await refrescarDatosMapa();
 }
 
-// Sus enlaces se borran con él (ON DELETE CASCADE). Si tenía un activo
+// No se puede borrar un equipo que todavía es servidor de otros (la FK es NO
+// ACTION): hay que reasignar sus clientes antes. Sus respaldos (los suyos y
+// los que otros tenían apuntando a él) se borran con él. Si tenía un activo
 // vinculado, el activo se queda en esta ubicación hasta que alguien lo mueva.
 export async function eliminarEquipo(id){
+  const clientes = cargarEquiposRadioenlace().filter(e=>e.servidor_id === id);
+  if(clientes.length) throw new Error(`No se puede eliminar: ${clientes.length === 1 ? `«${clientes[0].nombre}» lo tiene` : `${clientes.length} equipos lo tienen`} como servidor. Asígnales otro servidor primero.`);
   exigirFilas(await sb.from("equipos_radioenlace").delete().eq("id", id).select("id"), "eliminó el equipo");
-  const s = estadoMapa().seleccion;
-  if(s.equipoId === id) Object.assign(s, { equipoId: null, enlaceId: null });
+  const m = estadoMapa();
+  if(m.seleccion.equipoId === id) m.seleccion.equipoId = null;
+  m.simulacion.caidos = m.simulacion.caidos.filter(x=>x !== id);
+  m.expandidos = m.expandidos.filter(x=>x !== id);
   await refrescarDatosMapa();
 }
 
 // ---------------------------------------------------------------------------
-// Enlaces
+// Respaldos (enlaces_respaldo): a qué servidores puede conmutar un equipo si
+// pierde el suyo, por prioridad (1 = primera opción).
 // ---------------------------------------------------------------------------
-function filaEnlace(c){
-  const f = c.frecuencia_mhz;
+function filaRespaldo(c){
   return {
-    equipo_origen_id: Number(c.equipo_origen_id),
-    equipo_destino_id: Number(c.equipo_destino_id),
-    banda: textoOpcional(c.banda),
-    frecuencia_mhz: (f === "" || f === null || f === undefined) ? null : Number(String(f).replace(",", ".")),
+    equipo_id: Number(c.equipo_id),
+    servidor_alternativo_id: (c.servidor_alternativo_id === "" || c.servidor_alternativo_id === null || c.servidor_alternativo_id === undefined) ? null : Number(c.servidor_alternativo_id),
+    prioridad: Number(c.prioridad),
     notas: textoOpcional(c.notas),
   };
 }
 
-export async function crearEnlace(campos){
-  const fila = filaEnlace(campos);
-  const v = validarEnlace(fila, indicesMapa(), cargarEnlaces(), null);
+export async function crearRespaldo(campos){
+  const fila = filaRespaldo(campos);
+  const v = validarRespaldo(fila, redMapa(), null);
   if(!v.ok) throw new ErrorValidacion(v.errores);
-  const { id } = exigir(await sb.from("enlaces").insert(fila).select("id").single());
+  const { id } = exigir(await sb.from("enlaces_respaldo").insert(fila).select("id").single());
   await refrescarDatosMapa();
   return id;
 }
 
-export async function editarEnlace(id, campos){
-  const fila = filaEnlace(campos);
-  const v = validarEnlace(fila, indicesMapa(), cargarEnlaces(), id);
+export async function editarRespaldo(id, campos){
+  const fila = filaRespaldo(campos);
+  const v = validarRespaldo(fila, redMapa(), id);
   if(!v.ok) throw new ErrorValidacion(v.errores);
-  exigirFilas(await sb.from("enlaces").update(fila).eq("id", id).select("id"), "guardó el enlace");
+  exigirFilas(await sb.from("enlaces_respaldo").update({ servidor_alternativo_id: fila.servidor_alternativo_id, prioridad: fila.prioridad, notas: fila.notas }).eq("id", id).select("id"), "guardó el respaldo");
   await refrescarDatosMapa();
 }
 
-export async function eliminarEnlace(id){
-  exigirFilas(await sb.from("enlaces").delete().eq("id", id).select("id"), "eliminó el enlace");
-  const s = estadoMapa().seleccion;
-  if(s.enlaceId === id) s.enlaceId = null;
+export async function eliminarRespaldo(id){
+  exigirFilas(await sb.from("enlaces_respaldo").delete().eq("id", id).select("id"), "quitó el respaldo");
   await refrescarDatosMapa();
 }
 

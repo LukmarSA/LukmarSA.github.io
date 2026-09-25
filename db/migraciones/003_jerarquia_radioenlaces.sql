@@ -1,0 +1,201 @@
+-- =====================================================================
+-- 003 — Mapa: jerarquía de radioenlaces (servidor → clientes) y respaldos
+-- =====================================================================
+--
+-- Qué agrega
+--   equipos_radioenlace.servidor_id
+--                        Servidor ACTIVO del equipo (FK a la misma tabla).
+--                        NULL = raíz: punto de entrada de internet (puede
+--                        haber varias). Los clientes de X se buscan con
+--                        WHERE servidor_id = X: no se guarda ninguna lista.
+--   equipos_radioenlace.banda / frecuencia_mhz
+--                        Banda y frecuencia de operación del radio. Con la
+--                        jerarquía, la línea equipo → servidor ES el
+--                        radioenlace, así que estos datos pasan de la tabla
+--                        "enlaces" (002) al equipo.
+--   enlaces_respaldo     A qué otros servidores puede conmutar un equipo si
+--                        pierde el activo, por prioridad (1 = primera opción;
+--                        en un empate gana el registrado primero). La
+--                        conmutación la simula el mapa en el navegador: nada
+--                        de la simulación se guarda en la base.
+--
+-- Reglas (triggers)
+--   * Sin ciclos: un equipo no puede terminar siendo ancestro de sí mismo.
+--     El chequeo sube por servidor_id desde el servidor nuevo. Un advisory
+--     lock por transacción serializa los cambios de jerarquía, para que dos
+--     cambios simultáneos (A→B en una sesión, B→A en otra) no armen un ciclo
+--     entre los dos.
+--   * El servidor puede estar en la misma ubicación: es una conexión por
+--     cable dentro de la torre (p. ej. el PTP que recibe el backbone alimenta
+--     a los AP). El mapa no la dibuja como línea ni la cuenta para decidir si
+--     un enlace es backbone o P2MP.
+--   * Un respaldo no puede ser el propio equipo ni su servidor actual. Si un
+--     respaldo pasa a ser el servidor principal, su fila de respaldo se borra
+--     sola (quedó "promovido").
+--
+-- Borrados
+--   * servidor_id es NO ACTION: no se puede borrar un equipo que todavía es
+--     servidor de otros (hay que reasignarlos antes), pero sí se puede borrar
+--     en una misma sentencia un servidor junto con sus clientes.
+--   * enlaces_respaldo es ON DELETE CASCADE por los dos lados: si se borra el
+--     equipo o el servidor alternativo, esa opción de respaldo desaparece.
+--
+-- Permisos: mismo patrón que la 002. enlaces_respaldo se lee con
+-- puede('ver_mapa') (igual que "enlaces") y se escribe solo como
+-- administrador (es_admin()); GRANT explícito a anon/authenticated.
+-- servidor_id, banda y frecuencia_mhz heredan las políticas de
+-- equipos_radioenlace.
+--
+-- Esta migración NO borra la tabla "enlaces" de la 002: así la versión de la
+-- app que está publicada sigue funcionando mientras se despliega la nueva.
+-- Después de desplegar, correr 005_quitar_tabla_enlaces.sql (la 004 va antes).
+--
+-- Cómo correrla: pegar TODO el archivo en el SQL Editor de Supabase y
+-- ejecutar. Va en una sola transacción: si algo falla, no queda nada a medias.
+-- =====================================================================
+
+BEGIN;
+
+DO $$
+BEGIN
+  IF to_regclass('public.equipos_radioenlace') IS NULL THEN
+    RAISE EXCEPTION 'Falta la migración 002 (public.equipos_radioenlace no existe).';
+  END IF;
+  IF to_regclass('public.enlaces_respaldo') IS NOT NULL THEN
+    RAISE EXCEPTION 'La migración 003 ya fue aplicada (public.enlaces_respaldo existe).';
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 1. Jerarquía y datos de radio en el equipo
+-- ---------------------------------------------------------------------
+
+ALTER TABLE public.equipos_radioenlace
+  ADD COLUMN servidor_id bigint CONSTRAINT equipos_radioenlace_servidor_fk REFERENCES public.equipos_radioenlace(id),
+  ADD COLUMN banda text,
+  ADD COLUMN frecuencia_mhz numeric(9,3),
+  ADD CONSTRAINT equipos_radioenlace_no_es_su_servidor CHECK (servidor_id IS DISTINCT FROM id),
+  ADD CONSTRAINT equipos_radioenlace_frecuencia_positiva CHECK (frecuencia_mhz IS NULL OR frecuencia_mhz > 0);
+
+CREATE INDEX equipos_radioenlace_servidor_idx ON public.equipos_radioenlace (servidor_id);
+
+COMMENT ON COLUMN public.equipos_radioenlace.servidor_id IS 'Servidor activo (otro equipo). NULL = raíz: punto de entrada de internet. Clientes de X: WHERE servidor_id = X. En la misma ubicación = conexión por cable.';
+COMMENT ON COLUMN public.equipos_radioenlace.banda IS 'Banda de operación del radio (p. ej. 5 GHz).';
+COMMENT ON COLUMN public.equipos_radioenlace.frecuencia_mhz IS 'Frecuencia de operación del radio, en MHz.';
+
+-- ---------------------------------------------------------------------
+-- 2. Respaldos
+-- ---------------------------------------------------------------------
+
+CREATE TABLE public.enlaces_respaldo (
+  id                      bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  equipo_id               bigint NOT NULL REFERENCES public.equipos_radioenlace(id) ON DELETE CASCADE,
+  servidor_alternativo_id bigint NOT NULL REFERENCES public.equipos_radioenlace(id) ON DELETE CASCADE,
+  prioridad               integer NOT NULL DEFAULT 1 CONSTRAINT enlaces_respaldo_prioridad_positiva CHECK (prioridad >= 1),
+  notas                   text,
+  creado_en               timestamptz NOT NULL DEFAULT now(),
+  creado_por              uuid DEFAULT auth.uid(),
+  CONSTRAINT enlaces_respaldo_par_unico UNIQUE (equipo_id, servidor_alternativo_id),
+  CONSTRAINT enlaces_respaldo_distintos CHECK (equipo_id <> servidor_alternativo_id)
+);
+COMMENT ON TABLE public.enlaces_respaldo IS 'Servidores alternativos a los que un equipo puede conmutar si cae su servidor activo (servidor_id), por prioridad.';
+COMMENT ON COLUMN public.enlaces_respaldo.prioridad IS '1 = primera opción. En un empate gana el respaldo registrado primero (id menor).';
+-- El índice del UNIQUE (equipo_id primero) ya sirve para buscar por equipo.
+CREATE INDEX enlaces_respaldo_servidor_idx ON public.enlaces_respaldo (servidor_alternativo_id);
+
+-- ---------------------------------------------------------------------
+-- 3. Reglas de negocio (triggers). SECURITY DEFINER, como en la 002: la
+--    sentencia original ya pasó por la RLS; el trigger solo aplica sus reglas.
+-- ---------------------------------------------------------------------
+
+-- 3a. Sin ciclos en la jerarquía.
+CREATE FUNCTION public.f_equipos_radioenlace_validar_jerarquia()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  v_ciclo boolean;
+BEGIN
+  IF NEW.servidor_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.servidor_id = NEW.id THEN
+    RAISE EXCEPTION 'Un equipo no puede ser su propio servidor.' USING ERRCODE = '23514';
+  END IF;
+  -- Serializa los cambios de jerarquía; se libera al terminar la transacción.
+  PERFORM pg_advisory_xact_lock(hashtext('public.equipos_radioenlace.servidor_id'));
+  WITH RECURSIVE ancestros(id, servidor_id, nivel) AS (
+    SELECT e.id, e.servidor_id, 1
+      FROM public.equipos_radioenlace e
+     WHERE e.id = NEW.servidor_id
+    UNION ALL
+    SELECT e.id, e.servidor_id, a.nivel + 1
+      FROM public.equipos_radioenlace e
+      JOIN ancestros a ON e.id = a.servidor_id
+     WHERE a.id <> NEW.id AND a.nivel < 10000
+  )
+  SELECT EXISTS (SELECT 1 FROM ancestros WHERE id = NEW.id) INTO v_ciclo;
+  IF v_ciclo THEN
+    RAISE EXCEPTION 'Ciclo en la jerarquía: «%» no puede tener como servidor a un equipo que depende de él.', NEW.nombre USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER trg_equipos_radioenlace_validar_jerarquia
+  BEFORE INSERT OR UPDATE OF servidor_id ON public.equipos_radioenlace
+  FOR EACH ROW EXECUTE FUNCTION public.f_equipos_radioenlace_validar_jerarquia();
+
+-- 3b. Un respaldo que pasa a ser el servidor principal deja de ser respaldo.
+CREATE FUNCTION public.f_equipos_radioenlace_quitar_respaldo_promovido()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+BEGIN
+  IF NEW.servidor_id IS NOT NULL AND NEW.servidor_id IS DISTINCT FROM OLD.servidor_id THEN
+    DELETE FROM public.enlaces_respaldo
+     WHERE equipo_id = NEW.id AND servidor_alternativo_id = NEW.servidor_id;
+  END IF;
+  RETURN NULL;
+END $$;
+
+CREATE TRIGGER trg_equipos_radioenlace_quitar_respaldo_promovido
+  AFTER UPDATE OF servidor_id ON public.equipos_radioenlace
+  FOR EACH ROW EXECUTE FUNCTION public.f_equipos_radioenlace_quitar_respaldo_promovido();
+
+-- 3c. Un respaldo no puede ser el servidor actual del equipo.
+CREATE FUNCTION public.f_enlaces_respaldo_validar()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE
+  v_principal bigint;
+BEGIN
+  SELECT servidor_id INTO v_principal FROM public.equipos_radioenlace WHERE id = NEW.equipo_id;
+  IF v_principal = NEW.servidor_alternativo_id THEN
+    RAISE EXCEPTION 'Ese equipo ya es su servidor principal: un respaldo tiene que ser otro.' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER trg_enlaces_respaldo_validar
+  BEFORE INSERT OR UPDATE OF equipo_id, servidor_alternativo_id ON public.enlaces_respaldo
+  FOR EACH ROW EXECUTE FUNCTION public.f_enlaces_respaldo_validar();
+
+-- 3d. Auditoría: el mismo trigger genérico que las demás tablas del mapa.
+CREATE TRIGGER audit_enlaces_respaldo AFTER INSERT OR DELETE OR UPDATE ON public.enlaces_respaldo FOR EACH ROW EXECUTE FUNCTION public.registrar_auditoria();
+
+-- ---------------------------------------------------------------------
+-- 4. RLS (sel_/ins_/upd_/del_<tabla>, como el resto)
+-- ---------------------------------------------------------------------
+
+ALTER TABLE public.enlaces_respaldo ENABLE ROW LEVEL SECURITY;
+
+-- La redundancia es topología: solo la ve quien ve el mapa. Escribe solo admin.
+CREATE POLICY sel_enlaces_respaldo ON public.enlaces_respaldo FOR SELECT USING (public.puede('ver_mapa'));
+CREATE POLICY ins_enlaces_respaldo ON public.enlaces_respaldo FOR INSERT WITH CHECK (public.es_admin());
+CREATE POLICY upd_enlaces_respaldo ON public.enlaces_respaldo FOR UPDATE USING (public.es_admin());
+CREATE POLICY del_enlaces_respaldo ON public.enlaces_respaldo FOR DELETE USING (public.es_admin());
+
+-- ---------------------------------------------------------------------
+-- 5. GRANT explícito (el ACL por defecto de public solo da Dxtm a estos
+--    roles; ver el encabezado de la 002). id es IDENTITY: no hace falta
+--    GRANT sobre la secuencia.
+-- ---------------------------------------------------------------------
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.enlaces_respaldo TO anon, authenticated;
+
+COMMIT;

@@ -1,39 +1,51 @@
 // Pestaña "Mapa": ubicaciones (torres, oficinas, bodegas…), sus equipos de
-// radioenlace y los activos que están en cada una.
+// radioenlace, la jerarquía servidor → clientes y los activos de cada lugar.
 //
-// Flujo principal (el que pidió el spec):
-//   1. Marcadores de ubicaciones.
-//   2. Clic en un marcador → el panel lateral lista sus equipos de radioenlace
-//      (y sus activos).
-//   3. Clic en un equipo → se dibuja la línea de vista hacia cada equipo con el
-//      que está enlazado (PtP o PtMP), con distancia y azimut, y se resalta el
-//      otro extremo. Clic en ese otro extremo → pasa al equipo de allá, con la
-//      línea todavía dibujada.
+// Flujo principal:
+//   1. Marcadores de ubicaciones y las líneas de la red: backbone (un
+//      servidor con un solo cliente, gruesa) y distribución P2MP (varios
+//      clientes, delgada). Un servidor con más de 8 clientes se agrupa en un
+//      indicador hasta que se lo selecciona o se fijan sus líneas.
+//   2. Clic en un marcador → el panel lista sus equipos (y sus activos).
+//   3. Clic en un equipo → se resalta su camino hasta la raíz y se atenúa el
+//      resto. Clic en el marcador de su servidor (o de un cliente) → pasa a
+//      ese equipo.
+//   4. Simulación de fallas (solo en el navegador, nada se guarda): "Simular
+//      caída de este equipo" corta su enlace de subida; cada equipo sin camino
+//      conmuta solo a su respaldo de mejor prioridad con servicio, y lo que no
+//      tiene salida se marca sin conectividad.
 //
 // Misma convención que las demás vistas: renderVistaMapa(main) arma todo
 // dentro de <main>. Como Leaflet engancha listeners a window, renderMain()
 // llama a destruirVistaMapa() al salir de la pestaña.
 import { cargarActivos } from "../nucleo/datos.js";
-import { estadoMapa, indicesMapa, refrescarDatosMapa } from "../nucleo/datos-mapa.js";
+import { estadoMapa, indicesMapa, redMapa, refrescarDatosMapa, simulacionMapa } from "../nucleo/datos-mapa.js";
 import { state } from "../nucleo/estado.js";
-import { fmtCoordenadas } from "../nucleo/geo.js";
+import { fmtCoordenadas, fmtDistancia } from "../nucleo/geo.js";
 import { esc, fmtTag } from "../nucleo/helpers.js";
-import { buscarEnMapa, describirEnlace, enlacesDeEquipo, infoTipoUbicacion, resumenMapa, traducirErrorMapa, ubicacionesEnlazadas, ubicacionesVisibles } from "../nucleo/mapa-logica.js";
+import { buscarEnMapa, infoTipoUbicacion, resumenMapa, traducirErrorMapa, ubicacionesVisibles } from "../nucleo/mapa-logica.js";
+import { ESTADOS_SIMULACION, ROLES, UMBRAL_AGRUPAR_CLIENTES, caminoARaiz, contarRoles, equipoVisible, estadoPorUbicacion, planDeAgrupados, planDeLineas, resumenRed } from "../nucleo/mapa-jerarquia.js";
 import { esAdmin, puede } from "../nucleo/permisos.js";
-import { eliminarEnlace, eliminarEquipo, eliminarUbicacion, establecerUbicacionActiva, quitarActivoDeUbicacion } from "../negocio/operaciones-mapa.js";
+import { eliminarEquipo, eliminarRespaldo, eliminarUbicacion, establecerUbicacionActiva, quitarActivoDeUbicacion } from "../negocio/operaciones-mapa.js";
 import { urlFoto } from "../negocio/operaciones.js";
 import { abrirDetalle } from "./detalle/vista.js";
-import { abrirAsignarActivos, abrirFormEnlace, abrirFormEquipo, abrirFormUbicacion, abrirMoverActivo } from "./mapa/formularios.js";
-import { CAPAS_BASE, CENTRO_POR_DEFECTO, ESTILOS_ENLACE, capaBaseInicial, cargarLeaflet, crearCapasBase, iconoUbicacion, recordarCapaBase } from "./mapa/leaflet.js";
+import { abrirAsignarActivos, abrirFormEquipo, abrirFormRespaldo, abrirFormUbicacion, abrirMoverActivo } from "./mapa/formularios.js";
+import { CAPAS_BASE, CENTRO_POR_DEFECTO, ESTILOS_CON_HALO, ESTILOS_LINEA, HALO, OPACIDAD_ATENUADA, capaBaseInicial, cargarLeaflet, crearCapasBase, iconoAgrupado, iconoUbicacion, recordarCapaBase } from "./mapa/leaflet.js";
 import { htmlPanelCargando, htmlPanelError, htmlPanelResumen, htmlPanelUbicacion } from "./mapa/panel.js";
 import { abrirCarruselFotos, cerrarModal, confirmarAccion, mostrarToast, renderMain } from "./render-raiz.js";
 
 const P = "inventario-tecnologico-";
 
-let vista = null;     // { L, mapa, capaMarcadores, capaEnlaces, marcadores, main, colocando, alTeclear, ... }
+let vista = null;     // { L, mapa, capaLineas, capaMarcadores, capaAgrupados, marcadores, main, colocando, alTeclear, ... }
 let generacion = 0;   // invalida cargas en curso si se sale de la pestaña antes de que terminen
 let alClicFueraBuscador = null;
 let ubicacionEnPanel = null; // para conservar el scroll del panel solo si sigue mostrando la misma ubicación
+
+const LINEAS = [
+  { id: "backbone", etiqueta: "Backbone", ayuda: "Enlaces punto a punto: servidor con un solo cliente." },
+  { id: "p2mp", etiqueta: "P2MP", ayuda: "Distribución punto-multipunto: servidor con varios clientes." },
+  { id: "respaldos", etiqueta: "Respaldos", ayuda: "Enlaces de respaldo registrados (normalmente ocultos)." },
+];
 
 // ---------------------------------------------------------------------------
 // Ciclo de vida
@@ -64,7 +76,8 @@ export async function renderVistaMapa(main){
     panel.innerHTML = htmlPanelError(traducirErrorMapa(rDatos.reason));
     return;
   }
-  pintarTodo();
+  refrescar();
+  if(vista && !vista.encuadrado){ encuadrarTodo(); vista.encuadrado = true; }
   aplicarFocoPendiente();
 }
 
@@ -84,6 +97,9 @@ export function destruirVistaMapa(){
   setTimeout(()=>{ try{ mapa.off(); mapa.remove(); }catch(e){ /* el contenedor ya no existe: nada que limpiar */ } }, 300);
 }
 
+// Para las pruebas en navegador (tests/mapa-smoke.mjs): el mapa de Leaflet activo.
+export function mapaActual(){ return vista ? vista.mapa : null; }
+
 // Navegar al mapa desde otra vista (p. ej. "Ver en mapa" en el detalle de un activo).
 export function irAlMapa(foco){
   estadoMapa().foco = foco;
@@ -102,12 +118,32 @@ function htmlEsqueleto(){
             role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="${P}mapa-resultados" aria-label="Buscar en el mapa">
           <ul id="${P}mapa-resultados" class="${P}mapa-resultados" role="listbox" hidden></ul>
         </div>
-        <div class="${P}mapa-chips" id="${P}mapa-chips" role="group" aria-label="Tipos de ubicación visibles"></div>
-        <label class="${P}mapa-check"><input type="checkbox" id="${P}mapa-ver-enlaces"> Todos los enlaces</label>
-        <label class="${P}mapa-check"><input type="checkbox" id="${P}mapa-ver-archivadas"> Archivadas</label>
         <span class="${P}fb-spacer"></span>
-        <button type="button" class="${P}btn ${P}btn-sm" id="${P}mapa-recargar" title="Volver a leer ubicaciones, equipos y enlaces desde la base">Recargar</button>
+        <button type="button" class="${P}btn ${P}btn-sm" id="${P}mapa-recargar" title="Volver a leer ubicaciones, equipos y respaldos desde la base">Recargar</button>
         ${esAdmin() ? `<button type="button" class="${P}btn ${P}btn-sm ${P}btn-primary" id="${P}mapa-nueva-ubicacion">+ Ubicación</button>` : ""}
+        <details class="${P}mapa-filtros-det" id="${P}mapa-filtros-det" open>
+        <summary class="${P}mapa-filtros-resumen">Filtros y capas <span class="${P}mapa-chip-n" id="${P}mapa-filtros-cuenta"></span></summary>
+        <div class="${P}mapa-filtros" role="toolbar" aria-label="Capas y filtros del mapa">
+          <div class="${P}mapa-filtro-grupo" role="group" aria-label="Ubicaciones">
+            <span class="${P}mapa-filtro-titulo">Ubicaciones</span>
+            <div class="${P}mapa-chips" id="${P}mapa-chips"></div>
+            <label class="${P}mapa-check"><input type="checkbox" id="${P}mapa-ver-archivadas"> Archivadas</label>
+          </div>
+          <div class="${P}mapa-filtro-grupo" role="group" aria-label="Líneas">
+            <span class="${P}mapa-filtro-titulo">Líneas</span>
+            <div class="${P}mapa-chips" id="${P}mapa-chips-lineas"></div>
+          </div>
+          <div class="${P}mapa-filtro-grupo" role="group" aria-label="Equipos por tipo">
+            <span class="${P}mapa-filtro-titulo">Equipos</span>
+            <div class="${P}mapa-chips" id="${P}mapa-chips-roles"></div>
+          </div>
+          <div class="${P}mapa-filtro-grupo ${P}mapa-filtro-simulacion" role="group" aria-label="Simulación de fallas">
+            <button type="button" class="${P}mapa-chip ${P}mapa-chip-sim" id="${P}mapa-simulacion" aria-pressed="false" title="Activar o apagar la simulación de fallas (no se guarda nada)">Simulación de fallas</button>
+            <div class="${P}mapa-chips" id="${P}mapa-chips-estados" hidden></div>
+            <button type="button" class="${P}btn ${P}btn-sm" id="${P}mapa-sim-restablecer" hidden>Restablecer simulación</button>
+          </div>
+        </div>
+        </details>
       </div>
       <div class="${P}mapa-layout">
         <div class="${P}mapa-lienzo-wrap">
@@ -116,6 +152,19 @@ function htmlEsqueleto(){
             <span>Haz clic en el mapa donde está la ubicación.</span>
             <button type="button" class="${P}btn ${P}btn-sm" id="${P}mapa-aviso-cancelar">Cancelar (Esc)</button>
           </div>
+          <div class="${P}mapa-aviso ${P}mapa-aviso-sim" id="${P}mapa-aviso-sim" role="status" hidden></div>
+          <details class="${P}mapa-leyenda" id="${P}mapa-leyenda">
+            <summary>Leyenda</summary>
+            <ul>
+              <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-backbone"></span>Backbone (punto a punto)</li>
+              <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-p2mp"></span>Distribución P2MP</li>
+              <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-respaldo"></span>Respaldo registrado</li>
+              <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-cadena"></span>Camino a la raíz</li>
+              <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-recuperado"></span>Recuperado vía respaldo</li>
+              <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-cortado"></span>Enlace cortado (simulado)</li>
+              <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-sinConexion"></span>Sin conectividad</li>
+            </ul>
+          </details>
         </div>
         <aside class="${P}mapa-panel" id="${P}mapa-panel" aria-label="Detalle de la ubicación"></aside>
       </div>
@@ -134,12 +183,13 @@ function crearMapa(L, main){
     if(id) recordarCapaBase(id);
   });
   L.control.scale({ metric: true, imperial: false }).addTo(mapa);
-  const capaEnlaces = L.layerGroup().addTo(mapa);
+  const capaLineas = L.layerGroup().addTo(mapa);
   const capaMarcadores = L.layerGroup().addTo(mapa);
+  const capaAgrupados = L.layerGroup().addTo(mapa);
   mapa.on("click", alClicMapa);
   mapa.on("contextmenu", alClicDerechoMapa);
 
-  vista = { L, mapa, capaEnlaces, capaMarcadores, marcadores: new Map(), main, colocando: null, encuadrado: false, alTeclear: null };
+  vista = { L, mapa, capaLineas, capaMarcadores, capaAgrupados, marcadores: new Map(), main, colocando: null, encuadrado: false, alTeclear: null };
 
   // Captura: corre antes que el Esc de los modales (render-raiz.js), así
   // puede ignorar la tecla si hay un modal abierto.
@@ -161,144 +211,256 @@ function hayModalAbierto(){
 }
 
 // ---------------------------------------------------------------------------
-// Pintado
+// Cálculo compartido de un repintado: red, simulación, visibilidad y camino.
 // ---------------------------------------------------------------------------
-function contextoPanel(){
+function calcular(){
   const m = estadoMapa();
-  const indices = indicesMapa();
+  const idx = indicesMapa();
+  const red = redMapa();
+  const sim = simulacionMapa(red);
+  const f = m.filtros;
+  const s = m.seleccion;
+  const seleccionId = s.equipoId && red.equipoPorId.has(s.equipoId) ? s.equipoId : null;
+  const camino = seleccionId !== null ? caminoARaiz(red, seleccionId, sim) : [];
+  const ubicacionesCamino = new Set(camino.map(id=>red.equipoPorId.get(id).ubicacion_id));
+  const ubicacionesClientes = new Set(seleccionId !== null ? (red.clientes.get(seleccionId) || []).map(c=>c.ubicacion_id) : []);
+  const visibleEquipo = id=>equipoVisible(red, id, f, sim);
+  const base = new Set(ubicacionesVisibles(m.ubicaciones, f).map(u=>u.id));
+  // Una ubicación se oculta por los filtros de equipos solo si TODOS sus
+  // equipos quedaron ocultos; la seleccionada y las del camino se ven siempre.
+  const visibleUbicacion = id=>{
+    if(id === s.ubicacionId || ubicacionesCamino.has(id)) return true;
+    if(!base.has(id)) return false;
+    const equipos = idx.equiposPorUbicacion.get(id) || [];
+    return !equipos.length || equipos.some(e=>visibleEquipo(e.id));
+  };
+  return { m, idx, red, sim, seleccionId, camino, ubicacionesCamino, ubicacionesClientes, visibleEquipo, visibleUbicacion, expandidos: new Set(m.expandidos), estadoUbicaciones: estadoPorUbicacion(red, sim) };
+}
+
+function contextoPanel(c){
+  const m = c.m;
   const activos = cargarActivos().activos;
-  const visibles = ubicacionesVisibles(m.ubicaciones, m.filtros);
   return {
-    indices,
+    indices: c.idx,
+    red: c.red,
+    sim: c.sim,
+    simActiva: !!c.sim,
+    expandidos: c.expandidos,
+    umbralAgrupar: UMBRAL_AGRUPAR_CLIENTES,
     tipos: m.tiposUbicacion,
     seleccion: m.seleccion,
     esAdmin: esAdmin(),
     puedeAsignar: puede("asignar_ubicacion"),
-    ubicacionesVisibles: visibles,
+    puedeSimular: puede("ver_mapa"),
+    ubicacionesVisibles: m.ubicaciones.filter(u=>c.visibleUbicacion(u.id)),
     ubicacionesTotal: m.ubicaciones.length,
-    resumen: resumenMapa(indices, { ubicaciones: m.ubicaciones, equipos: m.equipos, enlaces: m.enlaces, activos }),
+    estadoUbicaciones: c.estadoUbicaciones,
+    resumen: resumenMapa(c.idx, { ubicaciones: m.ubicaciones, equipos: m.equipos, activos, red: c.red }),
+    resumenRed: resumenRed(c.red),
   };
 }
 
-function pintarTodo(){
-  pintarChips();
-  pintarMarcadores();
-  pintarEnlaces();
-  pintarPanel();
-  if(vista && !vista.encuadrado){ encuadrarTodo(); vista.encuadrado = true; }
+// Repinta todo: barra de filtros, marcadores, líneas, indicadores y panel.
+function refrescar(){
+  const c = calcular();
+  pintarFiltros(c);
+  pintarAvisoSimulacion(c);
+  if(vista){
+    pintarMarcadores(c);
+    pintarLineas(c);
+    pintarAgrupados(c);
+  }
+  pintarPanel(c);
 }
 
-function pintarChips(){
+// ---------------------------------------------------------------------------
+// Barra de filtros (se repinta con los conteos al día)
+// ---------------------------------------------------------------------------
+function chip({ data, valor, pressed, color = null, etiqueta, n = null, titulo = "", extra = "" }){
+  return `<button type="button" class="${P}mapa-chip" data-${data}="${esc(valor)}" aria-pressed="${pressed}"${color ? ` style="--chip-color:${esc(color)}"` : ""} title="${esc(titulo)}">${extra || (color ? `<span class="${P}mapa-chip-punto"></span>` : "")}${esc(etiqueta)}${n !== null ? ` <span class="${P}mapa-chip-n">${n}</span>` : ""}</button>`;
+}
+
+function pintarFiltros(c){
+  const m = c.m;
+  const f = m.filtros;
   const cont = document.getElementById(`${P}mapa-chips`);
   if(!cont) return;
-  const m = estadoMapa();
   const usados = new Set(m.ubicaciones.map(u=>u.tipo));
   const tipos = m.tiposUbicacion.filter(t=>t.activo !== false || usados.has(t.valor));
   cont.innerHTML = tipos.map(t=>{
-    const n = m.ubicaciones.filter(u=>u.tipo === t.valor && (m.filtros.verArchivadas || u.activa !== false)).length;
-    const visible = !m.filtros.tiposOcultos.includes(t.valor);
-    return `<button type="button" class="${P}mapa-chip" data-tipo="${esc(t.valor)}" aria-pressed="${visible}" style="--chip-color:${esc(t.color)}" title="${visible ? "Ocultar" : "Mostrar"} ${esc(t.etiqueta)}"><span class="${P}mapa-chip-punto"></span>${esc(t.etiqueta)} <span class="${P}mapa-chip-n">${n}</span></button>`;
+    const n = m.ubicaciones.filter(u=>u.tipo === t.valor && (f.verArchivadas || u.activa !== false)).length;
+    const visible = !f.tiposOcultos.includes(t.valor);
+    return chip({ data: "tipo", valor: t.valor, pressed: visible, color: t.color, etiqueta: t.etiqueta, n, titulo: `${visible ? "Ocultar" : "Mostrar"} ${t.etiqueta}` });
   }).join("");
-  const ve = document.getElementById(`${P}mapa-ver-enlaces`);
   const va = document.getElementById(`${P}mapa-ver-archivadas`);
-  if(ve) ve.checked = m.filtros.verTodosEnlaces;
-  if(va) va.checked = m.filtros.verArchivadas;
+  if(va) va.checked = f.verArchivadas;
+
+  const rr = resumenRed(c.red);
+  const nLineas = { backbone: rr.backbone, p2mp: rr.p2mp, respaldos: rr.respaldos };
+  document.getElementById(`${P}mapa-chips-lineas`).innerHTML = LINEAS.map(l=>chip({
+    data: "linea", valor: l.id, pressed: !!f.lineas[l.id], etiqueta: l.etiqueta, n: nLineas[l.id],
+    titulo: `${f.lineas[l.id] ? "Ocultar" : "Mostrar"}: ${l.ayuda}`, extra: `<span class="${P}mapa-chip-linea ${P}mapa-chip-linea-${l.id}"></span>`,
+  })).join("");
+
+  const nRoles = contarRoles(c.red);
+  document.getElementById(`${P}mapa-chips-roles`).innerHTML = ROLES.map(r=>chip({
+    data: "rol", valor: r.id, pressed: !f.rolesOcultos.includes(r.id), color: r.color, etiqueta: r.etiqueta, n: nRoles[r.id] || 0,
+    titulo: `${f.rolesOcultos.includes(r.id) ? "Mostrar" : "Ocultar"}: ${r.ayuda}`,
+  })).join("");
+
+  const cuentaFiltros = document.getElementById(`${P}mapa-filtros-cuenta`);
+  if(cuentaFiltros){
+    const activos = f.tiposOcultos.length + f.rolesOcultos.length + (c.sim ? f.estadosOcultos.length + 1 : 0) + (f.verArchivadas ? 1 : 0)
+      + (f.lineas.backbone ? 0 : 1) + (f.lineas.p2mp ? 0 : 1) + (f.lineas.respaldos ? 1 : 0);
+    cuentaFiltros.textContent = activos ? `${activos} activo${activos === 1 ? "" : "s"}${c.sim ? " · simulación" : ""}` : "";
+  }
+
+  const botonSim = document.getElementById(`${P}mapa-simulacion`);
+  const estados = document.getElementById(`${P}mapa-chips-estados`);
+  const restablecer = document.getElementById(`${P}mapa-sim-restablecer`);
+  botonSim.setAttribute("aria-pressed", String(!!c.sim));
+  estados.hidden = !c.sim;
+  restablecer.hidden = !(c.sim && c.sim.caidos.size);
+  estados.innerHTML = c.sim ? ESTADOS_SIMULACION.map(e=>chip({
+    data: "estado", valor: e.id, pressed: !f.estadosOcultos.includes(e.id), color: e.color, etiqueta: e.etiqueta, n: c.sim.cuentas[e.id] || 0,
+    titulo: `${f.estadosOcultos.includes(e.id) ? "Mostrar" : "Ocultar"} equipos: ${e.etiqueta.toLowerCase()}`,
+  })).join("") : "";
 }
 
-function opcionesIcono(u, { seleccionada, enlazada }){
-  const m = estadoMapa();
-  const idx = indicesMapa();
+function pintarAvisoSimulacion(c){
+  const aviso = document.getElementById(`${P}mapa-aviso-sim`);
+  if(!aviso) return;
+  aviso.hidden = !c.sim;
+  if(!c.sim) return;
+  const n = c.sim.cuentas;
+  // Un caído que conmutó a su propio respaldo cuenta como "caído" (los estados
+  // son excluyentes), así que se aclara aparte que sí se recuperó.
+  const recuperados = [...c.sim.caidos].filter(id=>(c.sim.estado.get(id) || {}).conectado).length;
+  aviso.innerHTML = c.sim.caidos.size
+    ? `<span><strong>Simulación:</strong> ${n.caido} caído${n.caido === 1 ? "" : "s"}${recuperados ? ` (${recuperados} recuperado${recuperados === 1 ? "" : "s"} vía respaldo)` : ""} · ${n.respaldo} vía respaldo · ${n.sin_conexion} sin conectividad</span>
+       <button type="button" class="${P}btn ${P}btn-sm" data-sim-accion="restablecer">Restablecer</button>
+       <button type="button" class="${P}btn ${P}btn-sm" data-sim-accion="salir">Salir</button>`
+    : `<span><strong>Simulación activa.</strong> Elige un equipo y usa «Simular caída de este equipo».</span>
+       <button type="button" class="${P}btn ${P}btn-sm" data-sim-accion="salir">Salir</button>`;
+}
+
+// ---------------------------------------------------------------------------
+// Marcadores, líneas e indicadores
+// ---------------------------------------------------------------------------
+function opcionesIcono(c, u){
+  const idx = c.idx;
   const equipos = (idx.equiposPorUbicacion.get(u.id) || []).length;
   // Un activo que es el radio de un equipo de esta ubicación no se cuenta dos veces.
   const activos = (idx.activosPorUbicacion.get(u.id) || []).filter(a=>{ const e = idx.equipoPorActivo.get(a.id); return !(e && e.ubicacion_id === u.id); }).length;
-  return { color: infoTipoUbicacion(m.tiposUbicacion, u.tipo).color, tipo: u.tipo, cantidad: equipos + activos, seleccionada, enlazada, archivada: u.activa === false };
+  const s = c.m.seleccion;
+  const servidor = c.seleccionId !== null && c.camino.length > 1 ? c.red.equipoPorId.get(c.camino[1]) : null;
+  const est = c.sim ? c.estadoUbicaciones.get(u.id) : null;
+  const hayCadena = c.seleccionId !== null;
+  return {
+    color: infoTipoUbicacion(c.m.tiposUbicacion, u.tipo).color, tipo: u.tipo, cantidad: equipos + activos,
+    seleccionada: s.ubicacionId === u.id,
+    enlazada: !!(servidor && servidor.ubicacion_id === u.id && u.id !== s.ubicacionId),
+    archivada: u.activa === false,
+    atenuada: hayCadena && u.id !== s.ubicacionId && !c.ubicacionesCamino.has(u.id) && !c.ubicacionesClientes.has(u.id),
+    sinConexion: !!(est && est.total && est.sinConexion === est.total),
+    parcial: !!(est && est.sinConexion && est.sinConexion < est.total),
+    caida: !!(est && est.caidos),
+  };
 }
 
-function pintarMarcadores(){
-  if(!vista) return;
+function pintarMarcadores(c){
   const { L } = vista;
-  const m = estadoMapa();
-  const s = m.seleccion;
-  const enlazadas = s.equipoId ? ubicacionesEnlazadas(indicesMapa(), s.equipoId) : new Set();
+  const m = c.m;
+  const enfocado = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.ubicacionId : null;
   vista.capaMarcadores.clearLayers();
   vista.marcadores.clear();
-  for(const u of ubicacionesVisibles(m.ubicaciones, m.filtros)){
-    const sel = s.ubicacionId === u.id, enl = enlazadas.has(u.id);
+  for(const u of m.ubicaciones){
+    if(!c.visibleUbicacion(u.id)) continue;
+    const o = opcionesIcono(c, u);
     const marcador = L.marker([u.lat, u.lng], {
-      icon: iconoUbicacion(L, opcionesIcono(u, { seleccionada: sel, enlazada: enl })),
+      icon: iconoUbicacion(L, o),
       keyboard: true,
       riseOnHover: true,
-      zIndexOffset: sel ? 1000 : (enl ? 500 : 0),
+      zIndexOffset: o.seleccionada ? 1000 : (o.enlazada ? 500 : (o.atenuada ? -200 : 0)),
     });
     marcador.bindTooltip(esc(u.nombre), { direction: "top", className: `${P}mapa-tooltip` });
     marcador.on("click", ()=>alClicMarcador(u.id));
-    marcador.on("add", ()=>{ const el = marcador.getElement(); if(el){ el.setAttribute("aria-label", u.nombre); el.dataset.ubicacionId = u.id; } });
+    marcador.on("add", ()=>{
+      const el = marcador.getElement();
+      if(!el) return;
+      el.setAttribute("aria-label", u.nombre);
+      el.dataset.ubicacionId = u.id;
+      if(enfocado !== null && String(u.id) === enfocado) el.focus({ preventScroll: true });
+    });
     marcador.addTo(vista.capaMarcadores);
     vista.marcadores.set(u.id, marcador);
   }
 }
 
-// Solo cambia íconos (selección/extremo enlazado), sin recrear marcadores.
-function actualizarIconos(){
-  if(!vista) return;
-  const m = estadoMapa();
-  const s = m.seleccion;
-  const enlazadas = s.equipoId ? ubicacionesEnlazadas(indicesMapa(), s.equipoId) : new Set();
-  for(const [id, marcador] of vista.marcadores){
-    const u = m.ubicaciones.find(x=>x.id === id);
-    if(!u) continue;
-    const sel = s.ubicacionId === id, enl = enlazadas.has(id);
-    marcador.setIcon(iconoUbicacion(vista.L, opcionesIcono(u, { seleccionada: sel, enlazada: enl })));
-    marcador.setZIndexOffset(sel ? 1000 : (enl ? 500 : 0));
-    const el = marcador.getElement();
-    if(el){ el.setAttribute("aria-label", u.nombre); el.dataset.ubicacionId = id; }
-  }
+function textoLinea(red, d){
+  const cliente = red.equipoPorId.get(d.clienteId), servidor = red.equipoPorId.get(d.servidorId);
+  const partes = [`${cliente ? cliente.nombre : "?"} ← ${servidor ? servidor.nombre : "?"}`, fmtDistancia(d.distanciaKm), d.banda || ""].filter(Boolean);
+  const extra = { cortado: "enlace cortado (simulado)", sinConexion: "sin servicio en la simulación", recuperado: "recuperado vía respaldo", respaldo: `respaldo (prioridad ${d.prioridad})`, cadenaRota: "camino cortado" }[d.estilo];
+  return partes.join(" · ") + (extra ? ` — ${extra}` : "");
 }
 
-function etiquetaLinea(d){
-  const partes = [d.distanciaKm !== null ? (d.distanciaKm < 1 ? `${Math.round(d.distanciaKm * 1000)} m` : `${d.distanciaKm.toFixed(2)} km`) : "", d.enlace.banda || ""].filter(Boolean);
-  return esc(partes.join(" · "));
+function etiquetaCorta(d){
+  if(d.estilo === "recuperado" || d.estilo === "cadenaRespaldo") return `↺ vía respaldo → ${d.ubicacionRespaldo}`;
+  return [fmtDistancia(d.distanciaKm), d.banda].filter(Boolean).join(" · ");
 }
 
-function pintarEnlaces(){
-  if(!vista) return;
+function pintarLineas(c){
   const { L } = vista;
-  const m = estadoMapa();
-  const s = m.seleccion;
-  const idx = indicesMapa();
-  const visibles = new Set(ubicacionesVisibles(m.ubicaciones, m.filtros).map(u=>u.id));
-  vista.capaEnlaces.clearLayers();
-
-  if(m.filtros.verTodosEnlaces){
-    for(const l of m.enlaces){
-      if(s.equipoId && (l.equipo_origen_id === s.equipoId || l.equipo_destino_id === s.equipoId)) continue;
-      const d = describirEnlace(idx, l, l.equipo_origen_id);
-      if(!d.otro || !d.ubicacion || !d.otraUbicacion || !visibles.has(d.ubicacion.id) || !visibles.has(d.otraUbicacion.id)) continue;
-      L.polyline([[d.ubicacion.lat, d.ubicacion.lng], [d.otraUbicacion.lat, d.otraUbicacion.lng]], ESTILOS_ENLACE.fondo)
-        .bindTooltip(`${esc(d.equipo.nombre)} ↔ ${esc(d.otro.nombre)}`, { sticky: true, className: `${P}mapa-tooltip` })
-        .on("click", ()=>seleccionarEquipo(l.equipo_origen_id, { enlaceId: l.id }))
-        .addTo(vista.capaEnlaces);
-    }
-  }
-
-  if(s.equipoId){
-    for(const d of enlacesDeEquipo(idx, s.equipoId)){
-      const puntos = [[d.ubicacion.lat, d.ubicacion.lng], [d.otraUbicacion.lat, d.otraUbicacion.lng]];
-      L.polyline(puntos, ESTILOS_ENLACE.borde).addTo(vista.capaEnlaces);
-      const linea = L.polyline(puntos, s.enlaceId === d.enlace.id ? ESTILOS_ENLACE.destacado : ESTILOS_ENLACE.seleccionado).addTo(vista.capaEnlaces);
-      linea.bindTooltip(etiquetaLinea(d), { permanent: true, direction: "center", className: `${P}mapa-etiqueta-enlace` });
-      linea.on("click", ()=>{ s.enlaceId = d.enlace.id; pintarEnlaces(); pintarPanel(); });
-      const el = linea.getElement();
-      if(el){ el.dataset.enlaceId = d.enlace.id; el.setAttribute("aria-label", `Enlace ${d.equipo.nombre} ↔ ${d.otro.nombre}`); }
+  vista.capaLineas.clearLayers();
+  const plan = planDeLineas(c.red, { lineas: c.m.filtros.lineas, visibleEquipo: c.visibleEquipo, visibleUbicacion: c.visibleUbicacion, sim: c.sim, seleccionId: c.seleccionId, expandidos: c.expandidos });
+  // Orden de dibujo: lo atenuado abajo, lo resaltado arriba.
+  const peso = d=>(d.atenuada ? 0 : 1) + (d.enCadena ? 2 : 0) + (d.estilo === "recuperado" ? 1 : 0);
+  plan.sort((a, b)=>peso(a) - peso(b));
+  for(const d of plan){
+    const estilo = ESTILOS_LINEA[d.estilo];
+    const puntos = [[d.desde.lat, d.desde.lng], [d.hasta.lat, d.hasta.lng]];
+    if(ESTILOS_CON_HALO.has(d.estilo) && !d.atenuada) L.polyline(puntos, { ...HALO, weight: estilo.weight + 4 }).addTo(vista.capaLineas);
+    const linea = L.polyline(puntos, d.atenuada ? { ...estilo, opacity: estilo.opacity * OPACIDAD_ATENUADA } : estilo).addTo(vista.capaLineas);
+    const permanente = d.enCadena || d.estilo === "recuperado";
+    if(permanente) linea.bindTooltip(esc(etiquetaCorta(d)), { permanent: true, direction: "center", className: `${P}mapa-etiqueta-enlace ${P}mapa-etiqueta-${d.estilo}` });
+    else linea.bindTooltip(esc(textoLinea(c.red, d)), { sticky: true, className: `${P}mapa-tooltip` });
+    linea.on("click", ()=>seleccionarEquipo(d.clienteId, { encuadrar: false }));
+    const el = linea.getElement();
+    if(el){
+      el.dataset.clienteId = d.clienteId;
+      el.dataset.servidorId = d.servidorId;
+      if(d.atenuada) el.classList.add(`${P}mapa-linea-atenuada`);
+      el.setAttribute("aria-label", textoLinea(c.red, d));
     }
   }
 }
 
-function pintarPanel(){
+function pintarAgrupados(c){
+  const { L } = vista;
+  vista.capaAgrupados.clearLayers();
+  const porUbicacion = new Map();
+  for(const g of planDeAgrupados(c.red, { sim: c.sim, expandidos: c.expandidos, seleccionId: c.seleccionId })){
+    if(!c.visibleUbicacion(g.ubicacionId) || !c.visibleEquipo(g.servidorId)) continue;
+    const u = c.red.ubicacionPorId.get(g.ubicacionId);
+    if(!u) continue;
+    const indice = porUbicacion.get(g.ubicacionId) || 0;
+    porUbicacion.set(g.ubicacionId, indice + 1);
+    const detalle = g.servidorSinConexion ? "sin conectividad" : (g.clientesSinConexion ? `${g.clientesSinConexion} sin conectividad` : "");
+    const m = L.marker([u.lat, u.lng], {
+      icon: iconoAgrupado(L, { texto: esc(`${g.nombre} · ${g.clientes} clientes`), detalle: esc(detalle), expandido: g.expandido, alerta: !!detalle, indice }),
+      keyboard: true, zIndexOffset: 1500,
+    });
+    m.on("click", ()=>seleccionarEquipo(g.servidorId));
+    m.on("add", ()=>{ const el = m.getElement(); if(el){ el.dataset.servidorId = g.servidorId; el.setAttribute("aria-label", `${g.nombre}: ${g.clientes} clientes${g.expandido ? " (líneas visibles)" : ". Clic para ver sus líneas"}`); } });
+    m.addTo(vista.capaAgrupados);
+  }
+}
+
+function pintarPanel(c){
   const panel = document.getElementById(`${P}mapa-panel`);
   if(!panel) return;
-  const m = estadoMapa();
-  const ctx = contextoPanel();
+  const m = c.m;
+  const ctx = contextoPanel(c);
   const u = m.seleccion.ubicacionId ? m.ubicaciones.find(x=>x.id === m.seleccion.ubicacionId) : null;
   const scroll = panel.scrollTop;
   panel.innerHTML = u ? htmlPanelUbicacion(ctx, u) : htmlPanelResumen(ctx);
@@ -311,24 +473,26 @@ function pintarPanel(){
 }
 
 // Leaflet descarta setView/fitBounds pedidos mientras anima un zoom
-// (_tryAnimatedZoom devuelve true sin mover nada si _animatingZoom), p. ej.
-// al elegir algo en el panel justo después de un encuadre. Se guarda el
-// último pedido y se aplica al terminar la animación.
+// (_tryAnimatedZoom devuelve true sin mover nada si _animatingZoom), y la
+// animación recién marca _animatingZoom en el cuadro siguiente: dos pedidos
+// seguidos (elegir una ubicación y enseguida uno de sus equipos) se pisan y
+// gana el primero. Por eso se guarda solo el ÚLTIMO pedido y se aplica en el
+// próximo cuadro, o al terminar la animación de zoom si hay una en curso.
 function moverVista(fn){
   if(!vista) return;
+  vista.movimientoPendiente = fn;
+  if(vista.movimientoProgramado) return;
+  vista.movimientoProgramado = true;
   const mapa = vista.mapa;
-  if(mapa._animatingZoom){
-    const yaEsperando = !!vista.movimientoPendiente;
-    vista.movimientoPendiente = fn;
-    if(!yaEsperando) mapa.once("zoomend", ()=>{
-      if(!vista || vista.mapa !== mapa) return;
-      const pendiente = vista.movimientoPendiente;
-      vista.movimientoPendiente = null;
-      if(pendiente) moverVista(pendiente);
-    });
-    return;
-  }
-  fn(mapa);
+  const aplicar = ()=>{
+    if(!vista || vista.mapa !== mapa) return;
+    if(mapa._animatingZoom){ mapa.once("zoomend", ()=>requestAnimationFrame(aplicar)); return; }
+    vista.movimientoProgramado = false;
+    const pendiente = vista.movimientoPendiente;
+    vista.movimientoPendiente = null;
+    if(pendiente) pendiente(mapa);
+  };
+  requestAnimationFrame(aplicar);
 }
 
 function encuadrarTodo(){
@@ -346,59 +510,51 @@ function encuadrarTodo(){
 // Selección
 // ---------------------------------------------------------------------------
 
-// Si lo que se va a mostrar está oculto por un filtro, se quita ese filtro
-// (buscar algo y no verlo sería peor).
+// Si lo que se va a mostrar está oculto por un filtro de ubicaciones, se
+// quita ese filtro (buscar algo y no verlo sería peor).
 function asegurarVisible(u){
   const f = estadoMapa().filtros;
-  let cambio = false;
-  if(f.tiposOcultos.includes(u.tipo)){ f.tiposOcultos = f.tiposOcultos.filter(t=>t !== u.tipo); cambio = true; }
-  if(u.activa === false && !f.verArchivadas){ f.verArchivadas = true; cambio = true; }
-  return cambio;
-}
-
-function refrescarSeleccion(recrearMarcadores){
-  if(recrearMarcadores){ pintarChips(); pintarMarcadores(); }
-  else actualizarIconos();
-  pintarEnlaces();
-  pintarPanel();
+  if(f.tiposOcultos.includes(u.tipo)) f.tiposOcultos = f.tiposOcultos.filter(t=>t !== u.tipo);
+  if(u.activa === false && !f.verArchivadas) f.verArchivadas = true;
 }
 
 export function seleccionarUbicacion(id, { centrar = false, activoId = null } = {}){
   const m = estadoMapa();
   const u = m.ubicaciones.find(x=>x.id === id);
   if(!u) return;
-  const recrear = asegurarVisible(u);
-  m.seleccion = { ubicacionId: id, equipoId: null, enlaceId: null, activoId };
-  refrescarSeleccion(recrear);
+  asegurarVisible(u);
+  m.seleccion = { ubicacionId: id, equipoId: null, activoId };
+  refrescar();
   moverVista(mapa=>{
     if(centrar) mapa.setView([u.lat, u.lng], Math.max(mapa.getZoom(), 15));
     else if(!mapa.getBounds().pad(-0.1).contains([u.lat, u.lng])) mapa.panTo([u.lat, u.lng]);
   });
 }
 
-export function seleccionarEquipo(equipoId, { enlaceId = null, encuadrar = true } = {}){
+export function seleccionarEquipo(equipoId, { encuadrar = true } = {}){
   const m = estadoMapa();
-  const idx = indicesMapa();
-  const e = idx.equipoPorId.get(equipoId);
+  const red = redMapa();
+  const e = red.equipoPorId.get(equipoId);
   if(!e) return;
-  const u = idx.ubicacionPorId.get(e.ubicacion_id);
+  const u = red.ubicacionPorId.get(e.ubicacion_id);
   if(!u) return;
-  const enlaces = enlacesDeEquipo(idx, equipoId);
-  let recrear = asegurarVisible(u);
-  for(const d of enlaces) recrear = asegurarVisible(d.otraUbicacion) || recrear;
-  m.seleccion = { ubicacionId: u.id, equipoId, enlaceId, activoId: null };
-  refrescarSeleccion(recrear);
+  asegurarVisible(u);
+  m.seleccion = { ubicacionId: u.id, equipoId, activoId: null };
+  refrescar();
   if(!encuadrar) return;
+  // Encuadre: su camino hasta la raíz y sus clientes.
+  const c = calcular();
+  const ids = new Set([...c.ubicacionesCamino, ...c.ubicacionesClientes, u.id]);
+  const puntos = [...ids].map(id=>red.ubicacionPorId.get(id)).filter(Boolean).map(x=>[x.lat, x.lng]);
   moverVista(mapa=>{
-    if(enlaces.length) mapa.fitBounds([[u.lat, u.lng], ...enlaces.map(d=>[d.otraUbicacion.lat, d.otraUbicacion.lng])], { padding: [70, 70], maxZoom: 15 });
+    if(puntos.length > 1) mapa.fitBounds(puntos, { padding: [70, 70], maxZoom: 15 });
     else if(!mapa.getBounds().contains([u.lat, u.lng])) mapa.panTo([u.lat, u.lng]);
   });
 }
 
 function deseleccionar(){
-  const m = estadoMapa();
-  m.seleccion = { ubicacionId: null, equipoId: null, enlaceId: null, activoId: null };
-  refrescarSeleccion(false);
+  estadoMapa().seleccion = { ubicacionId: null, equipoId: null, activoId: null };
+  refrescar();
 }
 
 function aplicarFocoPendiente(){
@@ -406,8 +562,31 @@ function aplicarFocoPendiente(){
   const f = m.foco;
   if(!f || !vista) return;
   m.foco = null;
-  if(f.equipoId && indicesMapa().equipoPorId.has(f.equipoId)) seleccionarEquipo(f.equipoId);
+  if(f.equipoId && m.equipos.some(e=>e.id === f.equipoId)) seleccionarEquipo(f.equipoId);
   else if(f.ubicacionId) seleccionarUbicacion(f.ubicacionId, { centrar: true, activoId: f.activoId || null });
+}
+
+// ---------------------------------------------------------------------------
+// Simulación (en memoria: estadoMapa().simulacion)
+// ---------------------------------------------------------------------------
+function alternarCaida(equipoId){
+  const s = estadoMapa().simulacion;
+  const estaba = s.caidos.includes(equipoId);
+  s.caidos = estaba ? s.caidos.filter(x=>x !== equipoId) : [...s.caidos, equipoId];
+  s.activa = true;
+  refrescar();
+}
+
+function restablecerSimulacion(){
+  estadoMapa().simulacion.caidos = [];
+  refrescar();
+}
+
+function alternarModoSimulacion(activa){
+  const s = estadoMapa().simulacion;
+  s.activa = activa === undefined ? !s.activa : !!activa;
+  if(!s.activa) estadoMapa().filtros.estadosOcultos = [];
+  refrescar();
 }
 
 // ---------------------------------------------------------------------------
@@ -416,11 +595,15 @@ function aplicarFocoPendiente(){
 function alClicMarcador(id){
   if(!vista || vista.colocando) return;
   const s = estadoMapa().seleccion;
-  // Clic en el otro extremo de un enlace dibujado: se pasa a su equipo y la
-  // línea se mantiene.
+  // Con un equipo seleccionado, clic en la ubicación de su servidor (o de uno
+  // de sus clientes) pasa a ese equipo y el camino se sigue viendo.
   if(s.equipoId && id !== s.ubicacionId){
-    const socio = enlacesDeEquipo(indicesMapa(), s.equipoId).find(d=>d.otraUbicacion.id === id);
-    if(socio){ seleccionarEquipo(socio.otro.id, { enlaceId: socio.enlace.id, encuadrar: false }); return; }
+    const red = redMapa();
+    const e = red.equipoPorId.get(s.equipoId);
+    const servidor = e && e.servidor_id !== null && e.servidor_id !== undefined ? red.equipoPorId.get(e.servidor_id) : null;
+    if(servidor && servidor.ubicacion_id === id){ seleccionarEquipo(servidor.id, { encuadrar: false }); return; }
+    const clientesAhi = (red.clientes.get(s.equipoId) || []).filter(c=>c.ubicacion_id === id);
+    if(clientesAhi.length === 1){ seleccionarEquipo(clientesAhi[0].id, { encuadrar: false }); return; }
   }
   if(s.ubicacionId === id && !s.equipoId) return;
   seleccionarUbicacion(id);
@@ -472,9 +655,7 @@ function cancelarColocacion(){
 // ---------------------------------------------------------------------------
 function trasGuardar(fn){
   return (...args)=>{
-    if(!vista) return;
-    pintarChips();
-    pintarMarcadores();
+    if(!document.getElementById(`${P}mapa-panel`)) return;
     fn(...args);
   };
 }
@@ -491,7 +672,7 @@ function abrirNuevaUbicacion({ lat = null, lng = null, id = null, borrador = nul
 }
 
 // ---------------------------------------------------------------------------
-// Barra superior: buscador, filtros por tipo, recargar, + Ubicación
+// Barra superior: buscador, filtros, simulación, recargar, + Ubicación
 // ---------------------------------------------------------------------------
 function montarBarra(main){
   const input = main.querySelector(`#${P}mapa-buscar`);
@@ -555,27 +736,55 @@ function montarBarra(main){
   alClicFueraBuscador = e=>{ if(!e.target.closest(`.${P}mapa-buscador`)) cerrarLista(); };
   document.addEventListener("click", alClicFueraBuscador);
 
-  main.querySelector(`#${P}mapa-chips`).addEventListener("click", e=>{
-    const chip = e.target.closest("[data-tipo]");
-    if(!chip) return;
-    const f = estadoMapa().filtros;
-    const t = chip.dataset.tipo;
-    f.tiposOcultos = f.tiposOcultos.includes(t) ? f.tiposOcultos.filter(x=>x !== t) : [...f.tiposOcultos, t];
-    const s = estadoMapa().seleccion;
-    const u = s.ubicacionId ? estadoMapa().ubicaciones.find(x=>x.id === s.ubicacionId) : null;
-    if(u && f.tiposOcultos.includes(u.tipo)) estadoMapa().seleccion = { ubicacionId: null, equipoId: null, enlaceId: null, activoId: null };
-    refrescarSeleccion(true);
-  });
-  main.querySelector(`#${P}mapa-ver-enlaces`).addEventListener("change", e=>{
-    estadoMapa().filtros.verTodosEnlaces = e.target.checked;
-    pintarEnlaces();
+  // En pantallas angostas (celular, o el panel lateral de un navegador) los
+  // filtros arrancan plegados para que el mapa se vea sin bajar; en escritorio
+  // siempre están desplegados.
+  const detalles = main.querySelector(`#${P}mapa-filtros-det`);
+  const angosta = window.matchMedia ? window.matchMedia("(max-width: 720px)") : null;
+  if(detalles && angosta){
+    detalles.open = !angosta.matches;
+    const alCambiar = e=>{ if(!e.matches && detalles.isConnected) detalles.open = true; };
+    if(angosta.addEventListener) angosta.addEventListener("change", alCambiar);
+  }
+
+  // Toggles: todos editan estadoMapa().filtros y repintan.
+  const alternarEnLista = (lista, valor)=>lista.includes(valor) ? lista.filter(x=>x !== valor) : [...lista, valor];
+  main.querySelector(`.${P}mapa-filtros`).addEventListener("click", e=>{
+    const m = estadoMapa();
+    const f = m.filtros;
+    const t = e.target.closest("[data-tipo]");
+    const l = e.target.closest("[data-linea]");
+    const r = e.target.closest("[data-rol]");
+    const s = e.target.closest("[data-estado]");
+    if(t){
+      f.tiposOcultos = alternarEnLista(f.tiposOcultos, t.dataset.tipo);
+      const u = m.seleccion.ubicacionId ? m.ubicaciones.find(x=>x.id === m.seleccion.ubicacionId) : null;
+      if(u && f.tiposOcultos.includes(u.tipo)) m.seleccion = { ubicacionId: null, equipoId: null, activoId: null };
+    } else if(l){
+      f.lineas = { ...f.lineas, [l.dataset.linea]: !f.lineas[l.dataset.linea] };
+    } else if(r){
+      f.rolesOcultos = alternarEnLista(f.rolesOcultos, r.dataset.rol);
+    } else if(s){
+      f.estadosOcultos = alternarEnLista(f.estadosOcultos, s.dataset.estado);
+    } else if(e.target.closest(`#${P}mapa-simulacion`)){
+      return alternarModoSimulacion();
+    } else if(e.target.closest(`#${P}mapa-sim-restablecer`)){
+      return restablecerSimulacion();
+    } else return;
+    refrescar();
   });
   main.querySelector(`#${P}mapa-ver-archivadas`).addEventListener("change", e=>{
     const m = estadoMapa();
     m.filtros.verArchivadas = e.target.checked;
     const u = m.seleccion.ubicacionId ? m.ubicaciones.find(x=>x.id === m.seleccion.ubicacionId) : null;
-    if(u && u.activa === false && !m.filtros.verArchivadas) m.seleccion = { ubicacionId: null, equipoId: null, enlaceId: null, activoId: null };
-    refrescarSeleccion(true);
+    if(u && u.activa === false && !m.filtros.verArchivadas) m.seleccion = { ubicacionId: null, equipoId: null, activoId: null };
+    refrescar();
+  });
+  main.querySelector(`#${P}mapa-aviso-sim`).addEventListener("click", e=>{
+    const b = e.target.closest("[data-sim-accion]");
+    if(!b) return;
+    if(b.dataset.simAccion === "restablecer") restablecerSimulacion();
+    else alternarModoSimulacion(false);
   });
   main.querySelector(`#${P}mapa-recargar`).addEventListener("click", e=>recargar(e.currentTarget));
   const nueva = main.querySelector(`#${P}mapa-nueva-ubicacion`);
@@ -593,10 +802,7 @@ async function recargar(boton){
   try{
     await refrescarDatosMapa();
     if(!document.getElementById(`${P}mapa-panel`)) return;
-    pintarChips();
-    pintarMarcadores();
-    pintarEnlaces();
-    pintarPanel();
+    refrescar();
     if(vista && !vista.encuadrado){ encuadrarTodo(); vista.encuadrado = true; }
   }catch(err){
     if(panel) panel.innerHTML = htmlPanelError(traducirErrorMapa(err));
@@ -615,7 +821,6 @@ async function alClicPanel(e){
   const id = b.dataset.id !== undefined ? Number(b.dataset.id) : null;
   const m = estadoMapa();
   const s = m.seleccion;
-  const idx = m.cargado ? indicesMapa() : null;
   const u = s.ubicacionId ? m.ubicaciones.find(x=>x.id === s.ubicacionId) : null;
   try{
     switch(accion){
@@ -625,11 +830,12 @@ async function alClicPanel(e){
       case "seleccionar-equipo":
         if(s.equipoId === id) return seleccionarUbicacion(s.ubicacionId);
         return seleccionarEquipo(id);
-      case "ir-extremo": {
-        const d = enlacesDeEquipo(idx, s.equipoId).find(x=>x.enlace.id === id);
-        if(d) seleccionarEquipo(d.otro.id, { enlaceId: id, encuadrar: true });
-        return;
-      }
+      case "seleccionar-equipo-mapa": return seleccionarEquipo(id);
+      case "simular-caida": return alternarCaida(id);
+      case "restablecer-simulacion": return restablecerSimulacion();
+      case "alternar-expandido":
+        m.expandidos = m.expandidos.includes(id) ? m.expandidos.filter(x=>x !== id) : [...m.expandidos, id];
+        return refrescar();
       case "ver-activo": return abrirDetalle(id);
       case "copiar-coords": {
         const texto = u ? fmtCoordenadas(u.lat, u.lng) : "";
@@ -646,53 +852,61 @@ async function alClicPanel(e){
           : `¿Archivar «${u.nombre}»? Se oculta del mapa (y de las listas para asignar), pero su historial se conserva. Puedes reactivarla con «Archivadas».`, reactivar ? "Reactivar" : "Archivar");
         if(!ok) return;
         await establecerUbicacionActiva(id, reactivar);
-        if(!reactivar && !m.filtros.verArchivadas) m.seleccion = { ubicacionId: null, equipoId: null, enlaceId: null, activoId: null };
+        if(!reactivar && !m.filtros.verArchivadas) m.seleccion = { ubicacionId: null, equipoId: null, activoId: null };
         mostrarToast(reactivar ? "Ubicación reactivada." : "Ubicación archivada.", "success");
-        return refrescarSeleccion(true);
+        return refrescar();
       }
       case "eliminar-ubicacion": {
         const ok = await confirmarAccion(`¿Eliminar «${u.nombre}»? Solo se puede si nunca tuvo equipos ni activos; si ya se usó, archívala. No se puede deshacer.`, "Eliminar");
         if(!ok) return;
         await eliminarUbicacion(id);
         mostrarToast("Ubicación eliminada.", "success");
-        return refrescarSeleccion(true);
+        return refrescar();
       }
       case "nuevo-equipo": return abrirFormEquipo({ ubicacionId: id }, { alGuardar: trasGuardar(nuevo=>seleccionarEquipo(nuevo, { encuadrar: false })) });
-      case "editar-equipo": return abrirFormEquipo({ id }, { alGuardar: trasGuardar(eq=>seleccionarEquipo(eq)) });
+      case "editar-equipo": return abrirFormEquipo({ id }, { alGuardar: trasGuardar(eq=>seleccionarEquipo(eq, { encuadrar: false })) });
       case "eliminar-equipo": {
-        const e2 = idx.equipoPorId.get(id);
-        const n = enlacesDeEquipo(idx, id).length;
-        const ok = await confirmarAccion(`¿Eliminar el equipo «${e2 ? e2.nombre : ""}»?${n ? ` También se eliminan sus ${n} enlace(s).` : ""}${e2 && e2.activo_id ? " El activo vinculado se queda registrado en esta ubicación." : ""}`, "Eliminar");
+        const red = redMapa();
+        const eq = red.equipoPorId.get(id);
+        const clientes = red.clientes.get(id) || [];
+        if(clientes.length){
+          mostrarToast(`No se puede eliminar «${eq ? eq.nombre : ""}»: ${clientes.length === 1 ? `«${clientes[0].nombre}» lo tiene` : `${clientes.length} equipos lo tienen`} como servidor. Asígnales otro servidor primero.`, "error");
+          return;
+        }
+        const propios = (red.respaldosPorEquipo.get(id) || []).length;
+        const ajenos = (red.respaldadosPor.get(id) || []).length;
+        const extra = [propios ? `sus ${propios} respaldo(s)` : "", ajenos ? `${ajenos} respaldo(s) de otros equipos que apuntaban a él` : ""].filter(Boolean).join(" y ");
+        const ok = await confirmarAccion(`¿Eliminar el equipo «${eq ? eq.nombre : ""}»?${extra ? ` También se quitan ${extra}.` : ""}${eq && eq.activo_id ? " El activo vinculado se queda registrado en esta ubicación." : ""}`, "Eliminar");
         if(!ok) return;
         await eliminarEquipo(id);
         mostrarToast("Equipo eliminado.", "success");
-        return refrescarSeleccion(true);
+        return refrescar();
       }
-      case "nuevo-enlace": return abrirFormEnlace({ equipoOrigenId: id }, { alGuardar: trasGuardar(nuevo=>seleccionarEquipo(id, { enlaceId: nuevo })) });
-      case "editar-enlace": return abrirFormEnlace({ id, equipoOrigenId: s.equipoId }, { alGuardar: trasGuardar(()=>seleccionarEquipo(s.equipoId, { enlaceId: id, encuadrar: false })) });
-      case "eliminar-enlace": {
-        const d = enlacesDeEquipo(idx, s.equipoId).find(x=>x.enlace.id === id);
-        const ok = await confirmarAccion(`¿Eliminar el enlace con «${d ? d.otro.nombre : ""}»?`, "Eliminar");
+      case "nuevo-respaldo": return abrirFormRespaldo({ equipoId: id }, { alGuardar: trasGuardar(()=>seleccionarEquipo(id, { encuadrar: false })) });
+      case "editar-respaldo": return abrirFormRespaldo({ id }, { alGuardar: trasGuardar(()=>seleccionarEquipo(s.equipoId, { encuadrar: false })) });
+      case "eliminar-respaldo": {
+        const red = redMapa();
+        const fila = m.respaldos.find(r=>r.id === id);
+        const alt = fila ? red.equipoPorId.get(fila.servidor_alternativo_id) : null;
+        const ok = await confirmarAccion(`¿Quitar «${alt ? alt.nombre : "ese equipo"}» de los respaldos?`, "Quitar");
         if(!ok) return;
-        const equipo = s.equipoId;
-        await eliminarEnlace(id);
-        mostrarToast("Enlace eliminado.", "success");
-        pintarMarcadores();
-        return seleccionarEquipo(equipo, { encuadrar: false });
+        await eliminarRespaldo(id);
+        mostrarToast("Respaldo quitado.", "success");
+        return refrescar();
       }
       case "asignar-activos": return abrirAsignarActivos(id, { alGuardar: trasGuardar(()=>seleccionarUbicacion(id)) });
       case "mover-activo": return abrirMoverActivo(id, { alGuardar: trasGuardar(dest=>seleccionarUbicacion(dest, { centrar: true, activoId: id })) });
       case "quitar-activo": {
-        const a = idx.activoPorId.get(id);
+        const a = indicesMapa().activoPorId.get(id);
         const ok = await confirmarAccion(`¿Quitar ${a ? fmtTag(a) : "el activo"} de «${u ? u.nombre : ""}»? Quedará sin ubicación (su tramo se cierra con la fecha de hoy y queda en el historial).`, "Quitar");
         if(!ok) return;
         await quitarActivoDeUbicacion(id);
         mostrarToast("Ubicación quitada.", "success");
-        return refrescarSeleccion(true);
+        return refrescar();
       }
     }
   }catch(err){
     mostrarToast(err.message || String(err), "error");
-    if(vista) refrescarSeleccion(true);
+    if(document.getElementById(`${P}mapa-panel`)) refrescar();
   }
 }
