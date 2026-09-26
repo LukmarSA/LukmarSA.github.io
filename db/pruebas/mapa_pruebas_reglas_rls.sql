@@ -1,5 +1,5 @@
 -- =====================================================================
--- Pruebas de las reglas del mapa (migraciones 002, 003 y 004) contra la base
+-- Pruebas de las reglas del mapa (migraciones 002 a 004, 006 y 007) contra la base
 -- REAL, sin dejar rastro. Sirven antes y después de correr la 005.
 -- =====================================================================
 -- Todo corre dentro de un único bloque DO que termina con RAISE EXCEPTION:
@@ -42,6 +42,17 @@ DECLARE
   v_resp   integer;
   v_txt    text;
   v_hc     integer;
+  v_plano  bigint;
+  v_esq    jsonb;
+  v_ur     bigint;
+  e_r1     bigint;
+  e_r2     bigint;
+  e_r3     bigint;
+  v_red1   bigint;
+  v_red2   bigint;
+  v_atajo  bigint;
+  v_atajo2 bigint;
+  v_arr    bigint[];
 BEGIN
   IF to_regprocedure('public.equipo_radio_de_activo(integer)') IS NULL THEN
     RAISE EXCEPTION 'Falta la migración 004 (public.equipo_radio_de_activo no existe): aplícala antes de correr estas pruebas.';
@@ -560,6 +571,232 @@ BEGIN
   SELECT count(*) INTO v_n FROM pg_proc
    WHERE pronamespace = 'public'::regnamespace AND proname IN ('f_cambiar_custodio', 'f_liberar_custodio') AND prosrc ILIKE '%current_date%';
   r := r || jsonb_build_object('t', 'K4 f_cambiar_custodio y f_liberar_custodio ya no usan current_date (UTC)', 'ok', v_n = 0, 'det', format('funciones con current_date: %s', v_n));
+
+  -- ================= P. Migración 006: capa Plano (planos_mapa) =================
+  PERFORM set_config('role', 'postgres', true);
+  IF to_regclass('public.planos_mapa') IS NULL THEN
+    r := r || jsonb_build_object('t', 'P0 migración 006 aplicada (planos_mapa existe)', 'ok', false, 'det', 'falta correr db/migraciones/006_plano_mapa.sql');
+  ELSE
+    SELECT count(*), max(id) INTO v_n, v_plano FROM public.planos_mapa WHERE activo;
+    SELECT esquinas INTO v_esq FROM public.planos_mapa WHERE id = v_plano;
+    r := r || jsonb_build_object('t', 'P0 migración 006: hay exactamente un plano activo', 'ok', v_n = 1 AND v_esq IS NOT NULL, 'det', format('activos: %s', v_n));
+
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('role', 'authenticated', true);
+    BEGIN
+      UPDATE public.planos_mapa SET esquinas = '{"no": [-2.3112, -79.7381], "ne": [-2.3111, -79.7003], "so": [-2.359, -79.7379]}' WHERE id = v_plano;
+      GET DIAGNOSTICS v_n = ROW_COUNT;
+      SELECT count(*) INTO v_m FROM public.planos_mapa WHERE id = v_plano AND actualizado_por = v_admin AND (esquinas -> 'no' ->> 0)::float8 = -2.3112;
+      r := r || jsonb_build_object('t', 'P1 el administrador guarda un ajuste del plano (y queda quién lo hizo)', 'ok', v_n = 1 AND v_m = 1, 'det', format('filas %s, con autor %s', v_n, v_m));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'P1 el administrador guarda un ajuste del plano (y queda quién lo hizo)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.planos_mapa SET esquinas = '{"no": [-2.3, -79.7], "ne": [-2.3, -79.6]}' WHERE id = v_plano;
+      r := r || jsonb_build_object('t', 'P2 esquinas incompletas rechazadas', 'ok', false, 'det', 'se actualizó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'P2 esquinas incompletas rechazadas', 'ok', SQLSTATE = '23514', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.planos_mapa SET esquinas = '{"no": [-2.3, -79.7], "ne": [-2.3, -79.6], "so": [-2.3, -79.5]}' WHERE id = v_plano;
+      r := r || jsonb_build_object('t', 'P3 esquinas alineadas (plano sin alto) rechazadas', 'ok', false, 'det', 'se actualizó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'P3 esquinas alineadas (plano sin alto) rechazadas', 'ok', SQLSTATE = '23514', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.planos_mapa SET esquinas = '{"no": [-200, -79.7], "ne": [-2.3, -79.6], "so": [-2.4, -79.7]}' WHERE id = v_plano;
+      r := r || jsonb_build_object('t', 'P4 latitud fuera de rango rechazada', 'ok', false, 'det', 'se actualizó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'P4 latitud fuera de rango rechazada', 'ok', SQLSTATE = '23514', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.planos_mapa SET esquinas = '{"no": ["-2.3", -79.7], "ne": [-2.3, -79.6], "so": [-2.4, -79.7]}' WHERE id = v_plano;
+      r := r || jsonb_build_object('t', 'P5 coordenada que no es número rechazada (sin error de conversión)', 'ok', false, 'det', 'se actualizó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'P5 coordenada que no es número rechazada (sin error de conversión)', 'ok', SQLSTATE = '23514', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.planos_mapa (nombre, imagen, ancho_px, alto_px, esquinas, esquinas_originales) VALUES ('[TX] Otro plano', 'assets/img/mapa/otro.webp', 10, 10, v_esq, v_esq);
+      r := r || jsonb_build_object('t', 'P6 un segundo plano activo rechazado', 'ok', false, 'det', 'se insertó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'P6 un segundo plano activo rechazado', 'ok', SQLSTATE = '23505', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.planos_mapa (nombre, imagen, ancho_px, alto_px, esquinas, esquinas_originales, activo) VALUES ('[TX] Externo', 'https://otro.sitio/plano.png', 10, 10, v_esq, v_esq, false);
+      r := r || jsonb_build_object('t', 'P7 la imagen tiene que ser un archivo de la app (no una URL externa)', 'ok', false, 'det', 'se insertó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'P7 la imagen tiene que ser un archivo de la app (no una URL externa)', 'ok', SQLSTATE = '23514', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.planos_mapa (nombre, imagen, ancho_px, alto_px, esquinas, esquinas_originales, activo) VALUES ('[TX] Inactivo', 'assets/img/mapa/viejo.webp', 10, 10, v_esq, v_esq, false);
+      r := r || jsonb_build_object('t', 'P7b un plano inactivo adicional sí se puede guardar', 'ok', true, 'det', '');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'P7b un plano inactivo adicional sí se puede guardar', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+
+    -- v_visit es registrador desde la sección K; su rol no tiene ver_mapa.
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_visit, 'role', 'authenticated')::text, true);
+    SELECT count(*) INTO v_n FROM public.planos_mapa;
+    UPDATE public.planos_mapa SET esquinas = v_esq WHERE id = v_plano;
+    GET DIAGNOSTICS v_m = ROW_COUNT;
+    r := r || jsonb_build_object('t', 'P8 sin ver_mapa no se lee el plano ni se ajusta', 'ok', v_n = 0 AND v_m = 0, 'det', format('filas visibles %s, actualizadas %s', v_n, v_m));
+    PERFORM set_config('role', 'postgres', true);
+    UPDATE public.permisos SET permitido = true WHERE rol = 'registrador' AND accion = 'ver_mapa';
+    PERFORM set_config('role', 'authenticated', true);
+    SELECT count(*) INTO v_n FROM public.planos_mapa WHERE activo;
+    UPDATE public.planos_mapa SET esquinas = v_esq WHERE id = v_plano;
+    GET DIAGNOSTICS v_m = ROW_COUNT;
+    r := r || jsonb_build_object('t', 'P9 con ver_mapa se lee el plano, pero solo el administrador lo ajusta (0 filas)', 'ok', v_n = 1 AND v_m = 0, 'det', format('visibles %s, actualizadas %s', v_n, v_m));
+    BEGIN
+      INSERT INTO public.planos_mapa (nombre, imagen, ancho_px, alto_px, esquinas, esquinas_originales, activo) VALUES ('[TX] No admin', 'assets/img/mapa/x.webp', 10, 10, v_esq, v_esq, false);
+      r := r || jsonb_build_object('t', 'P10 alguien que no es administrador no puede crear planos (RLS)', 'ok', false, 'det', 'se insertó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'P10 alguien que no es administrador no puede crear planos (RLS)', 'ok', SQLSTATE = '42501', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+
+    PERFORM set_config('request.jwt.claims', json_build_object('role', 'anon')::text, true);
+    PERFORM set_config('role', 'anon', true);
+    SELECT count(*) INTO v_n FROM public.planos_mapa;
+    r := r || jsonb_build_object('t', 'P11 anon (sin sesión) no ve el plano', 'ok', v_n = 0, 'det', format('filas %s', v_n));
+
+    PERFORM set_config('role', 'postgres', true);
+    SELECT count(*) INTO v_n FROM public.auditoria WHERE accion = 'UPDATE_planos_mapa' AND fecha >= now() - interval '1 minute';
+    r := r || jsonb_build_object('t', 'P12 el ajuste del plano queda en auditoría', 'ok', v_n >= 1, 'det', format('filas de auditoría: %s', v_n));
+    SELECT string_agg(rol || ':' || priv, ', ') INTO v_txt
+      FROM (VALUES ('anon'), ('authenticated')) AS roles(rol)
+      CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS privs(priv)
+     WHERE NOT has_table_privilege(rol, 'public.planos_mapa', priv);
+    r := r || jsonb_build_object('t', 'P13 planos_mapa tiene GRANT SELECT/INSERT/UPDATE/DELETE para anon y authenticated', 'ok', v_txt IS NULL, 'det', coalesce('faltan: ' || v_txt, 'completo'));
+  END IF;
+
+  -- ================= R. Migración 007: tipos de equipo, redes y atajos =================
+  PERFORM set_config('role', 'postgres', true);
+  IF to_regclass('public.tipos_equipo_red') IS NULL THEN
+    r := r || jsonb_build_object('t', 'R0 migración 007 aplicada (tipos_equipo_red existe)', 'ok', false, 'det', 'falta correr db/migraciones/007_red_tipos_atajos.sql');
+  ELSE
+    SELECT count(*), count(*) FILTER (WHERE genero = 'f') INTO v_n, v_m FROM public.tipos_equipo_red WHERE valor IN ('router','switch','ptp','ap','estacion','camara','nvr','otro');
+    r := r || jsonb_build_object('t', 'R0 migración 007: los 8 tipos de equipo de la semilla (Estación y Cámara en femenino)', 'ok', v_n = 8 AND v_m = 2, 'det', format('tipos %s, femeninos %s', v_n, v_m));
+
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('role', 'authenticated', true);
+    BEGIN
+      INSERT INTO public.redes (nombre, color, orden) VALUES ('[TX] Red Administrativa', '#004DAB', 10) RETURNING id INTO v_red1;
+      INSERT INTO public.redes (nombre, color, orden) VALUES ('[TX] Red Cámaras', '#EC741D', 20) RETURNING id INTO v_red2;
+      r := r || jsonb_build_object('t', 'R1 el administrador crea redes', 'ok', v_red1 IS NOT NULL AND v_red2 IS NOT NULL, 'det', format('ids %s,%s', v_red1, v_red2));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R1 el administrador crea redes', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.redes (nombre) VALUES ('  [tx] red administrativa ');
+      r := r || jsonb_build_object('t', 'R2 red con nombre repetido (mayúsculas/espacios) rechazada', 'ok', false, 'det', 'se insertó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R2 red con nombre repetido (mayúsculas/espacios) rechazada', 'ok', SQLSTATE = '23505', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.redes (nombre, color) VALUES ('[TX] Color malo', 'rojo');
+      r := r || jsonb_build_object('t', 'R3 color que no es #RRGGBB rechazado', 'ok', false, 'det', 'se insertó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R3 color que no es #RRGGBB rechazado', 'ok', SQLSTATE = '23514', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.ubicaciones (nombre, tipo, lat, lng) VALUES ('[TX] Torre R', 'torre', -2.2, -79.9) RETURNING id INTO v_ur;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, red_id) VALUES (v_ur, '[TX] Router en Torre R', 'router', v_red1) RETURNING id INTO e_r1;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, red_id, servidor_id) VALUES (v_ur, '[TX] Switch en Torre R conectado a Router', 'switch', v_red2, e_r1) RETURNING id INTO e_r2;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, red_id, servidor_id, referencia) VALUES (v_ur, '[TX] Cámara (Norte) en Torre R conectada a Switch', 'camara', v_red2, e_r2, 'Norte') RETURNING id INTO e_r3;
+      SELECT count(*) INTO v_n FROM public.equipos_radioenlace WHERE id IN (e_r1, e_r2, e_r3) AND tipo_equipo IS NOT NULL AND red_id IS NOT NULL;
+      r := r || jsonb_build_object('t', 'R4 equipos con tipo, red y referencia (router ← switch ← cámara por cable)', 'ok', v_n = 3, 'det', format('filas %s', v_n));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R4 equipos con tipo, red y referencia (router ← switch ← cámara por cable)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.equipos_radioenlace SET tipo_equipo = 'tostadora' WHERE id = e_r1;
+      r := r || jsonb_build_object('t', 'R5 tipo de equipo inexistente rechazado (FK)', 'ok', false, 'det', 'se actualizó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R5 tipo de equipo inexistente rechazado (FK)', 'ok', SQLSTATE = '23503', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.equipos_radioenlace SET referencia = '   ' WHERE id = e_r1;
+      r := r || jsonb_build_object('t', 'R6 referencia vacía rechazada (se guarda NULL, no espacios)', 'ok', false, 'det', 'se actualizó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R6 referencia vacía rechazada (se guarda NULL, no espacios)', 'ok', SQLSTATE = '23514', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.atajos_simulacion (nombre, equipos) VALUES ('[TX] Red Cámaras', ARRAY[e_r3, e_r2, e_r3]) RETURNING id, equipos INTO v_atajo, v_arr;
+      r := r || jsonb_build_object('t', 'R7 atajo con dos equipos (sin repetidos, ordenados)', 'ok', v_arr = ARRAY[e_r2, e_r3], 'det', format('equipos %s', v_arr));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R7 atajo con dos equipos (sin repetidos, ordenados)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.atajos_simulacion (nombre, equipos) VALUES ('[TX] Fantasma', ARRAY[e_r1, -1]);
+      r := r || jsonb_build_object('t', 'R8 atajo con un equipo que no existe rechazado', 'ok', false, 'det', 'se insertó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R8 atajo con un equipo que no existe rechazado', 'ok', SQLSTATE = '23503', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.atajos_simulacion (nombre, equipos) VALUES ('[TX] Vacío', '{}'::bigint[]);
+      r := r || jsonb_build_object('t', 'R9 atajo sin equipos rechazado', 'ok', false, 'det', 'se insertó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R9 atajo sin equipos rechazado', 'ok', SQLSTATE = '23514', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.atajos_simulacion (nombre, equipos) VALUES ('[tx] red cámaras', ARRAY[e_r1]);
+      r := r || jsonb_build_object('t', 'R10 atajo con nombre repetido rechazado', 'ok', false, 'det', 'se insertó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R10 atajo con nombre repetido rechazado', 'ok', SQLSTATE = '23505', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.atajos_simulacion (nombre, equipos) VALUES ('[TX] Solo la cámara', ARRAY[e_r3]) RETURNING id INTO v_atajo2;
+      DELETE FROM public.equipos_radioenlace WHERE id = e_r3;
+      SELECT equipos INTO v_arr FROM public.atajos_simulacion WHERE id = v_atajo;
+      SELECT count(*) INTO v_n FROM public.atajos_simulacion WHERE id = v_atajo2;
+      r := r || jsonb_build_object('t', 'R11 borrar un equipo lo saca de los atajos (y borra el atajo que queda vacío)', 'ok', v_arr = ARRAY[e_r2] AND v_n = 0, 'det', format('equipos del atajo %s, atajo vacío quedó: %s', v_arr, v_n));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R11 borrar un equipo lo saca de los atajos (y borra el atajo que queda vacío)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      DELETE FROM public.redes WHERE id = v_red2;
+      SELECT count(*) INTO v_n FROM public.equipos_radioenlace WHERE id = e_r2 AND red_id IS NULL;
+      r := r || jsonb_build_object('t', 'R12 borrar una red deja a sus equipos sin red (no se borran)', 'ok', v_n = 1, 'det', format('filas %s', v_n));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R12 borrar una red deja a sus equipos sin red (no se borran)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.tipos_equipo_red SET valor = 'router_core' WHERE valor = 'router';
+      SELECT count(*) INTO v_n FROM public.equipos_radioenlace WHERE id = e_r1 AND tipo_equipo = 'router_core';
+      r := r || jsonb_build_object('t', 'R13 cambiar la clave de un tipo arrastra a sus equipos (ON UPDATE CASCADE)', 'ok', v_n = 1, 'det', format('filas %s', v_n));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R13 cambiar la clave de un tipo arrastra a sus equipos (ON UPDATE CASCADE)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+
+    -- v_visit es registrador (con ver_mapa desde la sección P, pero no administrador).
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_visit, 'role', 'authenticated')::text, true);
+    SELECT count(*) INTO v_n FROM public.tipos_equipo_red;
+    SELECT count(*) INTO v_m FROM public.atajos_simulacion WHERE id = v_atajo;
+    UPDATE public.redes SET nombre = '[TX] Cambiada' WHERE id = v_red1;
+    GET DIAGNOSTICS v_resp = ROW_COUNT;
+    r := r || jsonb_build_object('t', 'R14 con ver_mapa se leen tipos y atajos, pero solo el administrador edita (0 filas)', 'ok', v_n >= 8 AND v_m = 1 AND v_resp = 0, 'det', format('tipos %s, atajo %s, redes actualizadas %s', v_n, v_m, v_resp));
+    BEGIN
+      INSERT INTO public.atajos_simulacion (nombre, equipos) VALUES ('[TX] No admin', ARRAY[e_r1]);
+      r := r || jsonb_build_object('t', 'R15 alguien que no es administrador no puede crear atajos (RLS)', 'ok', false, 'det', 'se insertó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'R15 alguien que no es administrador no puede crear atajos (RLS)', 'ok', SQLSTATE = '42501', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    PERFORM set_config('request.jwt.claims', json_build_object('role', 'anon')::text, true);
+    PERFORM set_config('role', 'anon', true);
+    SELECT (SELECT count(*) FROM public.tipos_equipo_red) + (SELECT count(*) FROM public.redes) + (SELECT count(*) FROM public.atajos_simulacion) INTO v_n;
+    r := r || jsonb_build_object('t', 'R16 anon (sin sesión) no ve tipos, redes ni atajos', 'ok', v_n = 0, 'det', format('filas %s', v_n));
+
+    PERFORM set_config('role', 'postgres', true);
+    SELECT count(*) FILTER (WHERE accion = 'INSERT_redes'), count(*) FILTER (WHERE accion IN ('INSERT_atajos_simulacion', 'UPDATE_atajos_simulacion', 'DELETE_atajos_simulacion'))
+      INTO v_n, v_m FROM public.auditoria WHERE fecha >= now() - interval '1 minute';
+    r := r || jsonb_build_object('t', 'R17 redes y atajos quedan en auditoría', 'ok', v_n >= 2 AND v_m >= 3, 'det', format('redes %s, atajos %s', v_n, v_m));
+    SELECT string_agg(tabla || '/' || rol || ':' || priv, ', ') INTO v_txt
+      FROM (VALUES ('public.tipos_equipo_red'), ('public.redes'), ('public.atajos_simulacion')) AS tablas(tabla)
+      CROSS JOIN (VALUES ('anon'), ('authenticated')) AS roles(rol)
+      CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS privs(priv)
+     WHERE NOT has_table_privilege(rol, tabla, priv);
+    r := r || jsonb_build_object('t', 'R18 tipos_equipo_red, redes y atajos_simulacion tienen GRANT completo para anon y authenticated', 'ok', v_txt IS NULL, 'det', coalesce('faltan: ' || v_txt, 'completo'));
+  END IF;
 
   -- ================= G. GRANT explícito (sin él, la API responde "permission denied") =================
   PERFORM set_config('role', 'postgres', true);

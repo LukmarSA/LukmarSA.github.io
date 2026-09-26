@@ -7,7 +7,8 @@
     "test": "node run.mjs",
     "check-syntax": "node check-syntax.mjs",
     "test:mapa": "node mapa-unit.mjs",
-    "smoke:mapa": "node mapa-smoke.mjs"
+    "smoke:mapa": "node mapa-smoke.mjs",
+    "test:activo": "node activo-unit.mjs"
   },
   "devDependencies": {
     "jsdom": "^24.0.0",

@@ -3,7 +3,10 @@
 // stubs/supabase-stub.js. Hace los clics de verdad: marcador → panel →
 // equipo → camino a la raíz, los toggles de líneas/equipos, la simulación de
 // fallas, los formularios de administrador (equipo con servidor, respaldos),
-// permisos por rol y los casos de falla (tablas faltantes, unpkg caído).
+// permisos por rol, los casos de falla (tablas faltantes, unpkg caído) y la
+// capa Plano con su herramienta de ajuste (mover, agrandar, guardar, cancelar)
+// y, del inventario, el modal «Nuevo activo» (tipo con búsqueda, campos según
+// el tipo, submodales de «+»).
 //
 // Uso (desde tests/):  npm install   (una vez; trae playwright y leaflet)
 //                      npx playwright install chromium   (si no hay navegador)
@@ -17,6 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
 import { distanciaKm, fmtDistancia } from "../assets/js/inventario-tecnologico/nucleo/geo.js";
+import { PLANO_POR_DEFECTO } from "../assets/js/inventario-tecnologico/nucleo/plano-mapa.js";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(AQUI, "..");
@@ -71,7 +75,7 @@ function teselaPng(){
 const TESELA = teselaPng();
 
 function servir(raiz){
-  const tipos = { ".html":"text/html; charset=utf-8", ".js":"text/javascript; charset=utf-8", ".css":"text/css; charset=utf-8", ".png":"image/png", ".json":"application/json" };
+  const tipos = { ".html":"text/html; charset=utf-8", ".js":"text/javascript; charset=utf-8", ".css":"text/css; charset=utf-8", ".png":"image/png", ".webp":"image/webp", ".json":"application/json" };
   return new Promise(resolve=>{
     const srv = http.createServer((req, res)=>{
       let p = decodeURIComponent(new URL(req.url, "http://x").pathname);
@@ -104,7 +108,34 @@ const UBIC = {
 const PISCINAS = Array.from({ length: 9 }, (_, i)=>({ id:10 + i, nombre:`Piscina ${i + 1}`, tipo:"otro", lat:-2.22 - 0.01 * Math.floor(i / 3), lng:-79.97 - 0.015 * (i % 3), direccion:null, notas:null, fotos:[], activa:true }));
 const eq = (id, ubicacion_id, nombre, servidor_id = null, extra = {})=>({ id, ubicacion_id, nombre, modelo:null, activo_id:null, notas:null, servidor_id, banda:null, frecuencia_mhz:null, ...extra });
 
-function fixture({ rol = "administrador", permitidas = [], fallas = {} } = {}){
+// Migración 007 (red de la finca): tipos de equipo, redes y atajos. Sin
+// red007, el stub se comporta como una base sin la 007.
+const TIPOS_EQUIPO_RED = [
+  ["router","Router","m",10], ["switch","Switch","m",20], ["ptp","Punto a Punto","m",30], ["ap","AP","m",40],
+  ["estacion","Estación","f",50], ["camara","Cámara","f",60], ["nvr","NVR","m",70], ["otro","Equipo","m",90],
+].map(([valor, etiqueta, genero, orden])=>({ valor, etiqueta, genero, orden, activo:true }));
+const TIPO_DE = { 30:"router", 31:"ptp", 10:"ptp", 11:"ap", 12:"ptp", 20:"ptp", 21:"ap", 32:"estacion" };
+function conRed007(tablas){
+  for(const e of tablas.equipos_radioenlace){
+    e.tipo_equipo = TIPO_DE[e.id] || (e.id > 100 ? "estacion" : null); // SM Bodega (40) queda sin tipo: nombre a mano
+    e.red_id = e.id > 100 || e.id === 40 ? null : 1;
+    e.referencia = null;
+  }
+  tablas.equipos_radioenlace.push(
+    eq(50, 1, "Switch CA", 10, { tipo_equipo:"switch", red_id:2, referencia:null }),
+    eq(51, 1, "Cámara Norte CA", 50, { tipo_equipo:"camara", red_id:2, referencia:"Norte" }),
+    eq(52, 1, "Cámara Sur CA", 50, { tipo_equipo:"camara", red_id:2, referencia:"Sur" }),
+  );
+  tablas.tipos_equipo_red = TIPOS_EQUIPO_RED.map(x=>({ ...x }));
+  tablas.redes = [
+    { id:1, nombre:"Red Administrativa", color:"#004DAB", orden:10, activa:true },
+    { id:2, nombre:"Red Cámaras", color:"#EC741D", orden:20, activa:true },
+  ];
+  tablas.atajos_simulacion = [{ id:1, nombre:"Cámaras Cerro Azul", equipos:[50], orden:10 }];
+  return tablas;
+}
+
+function fixture({ rol = "administrador", permitidas = [], fallas = {}, red007 = false } = {}){
   const uid = rol === "administrador" ? "u-admin" : "u-usuario";
   const permisos = [];
   for(const r of ["registrador", "visitante"]){
@@ -117,7 +148,7 @@ function fixture({ rol = "administrador", permitidas = [], fallas = {} } = {}){
     hoy: HOY,
     fallas,
     sesion: { user: { id: uid, email: `${rol}@lukmar.local` } },
-    tablas: {
+    tablas: (red007 ? conRed007 : x=>x)({
       perfiles: [{ id:"u-admin", rol:"administrador", nombre_completo:"Admin Pruebas" }, { id:"u-usuario", rol, nombre_completo:"Usuario Pruebas" }],
       permisos,
       tipos_activo: [
@@ -167,7 +198,11 @@ function fixture({ rol = "administrador", permitidas = [], fallas = {} } = {}){
         { id:1000, activo_id:2, ubicacion_id:3, desde:"2026-09-01", hasta:null, notas:"Automático: instalado como equipo de radioenlace «SM Oficina»" },
         { id:1001, activo_id:1, ubicacion_id:3, desde:"2026-09-05", hasta:null, notas:null },
       ],
-    },
+      planos_mapa: [
+        { id:1, nombre:PLANO_POR_DEFECTO.nombre, imagen:PLANO_POR_DEFECTO.imagen, ancho_px:PLANO_POR_DEFECTO.ancho_px, alto_px:PLANO_POR_DEFECTO.alto_px,
+          esquinas:PLANO_POR_DEFECTO.esquinas, esquinas_originales:PLANO_POR_DEFECTO.esquinas, activo:true, actualizado_en:"2026-09-25T12:00:00Z", actualizado_por:null },
+      ],
+    }),
   };
 }
 
@@ -176,6 +211,7 @@ async function abrirApp(browser, base, fx, { leafletFalla = false, viewport = { 
   const page = await context.newPage();
   const errores = [];
   page.on("pageerror", e=>errores.push(e.message));
+  if(process.env.DEPURAR) page.on("console", m=>{ if(/DEPURAR/.test(m.text())) console.log("   [consola]", m.text()); });
   page.on("console", m=>{ if(m.type() === "error" && !/Failed to load resource/.test(m.text())) errores.push("console: " + m.text()); });
   await page.route("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2", r=>r.fulfill({ contentType: "text/javascript", body: `window.__FIXTURE__ = ${JSON.stringify(fx)};\n${STUB}` }));
   await page.route("https://cdnjs.cloudflare.com/**", r=>r.fulfill({ contentType: "text/javascript", body: "window.JSZip = function(){};" }));
@@ -213,6 +249,15 @@ async function irAlMapa(page){
   await page.click(SEL.tab("mapa"));
   await page.waitForSelector(".leaflet-marker-icon", { timeout: 10000 });
   await page.waitForFunction(()=>!!document.querySelector("#inventario-tecnologico-mapa-panel .inventario-tecnologico-mapa-cifras, #inventario-tecnologico-mapa-panel .inventario-tecnologico-mapa-panel-titulo"));
+}
+// Espera a que el mapa termine de moverse (encuadres animados): un clic en un
+// marcador que todavía se desplaza puede caer en el fondo del mapa.
+async function mapaQuieto(page){
+  await page.waitForFunction(async ()=>{
+    const m = (await import("/assets/js/inventario-tecnologico/ui/vista-mapa.js")).mapaActual();
+    return !m || (!m._animatingZoom && !(m._panAnim && m._panAnim._inProgress));
+  }, null, { timeout: 5000 });
+  await page.waitForTimeout(120);
 }
 async function clicVacio(page){
   const caja = await page.locator("#inventario-tecnologico-mapa-canvas").boundingBox();
@@ -271,7 +316,7 @@ async function escenarioAdmin(browser, base){
   await verificar("un marcador por ubicación (13) y el resumen cuenta equipos, radioenlaces y la red", async ()=>{
     exigir(await cuenta(page, ".leaflet-marker-icon.inventario-tecnologico-mapa-icono") === 13, "marcadores: " + await cuenta(page, ".leaflet-marker-icon.inventario-tecnologico-mapa-icono"));
     const t = await texto(page, SEL.panel);
-    exigir(/13\s*ubicaciones/.test(t) && /18\s*equipos de radio/.test(t) && /13\s*radioenlaces/.test(t) && /2\s*activos ubicados/.test(t), t.replace(/\s+/g, " ").slice(0, 240));
+    exigir(/13\s*ubicaciones/.test(t) && /18\s*equipos de red/.test(t) && /13\s*radioenlaces/.test(t) && /2\s*activos ubicados/.test(t), t.replace(/\s+/g, " ").slice(0, 240));
     exigir(/1 raíz · 2 enlaces backbone · 11 enlaces P2MP · 1 respaldo registrado/.test(t), "línea de la red: " + t.replace(/\s+/g, " ").slice(0, 400));
   });
   await verificar("por defecto: 2 líneas backbone y 2 P2MP; el AP con 9 clientes queda agrupado; respaldos ocultos", async ()=>{
@@ -326,6 +371,7 @@ async function escenarioAdmin(browser, base){
     const t = await texto(page, SEL.panel);
     exigir(t.includes(esperada) && /azimut desde aquí/i.test(t) && /4 saltos/.test(t), t.replace(/\s+/g, " ").slice(0, 400));
   });
+  await mapaQuieto(page);
   await page.click(SEL.marcador("Torre Cerro Azul"));
   await verificar("clic en el marcador de su servidor pasa al AP y el camino se sigue viendo", async ()=>{
     await page.waitForSelector(`${SEL.equipo(11)}[aria-pressed="true"]`);
@@ -451,13 +497,14 @@ async function escenarioAdmin(browser, base){
   await verificar("… y uno en otra ubicación muestra distancia y azimut", async ()=>{
     exigir(/Radioenlace con «AP Santa Ana».*km · azimut desde aquí/.test(await texto(page, "#inventario-tecnologico-equipo-servidor-calculo")), await texto(page, "#inventario-tecnologico-equipo-servidor-calculo"));
   });
-  await page.fill("#inventario-tecnologico-equipo-banda", "5 GHz");
-  await page.fill("#inventario-tecnologico-equipo-frecuencia", "5220");
+  await verificar("el formulario de equipo ya no pide banda ni frecuencia", async ()=>{
+    exigir(await cuenta(page, "#inventario-tecnologico-equipo-banda, #inventario-tecnologico-equipo-frecuencia") === 0, "siguen los campos");
+  });
   await page.click("#inventario-tecnologico-equipo-guardar");
-  await verificar("crear equipo con servidor: se guarda servidor_id, banda y frecuencia, y aparece su línea", async ()=>{
+  await verificar("crear equipo con servidor: se guarda servidor_id (sin banda ni frecuencia) y aparece su línea", async ()=>{
     await esperarSinModal(page);
     const e = (await db(page, "equipos_radioenlace")).find(x=>x.nombre === "Cámara Bodega");
-    exigir(e && e.servidor_id === 21 && e.banda === "5 GHz" && e.frecuencia_mhz === 5220, JSON.stringify(e));
+    exigir(e && e.servidor_id === 21 && (e.banda ?? null) === null && (e.frecuencia_mhz ?? null) === null, JSON.stringify(e));
     await page.waitForSelector(`${SEL.lineas}[data-cliente-id="${e.id}"]`);
   });
   const idCamara = (await db(page, "equipos_radioenlace")).find(x=>x.nombre === "Cámara Bodega").id;
@@ -471,7 +518,14 @@ async function escenarioAdmin(browser, base){
     exigir(valores.includes("31") && valores.includes("30") && valores.includes(""), "faltan 30/31/raíz");
     exigir((await page.inputValue("#inventario-tecnologico-equipo-servidor")) === "31", "no quedó elegido su servidor actual");
   });
-  await page.click("#inventario-tecnologico-modal-host .inventario-tecnologico-modal-footer .inventario-tecnologico-modal-close");
+  await page.click("#inventario-tecnologico-equipo-guardar");
+  await verificar("editar y guardar un equipo no borra la banda ni la frecuencia que ya tenía", async ()=>{
+    await esperarSinModal(page);
+    const parche = await page.evaluate(()=>window.__ESCRITURAS__.filter(e=>e.tabla === "equipos_radioenlace" && e.op === "update").pop()?.parche);
+    exigir(parche && !("banda" in parche) && !("frecuencia_mhz" in parche), JSON.stringify(parche));
+    const e = (await db(page, "equipos_radioenlace")).find(x=>x.id === 10);
+    exigir(e.banda === "5 GHz" && e.frecuencia_mhz === 5745, JSON.stringify(e));
+  });
 
   await seleccionarEquipoDesdeSuUbicacion(page, 3, 32);
   await page.click(`${SEL.panel} [data-accion="nuevo-respaldo"][data-id="32"]`);
@@ -696,15 +750,666 @@ async function escenarioCelular(browser, base){
   await context.close();
 }
 
+// ------------------------------------------------------------------ capa Plano (006)
+async function elegirCapa(page, nombre){
+  await page.evaluate(n=>{
+    const l = [...document.querySelectorAll(".leaflet-control-layers-base label")].find(x=>x.textContent.trim() === n);
+    l.querySelector("input").click();
+  }, nombre);
+}
+const IMG_PLANO = "img.inventario-tecnologico-mapa-plano";
+const matrizPlano = page=>page.evaluate(sel=>{ const m = new DOMMatrix(getComputedStyle(document.querySelector(sel)).transform); return [m.a, m.b, m.c, m.d, m.e, m.f]; }, IMG_PLANO);
+const escriturasPlano = page=>page.evaluate(()=>window.__ESCRITURAS__.filter(e=>e.tabla === "planos_mapa"));
+
+async function escenarioPlano(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixture());
+  await irAlMapa(page);
+  await verificar("capas base: Mapa, Satélite y Plano", async ()=>{
+    const t = (await page.locator(".leaflet-control-layers-base label").allInnerTexts()).map(x=>x.trim());
+    exigir(t.join("|") === "Mapa|Satélite|Plano", t.join("|"));
+    exigir(await page.locator(".inventario-tecnologico-mapa-plano-control").count() === 0, "el control del plano aparece sin elegir la capa");
+  });
+  await elegirCapa(page, "Plano");
+  await verificar("Plano: la imagen carga en su pane, sobre el satélite, con su control y su leyenda", async ()=>{
+    await page.waitForFunction(sel=>{ const i = document.querySelector(`.leaflet-inventarioPlano-pane ${sel}`); return !!(i && i.complete && i.naturalWidth === 3198); }, IMG_PLANO, { timeout: 8000 });
+    exigir(await page.locator(".leaflet-tile-pane img[src*='arcgisonline']").count() > 0, "sin teselas del satélite debajo");
+    exigir(await page.locator(".inventario-tecnologico-mapa-plano-control").count() === 1, "sin control del plano");
+    exigir(await page.locator("#inventario-tecnologico-mapa-plano-ajustar").count() === 1, "el admin no ve «Ajustar plano»");
+    exigir(await page.evaluate(()=>!document.getElementById("inventario-tecnologico-mapa-leyenda-plano").hidden), "no se ve la leyenda del plano");
+    exigir(/Consultora ZH/.test(await texto(page, ".leaflet-control-attribution")), "falta el crédito del plano");
+  });
+  await page.click('[data-plano="encuadrar"]');
+  await page.waitForTimeout(800);
+  await verificar("Plano: las tres esquinas quedan donde dicen sus coordenadas y «Ver plano» lo encuadra", async ()=>{
+    const r = await page.evaluate(async sel=>{
+      const m = (await import("/assets/js/inventario-tecnologico/ui/vista-mapa.js")).mapaActual();
+      const { PLANO_POR_DEFECTO: PD } = await import("/assets/js/inventario-tecnologico/nucleo/plano-mapa.js");
+      const img = document.querySelector(sel);
+      const mat = new DOMMatrix(getComputedStyle(img).transform);
+      const origen = m.getPixelOrigin();
+      const esperado = ["no", "ne", "so"].map(k=>m.project(PD.esquinas[k])._subtract(origen));
+      const real = [[0, 0], [PD.ancho_px, 0], [0, PD.alto_px]].map(([x, y])=>mat.transformPoint(new DOMPoint(x, y)));
+      const caja = img.getBoundingClientRect(), lienzo = document.getElementById("inventario-tecnologico-mapa-canvas").getBoundingClientRect();
+      const caja4 = ["no", "ne", "so", "se"].map(k=>m.latLngToContainerPoint(k === "se" ? [PD.esquinas.ne[0] + PD.esquinas.so[0] - PD.esquinas.no[0], PD.esquinas.ne[1] + PD.esquinas.so[1] - PD.esquinas.no[1]] : PD.esquinas[k]));
+      const t = m.getSize();
+      return { dif: Math.max(...esperado.map((p, i)=>Math.hypot(p.x - real[i].x, p.y - real[i].y))), dentro: caja4.every(p=>p.x >= -1 && p.y >= -1 && p.x <= t.x + 1 && p.y <= t.y + 1), detalle: JSON.stringify({ caja4: caja4.map(p=>[Math.round(p.x), Math.round(p.y)]), t, zoom: m.getZoom() }) };
+    }, IMG_PLANO);
+    exigir(r.dif < 0.05, `las esquinas quedaron a ${r.dif.toFixed(3)} px de su lugar`);
+    exigir(r.dentro, "«Ver plano» no dejó el plano entero a la vista: " + r.detalle);
+  });
+  await captura(page, "20-plano.png");
+  await verificar("opacidad del plano: cambia la imagen y el navegador la recuerda", async ()=>{
+    await page.locator("#inventario-tecnologico-mapa-plano-opacidad").fill("50");
+    exigir(await page.evaluate(sel=>document.querySelector(sel).style.opacity, IMG_PLANO) === "0.5", "no cambió la opacidad");
+    exigir(await page.evaluate(()=>localStorage.getItem("inventario-tecnologico-mapa-plano-opacidad")) === "0.5", "no se recordó");
+  });
+
+  await page.click("#inventario-tecnologico-mapa-plano-ajustar");
+  await verificar("Ajustar plano: barra, cuatro esquinas, plano semitransparente y el control escondido", async ()=>{
+    await page.waitForSelector(".inventario-tecnologico-mapa-aviso-plano");
+    await esperarCuenta(page, ".inventario-tecnologico-mapa-plano-esquina", 4);
+    exigir(await page.evaluate(sel=>document.querySelector(sel).style.opacity, IMG_PLANO) === "0.6", "opacidad de ajuste");
+    exigir(await page.locator(".inventario-tecnologico-mapa-plano-control").isHidden(), "el control del plano sigue visible");
+  });
+  const lienzo = await page.locator("#inventario-tecnologico-mapa-canvas").boundingBox();
+  await verificar("Ajustar plano: arrastrar el plano lo mueve lo mismo que el puntero (sin mover el mapa)", async ()=>{
+    const m0 = await matrizPlano(page);
+    const centro0 = await page.evaluate(async ()=>(await import("/assets/js/inventario-tecnologico/ui/vista-mapa.js")).mapaActual().getCenter());
+    const x = lienzo.x + lienzo.width / 2, y = lienzo.y + lienzo.height / 2 + 60;
+    await page.mouse.move(x, y); await page.mouse.down();
+    await page.mouse.move(x + 30, y + 15, { steps: 5 }); await page.mouse.move(x + 60, y + 30, { steps: 5 });
+    await page.mouse.up();
+    const m1 = await matrizPlano(page);
+    const centro1 = await page.evaluate(async ()=>(await import("/assets/js/inventario-tecnologico/ui/vista-mapa.js")).mapaActual().getCenter());
+    exigir(Math.abs(m1[4] - m0[4] - 60) < 1.5 && Math.abs(m1[5] - m0[5] - 30) < 1.5, `se movió ${(m1[4] - m0[4]).toFixed(1)}, ${(m1[5] - m0[5]).toFixed(1)} px`);
+    exigir(Math.abs(m1[0] - m0[0]) < 1e-9, "cambió el tamaño");
+    exigir(centro0.lat === centro1.lat && centro0.lng === centro1.lng, "el mapa se desplazó");
+  });
+  // Tras moverlo, la esquina de abajo a la derecha queda fuera del lienzo: se aleja un nivel de zoom.
+  await page.evaluate(async ()=>{ const m = (await import("/assets/js/inventario-tecnologico/ui/vista-mapa.js")).mapaActual(); m.setZoom(m.getZoom() - 1, { animate: false }); });
+  await page.waitForTimeout(300);
+  await verificar("Ajustar plano: arrastrar una esquina lo achica sin deformarlo y deja fija la opuesta", async ()=>{
+    const m0 = await matrizPlano(page);
+    const se = await page.locator(".inventario-tecnologico-mapa-plano-esquina-se").boundingBox();
+    const x = se.x + se.width / 2, y = se.y + se.height / 2;
+    await page.mouse.move(x, y); await page.mouse.down();
+    await page.mouse.move(x - 20, y - 25, { steps: 4 }); await page.mouse.move(x - 40, y - 50, { steps: 4 });
+    await page.mouse.up();
+    const m1 = await matrizPlano(page);
+    exigir(Math.hypot(m1[4] - m0[4], m1[5] - m0[5]) < 1, "se movió la esquina opuesta (arriba-izquierda)");
+    const fx = Math.hypot(m1[0], m1[1]) / Math.hypot(m0[0], m0[1]), fy = Math.hypot(m1[2], m1[3]) / Math.hypot(m0[2], m0[3]);
+    exigir(fx < 0.99 && Math.abs(fx - fy) < 1e-3, `factores ${fx.toFixed(4)} y ${fy.toFixed(4)}`);
+  });
+  await verificar("Ajustar plano: la barra dice cuánto cambió", async ()=>{
+    exigir(/se movió hasta .* m · -[\d,]+ % de tamaño/.test(await texto(page, '[data-ajuste="info"]')), await texto(page, '[data-ajuste="info"]'));
+  });
+  await captura(page, "21-plano-ajustando.png");
+  await verificar("Guardar: escribe las esquinas nuevas en planos_mapa, avisa y sale del ajuste", async ()=>{
+    await page.click('[data-ajuste="guardar"]');
+    await toast(page, /Ajuste del plano guardado/);
+    const esc = await escriturasPlano(page);
+    exigir(esc.length === 1 && esc[0].op === "update" && esc[0].parche.esquinas, JSON.stringify(esc));
+    const fila = (await db(page, "planos_mapa"))[0];
+    exigir(JSON.stringify(fila.esquinas) !== JSON.stringify(fila.esquinas_originales), "las esquinas no cambiaron");
+    await esperarCuenta(page, ".inventario-tecnologico-mapa-plano-esquina", 0);
+    exigir(await page.locator(".inventario-tecnologico-mapa-aviso-plano").count() === 0, "la barra de ajuste sigue");
+    exigir(await page.evaluate(sel=>document.querySelector(sel).style.opacity, IMG_PLANO) === "0.5", "no volvió la opacidad elegida");
+    exigir(!(await page.locator(".inventario-tecnologico-mapa-plano-control").isHidden()), "el control no volvió");
+  });
+  const guardada = await matrizPlano(page);
+  await page.click("#inventario-tecnologico-mapa-plano-ajustar");
+  await page.waitForSelector(".inventario-tecnologico-mapa-aviso-plano");
+  await verificar("Ajustar plano: Shift+flecha mueve 10 m; Esc cancela y no escribe nada", async ()=>{
+    for(let i = 0; i < 5; i++) await page.keyboard.press("Shift+ArrowRight");
+    const m1 = await matrizPlano(page);
+    const mPorPx = await page.evaluate(async ()=>{ const m = (await import("/assets/js/inventario-tecnologico/ui/vista-mapa.js")).mapaActual(); return 40075016.686 * Math.cos(m.getCenter().lat * Math.PI / 180) / (256 * Math.pow(2, m.getZoom())); });
+    exigir(Math.abs((m1[4] - guardada[4]) * mPorPx - 50) < 3, `se movió ${((m1[4] - guardada[4]) * mPorPx).toFixed(1)} m`);
+    await page.keyboard.press("Escape");
+    await esperarCuenta(page, ".inventario-tecnologico-mapa-plano-esquina", 0);
+    const m2 = await matrizPlano(page);
+    exigir(Math.abs(m2[4] - guardada[4]) < 0.5 && Math.abs(m2[5] - guardada[5]) < 0.5, "Esc no dejó el plano como estaba guardado");
+    exigir((await escriturasPlano(page)).length === 1, "el Esc escribió en la base");
+  });
+  await page.click("#inventario-tecnologico-mapa-plano-ajustar");
+  await page.waitForSelector(".inventario-tecnologico-mapa-aviso-plano");
+  await verificar("Ajustar plano: «Calce original» vuelve a las esquinas con que se publicó; Cancelar no lo guarda", async ()=>{
+    await page.click('[data-ajuste="original"]');
+    const r = await page.evaluate(async sel=>{
+      const m = (await import("/assets/js/inventario-tecnologico/ui/vista-mapa.js")).mapaActual();
+      const { PLANO_POR_DEFECTO: PD } = await import("/assets/js/inventario-tecnologico/nucleo/plano-mapa.js");
+      const mat = new DOMMatrix(getComputedStyle(document.querySelector(sel)).transform);
+      const p = m.project(PD.esquinas.no)._subtract(m.getPixelOrigin());
+      return Math.hypot(mat.e - p.x, mat.f - p.y);
+    }, IMG_PLANO);
+    exigir(r < 0.05, `quedó a ${r.toFixed(3)} px del calce original`);
+    await page.click('[data-ajuste="cancelar"]');
+    await esperarCuenta(page, ".inventario-tecnologico-mapa-plano-esquina", 0);
+    const m2 = await matrizPlano(page);
+    exigir(Math.abs(m2[4] - guardada[4]) < 0.5, "Cancelar no volvió a lo guardado");
+    exigir((await escriturasPlano(page)).length === 1, "Cancelar escribió en la base");
+  });
+  await verificar("mientras se ajusta, los clics en el mapa no abren nada (y al salir vuelven a funcionar)", async ()=>{
+    await page.click("#inventario-tecnologico-mapa-plano-ajustar");
+    await page.waitForSelector(".inventario-tecnologico-mapa-aviso-plano");
+    await page.mouse.click(lienzo.x + lienzo.width / 2, lienzo.y + lienzo.height / 2 + 60, { button: "right" });
+    await page.waitForTimeout(300);
+    exigir(await page.locator("#inventario-tecnologico-modal-host .inventario-tecnologico-modal").count() === 0, "el clic derecho abrió «Nueva ubicación» durante el ajuste");
+    await page.keyboard.press("Escape");
+    await esperarCuenta(page, ".inventario-tecnologico-mapa-plano-esquina", 0);
+  });
+  await verificar("al volver a abrir el mapa sigue en la capa Plano (el navegador la recuerda)", async ()=>{
+    await page.reload();
+    await page.waitForSelector(".inventario-tecnologico-topbar");
+    await irAlMapa(page);
+    await page.waitForSelector(IMG_PLANO);
+    exigir(await page.locator(".inventario-tecnologico-mapa-plano-control").count() === 1, "no está el control del plano");
+    exigir(await page.evaluate(()=>[...document.querySelectorAll(".leaflet-control-layers-base input")].findIndex(i=>i.checked)) === 2, "la capa elegida no es Plano");
+  });
+  await elegirCapa(page, "Mapa");
+  await verificar("al volver a «Mapa» se quitan el plano, su control y su leyenda", async ()=>{
+    await esperarCuenta(page, IMG_PLANO, 0);
+    exigir(await page.locator(".inventario-tecnologico-mapa-plano-control").count() === 0, "quedó el control");
+    exigir(await page.evaluate(()=>document.getElementById("inventario-tecnologico-mapa-leyenda-plano").hidden), "quedó la leyenda del plano");
+  });
+  await verificar("sin errores de JavaScript (capa Plano)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+
+  {
+    const { context, page, errores } = await abrirApp(browser, base, fixture({ rol: "registrador", permitidas: ["ver_mapa"] }));
+    await irAlMapa(page);
+    await elegirCapa(page, "Plano");
+    await verificar("con «ver_mapa» sin ser admin: ve el plano y su opacidad, pero no «Ajustar plano»", async ()=>{
+      await page.waitForSelector(IMG_PLANO);
+      exigir(await page.locator(".inventario-tecnologico-mapa-plano-control").count() === 1, "sin control");
+      exigir(await page.locator("#inventario-tecnologico-mapa-plano-ajustar").count() === 0, "ve «Ajustar plano»");
+    });
+    await verificar("sin errores de JavaScript (plano sin ser admin)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    const fx = fixture({ fallas: { planos_mapa: { code: "PGRST205", message: "Could not find the table 'public.planos_mapa' in the schema cache" } } });
+    const { context, page, errores } = await abrirApp(browser, base, fx);
+    await irAlMapa(page);
+    await elegirCapa(page, "Plano");
+    await verificar("sin la migración 006: el plano se ve igual (calce de la app) y el mapa no se rompe", async ()=>{
+      await page.waitForFunction(sel=>{ const i = document.querySelector(sel); return !!(i && i.complete && i.naturalWidth === 3198); }, IMG_PLANO, { timeout: 8000 });
+      exigir(await page.locator(".leaflet-marker-icon").count() > 0, "no hay marcadores");
+    });
+    await page.click("#inventario-tecnologico-mapa-plano-ajustar");
+    await page.waitForSelector(".inventario-tecnologico-mapa-aviso-plano");
+    await verificar("sin la migración 006: «Guardar» explica que falta correr la 006 y deja seguir ajustando", async ()=>{
+      await page.keyboard.press("Shift+ArrowUp");
+      await page.click('[data-ajuste="guardar"]');
+      await toast(page, /006_plano_mapa\.sql/);
+      exigir(await page.locator(".inventario-tecnologico-mapa-aviso-plano").count() === 1, "se cerró el ajuste");
+      exigir(!(await page.locator('[data-ajuste="guardar"]').isDisabled()), "«Guardar» quedó deshabilitado");
+    });
+    await verificar("sin errores de JavaScript (sin la 006)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+}
+
+// ------------------------------------------------------------------ detalle de la torre
+// Casilla por equipo para simular su caída, conectores del camino a la raíz
+// (onda = inalámbrico, enchufe = cable) y detalle que se despliega (acordeón).
+const CASILLA = id=>`${SEL.panel} [data-accion="casilla-caida"][data-id="${id}"]`;
+const esperarPanelQuieto = page=>page.waitForFunction(()=>document.getElementById("inventario-tecnologico-mapa-panel").getAnimations({ subtree: true }).every(a=>a.playState !== "running"), null, { timeout: 4000 });
+
+async function escenarioTorre(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixture());
+  await irAlMapa(page);
+  await irAUbicacionDesdePanel(page, 1);
+  await verificar("torre: cada equipo tiene su casilla para simular la caída, fuera del botón de la fila", async ()=>{
+    for(const id of [10, 11, 12]) exigir(await cuenta(page, CASILLA(id)) === 1, `falta la casilla de ${id}`);
+    exigir(await page.evaluate(()=>!document.querySelector('#inventario-tecnologico-mapa-panel .inventario-tecnologico-mapa-fila [data-accion="casilla-caida"]')), "la casilla quedó dentro del botón");
+    exigir(/Marca la casilla de un equipo para simular su caída/.test(await texto(page, SEL.panel)), "sin la ayuda");
+  });
+  await verificar("marcar la casilla simula la caída sin abrir el detalle del equipo", async ()=>{
+    await page.click(CASILLA(12));
+    await page.waitForFunction(()=>/1 caído · 0 vía respaldo · 4 sin conectividad/.test(document.getElementById("inventario-tecnologico-mapa-aviso-sim")?.innerText || ""));
+    exigir(await page.isChecked(CASILLA(12)), "la casilla no quedó marcada");
+    exigir(await cuenta(page, `${SEL.panel} [data-equipo-id="12"].inventario-tecnologico-mapa-equipo-caido`) === 1, "la fila no se ve caída");
+    exigir(await cuenta(page, `${SEL.panel} .inventario-tecnologico-mapa-equipo-sel`) === 0, "se abrió el detalle");
+    exigir((await texto(page, SEL.titulo)) === "Torre Cerro Azul", "cambió el panel");
+  });
+  await verificar("con teclado: Espacio sobre la casilla la desmarca y el foco se queda en ella", async ()=>{
+    await page.focus(CASILLA(12));
+    await page.keyboard.press("Space");
+    await page.waitForFunction(()=>/Simulación activa/.test(document.getElementById("inventario-tecnologico-mapa-aviso-sim")?.innerText || ""));
+    exigir(!(await page.isChecked(CASILLA(12))), "sigue marcada");
+    exigir(await page.evaluate(()=>document.activeElement?.dataset?.accion === "casilla-caida" && document.activeElement?.dataset?.id === "12"), "el foco se perdió al repintar");
+    await page.click('#inventario-tecnologico-mapa-aviso-sim [data-sim-accion="salir"]');
+  });
+  await page.click(SEL.equipo(11));
+  await page.waitForSelector(`${SEL.panel} [data-equipo-id="11"].inventario-tecnologico-mapa-equipo-sel`);
+  await verificar("seleccionar un equipo despliega su detalle con transición, no de golpe", async ()=>{
+    const n = await page.evaluate(()=>document.querySelector('#inventario-tecnologico-mapa-panel [data-equipo-id="11"] .inventario-tecnologico-mapa-equipo-detalle')?.getAnimations().length ?? -1);
+    exigir(n > 0, `sin animación (${n})`);
+    await esperarPanelQuieto(page);
+    exigir(await page.getAttribute(SEL.equipo(11), "aria-expanded") === "true", "aria-expanded");
+  });
+  await verificar("camino: entre cada salto, un conector con su símbolo (onda o enchufe) y el badge junto a la línea", async ()=>{
+    const con = await page.evaluate(()=>[...document.querySelectorAll("#inventario-tecnologico-mapa-panel .inventario-tecnologico-mapa-camino-conector")].map(c=>({
+      cable: c.classList.contains("inventario-tecnologico-mapa-camino-cable"),
+      inalambrico: c.classList.contains("inventario-tecnologico-mapa-camino-inalambrico"),
+      simbolo: !!c.querySelector(".inventario-tecnologico-mapa-camino-simbolo svg"),
+      texto: c.innerText.replace(/\s+/g, " ").trim(),
+    })));
+    exigir(con.length === 3, JSON.stringify(con));
+    exigir(con.every(c=>c.simbolo), "falta el símbolo en algún conector");
+    exigir(con[0].cable && con[0].texto === "cable", JSON.stringify(con[0]));
+    exigir(con[1].inalambrico && /^inalámbrico · [\d,.]+ (km|m)$/.test(con[1].texto), JSON.stringify(con[1]));
+    exigir(con[2].cable && con[2].texto === "cable", JSON.stringify(con[2]));
+    const nodos = await page.locator(`${SEL.panel} .inventario-tecnologico-mapa-camino-nodo`).allInnerTexts();
+    exigir(nodos.length === 4 && nodos.every(n=>!/cable|inalámbrico/.test(n)), "el badge quedó en la descripción: " + nodos.join(" | "));
+  });
+  await page.screenshot({ path: path.join(CAPTURAS, "13-torre-camino.png") });
+  await verificar("elegir otro equipo de la torre: se pliega el anterior y se despliega el nuevo (acordeón)", async ()=>{
+    await page.click(SEL.equipo(12));
+    await page.waitForSelector(`${SEL.panel} [data-equipo-id="12"].inventario-tecnologico-mapa-equipo-sel`);
+    const estado = await page.evaluate(()=>({
+      nuevo: document.querySelector('#inventario-tecnologico-mapa-panel [data-equipo-id="12"] .inventario-tecnologico-mapa-equipo-detalle')?.getAnimations().length ?? -1,
+      fantasma: document.querySelector('#inventario-tecnologico-mapa-panel [data-equipo-id="11"] > div[aria-hidden="true"]') ? 1 : 0,
+    }));
+    exigir(estado.nuevo > 0 && estado.fantasma === 1, JSON.stringify(estado));
+    await esperarPanelQuieto(page);
+    exigir(await cuenta(page, `${SEL.panel} .inventario-tecnologico-mapa-equipo-detalle`) === 1, "quedó más de un detalle");
+    exigir(await page.getAttribute(SEL.equipo(11), "aria-expanded") === "false", "el anterior sigue desplegado");
+  });
+  await verificar("volver a tocar el equipo lo pliega", async ()=>{
+    await page.click(SEL.equipo(12));
+    await page.waitForFunction(()=>!document.querySelector("#inventario-tecnologico-mapa-panel .inventario-tecnologico-mapa-equipo-sel"));
+    await esperarPanelQuieto(page);
+    exigir(await cuenta(page, `${SEL.panel} .inventario-tecnologico-mapa-equipo-detalle`) === 0, "sigue el detalle");
+    exigir((await texto(page, SEL.titulo)) === "Torre Cerro Azul", "cambió el panel");
+  });
+  await verificar("sin errores de JavaScript (torre)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+}
+
+// ------------------------------------------------------------------ red de la finca (007)
+// Nombre automático, red de cada equipo, cableado dentro de la torre, atajos
+// de simulación (encender/apagar, guardar las caídas, editar, eliminar),
+// formulario de equipo sin nombre a mano y el catálogo de redes y tipos.
+const NOMBRE = {
+  ptpCA: "Punto a Punto en Torre Cerro Azul enlazado a Punto a Punto en Oficina Centro",
+  ap: "AP en Torre Cerro Azul conectado a Punto a Punto",
+  sw: "Switch en Torre Cerro Azul conectado a Punto a Punto",
+  camN: "Cámara (Norte) en Torre Cerro Azul conectada a Switch",
+  camS: "Cámara (Sur) en Torre Cerro Azul conectada a Switch",
+  sm: "Estación en Oficina Centro enlazada a AP en Torre Santa Ana",
+};
+const ATAJO = id=>`${SEL.panel} [data-accion="alternar-atajo"][data-id="${id}"]`;
+async function volverAlResumen(page){
+  if(await page.locator(`${SEL.panel} [data-accion="volver-resumen"]`).count()) await page.click(`${SEL.panel} [data-accion="volver-resumen"]`);
+  await page.waitForSelector(`${SEL.panel} .inventario-tecnologico-mapa-cifras`);
+}
+
+async function escenarioRed(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixture({ red007: true }));
+  await irAlMapa(page);
+  await verificar("007: el administrador ve «Redes y tipos» y el resumen tiene los atajos de simulación", async ()=>{
+    exigir(await page.locator("#inventario-tecnologico-mapa-redes-tipos").isVisible(), "sin el botón");
+    exigir(await cuenta(page, ATAJO(1)) === 1, "sin el atajo");
+    exigir(await page.getAttribute(ATAJO(1), "aria-checked") === "false", "arrancó encendido");
+  });
+  await irAUbicacionDesdePanel(page, 1);
+  await verificar("nombres automáticos en la torre (según tipo y servidor; la referencia entre paréntesis)", async ()=>{
+    const titulos = await page.locator(`${SEL.panel} .inventario-tecnologico-mapa-equipo-fila .inventario-tecnologico-mapa-fila-titulo`).evaluateAll(l=>l.map(x=>x.title));
+    for(const n of [NOMBRE.ptpCA, NOMBRE.ap, NOMBRE.sw, NOMBRE.camN, NOMBRE.camS]) exigir(titulos.includes(n), `falta «${n}»: ${titulos.join(" | ")}`);
+  });
+  await verificar("en la lista de la torre el nombre se acorta (sin repetir «en Torre Cerro Azul»)", async ()=>{
+    const visibles = await page.locator(`${SEL.panel} .inventario-tecnologico-mapa-equipo-fila .inventario-tecnologico-mapa-fila-titulo`).allTextContents();
+    exigir(visibles.includes("Cámara (Norte) conectada a Switch") && visibles.includes("Punto a Punto enlazado a Punto a Punto en Oficina Centro"), visibles.join(" | "));
+    exigir(visibles.every(v=>!v.includes("en Torre Cerro Azul")), visibles.join(" | "));
+  });
+  await verificar("cada equipo muestra su red y la torre dibuja su cableado (switch → cámaras)", async ()=>{
+    exigir(await cuenta(page, `${SEL.panel} [data-equipo-id="50"] .inventario-tecnologico-mapa-red-chip`) === 1, "sin chip de red");
+    exigir((await texto(page, `${SEL.panel} [data-equipo-id="50"] .inventario-tecnologico-mapa-red-chip`)) === "Red Cámaras", "red equivocada");
+    const arbol = await page.evaluate(()=>{
+      const raiz = document.querySelector("#inventario-tecnologico-mapa-panel .inventario-tecnologico-mapa-cableado-arbol");
+      if(!raiz) return null;
+      const nodo = li=>({ n: li.querySelector(":scope > .inventario-tecnologico-mapa-cableado-fila .inventario-tecnologico-mapa-enlace-texto").title, h: [...li.querySelectorAll(":scope > .inventario-tecnologico-mapa-cableado-hijos > li")].map(nodo) });
+      return [...raiz.children].map(nodo);
+    });
+    exigir(arbol && arbol.length === 1 && arbol[0].n === NOMBRE.ptpCA, JSON.stringify(arbol));
+    const sw = arbol[0].h.find(x=>x.n === NOMBRE.sw);
+    exigir(arbol[0].h.length === 3 && sw && sw.h.map(x=>x.n).sort().join("|") === [NOMBRE.camN, NOMBRE.camS].sort().join("|"), JSON.stringify(arbol[0]));
+    exigir(/de Oficina Centro/.test(await texto(page, `${SEL.panel} .inventario-tecnologico-mapa-cableado-subida`)), "sin la subida inalámbrica");
+  });
+  await page.screenshot({ path: path.join(CAPTURAS, "14-red-torre.png") });
+
+  await volverAlResumen(page);
+  await verificar("encender un atajo simula la caída de sus equipos (y lo que depende de ellos)", async ()=>{
+    await page.click(ATAJO(1));
+    await page.waitForFunction(()=>/1 caído · 0 vía respaldo · 2 sin conectividad/.test(document.getElementById("inventario-tecnologico-mapa-aviso-sim")?.innerText || ""));
+    exigir(await page.getAttribute(ATAJO(1), "aria-checked") === "true", "el switch no quedó encendido");
+  });
+  await irAUbicacionDesdePanel(page, 1);
+  await verificar("un equipo caído por un atajo tiene la casilla marcada y bloqueada, con la explicación", async ()=>{
+    const c = CASILLA(50);
+    exigir(await page.isChecked(c) && await page.isDisabled(c), "no está marcada y bloqueada");
+    const titulo = await page.locator(`${SEL.panel} [data-equipo-id="50"] .inventario-tecnologico-mapa-caida-check`).getAttribute("title");
+    exigir(/atajo «Cámaras Cerro Azul»/.test(titulo), titulo);
+  });
+  await page.click(CASILLA(12));
+  await page.waitForFunction(()=>/2 caídos/.test(document.getElementById("inventario-tecnologico-mapa-aviso-sim")?.innerText || ""));
+  await volverAlResumen(page);
+  await verificar("apagar el atajo levanta solo sus equipos (lo marcado a mano sigue caído)", async ()=>{
+    await page.click(ATAJO(1));
+    await page.waitForFunction(()=>/1 caído · 0 vía respaldo · 4 sin conectividad/.test(document.getElementById("inventario-tecnologico-mapa-aviso-sim")?.innerText || ""));
+  });
+  await verificar("guardar las caídas actuales como atajo: queda encendido con esos equipos", async ()=>{
+    await page.click(`${SEL.panel} [data-accion="guardar-atajo"]`);
+    await page.waitForSelector("#inventario-tecnologico-atajo-nombre");
+    exigir(/Punto a Punto en Torre Cerro Azul conectado a Punto a Punto/.test(await texto(page, "#inventario-tecnologico-modal-host .inventario-tecnologico-mapa-atajo-equipos")), "no lista el equipo");
+    await page.fill("#inventario-tecnologico-atajo-nombre", "PtP a Santa Ana");
+    await page.keyboard.press("Enter");
+    await esperarSinModal(page);
+    const ins = await page.evaluate(()=>window.__ESCRITURAS__.filter(e=>e.tabla === "atajos_simulacion" && e.op === "insert").map(e=>e.filas[0]));
+    exigir(ins.length === 1 && ins[0].nombre === "PtP a Santa Ana" && JSON.stringify(ins[0].equipos) === "[12]", JSON.stringify(ins));
+    await page.waitForSelector(`${ATAJO(ins[0].id)}[aria-checked="true"]`);
+    exigir(/1 caído/.test(await texto(page, "#inventario-tecnologico-mapa-aviso-sim")), "cambió la simulación");
+  });
+  await verificar("editar un atajo (renombrar) y eliminarlo (con confirmación en el mismo botón)", async ()=>{
+    const id = await page.evaluate(()=>window.__DB__.atajos_simulacion.find(a=>a.nombre === "PtP a Santa Ana").id);
+    await page.click(`${SEL.panel} [data-accion="editar-atajo"][data-id="${id}"]`);
+    await page.waitForSelector("#inventario-tecnologico-atajo-nombre");
+    await page.fill("#inventario-tecnologico-atajo-nombre", "Enlace a Santa Ana");
+    await page.click("#inventario-tecnologico-atajo-guardar");
+    await esperarSinModal(page);
+    exigir(await page.evaluate(i=>window.__DB__.atajos_simulacion.find(a=>a.id === i).nombre, id) === "Enlace a Santa Ana", "no se renombró");
+    await page.click(`${SEL.panel} [data-accion="editar-atajo"][data-id="${id}"]`);
+    await page.waitForSelector("#inventario-tecnologico-atajo-eliminar");
+    await page.click("#inventario-tecnologico-atajo-eliminar");
+    exigir(await page.evaluate(i=>window.__DB__.atajos_simulacion.some(a=>a.id === i), id), "borró sin confirmar");
+    await page.click("#inventario-tecnologico-atajo-eliminar");
+    await esperarSinModal(page);
+    exigir(!(await page.evaluate(i=>window.__DB__.atajos_simulacion.some(a=>a.id === i), id)), "no se borró");
+    exigir(await cuenta(page, ATAJO(id)) === 0, "sigue en el panel");
+  });
+  await page.click('#inventario-tecnologico-mapa-aviso-sim [data-sim-accion="salir"]');
+
+  await irAUbicacionDesdePanel(page, 1);
+  await page.click(`${SEL.panel} [data-accion="nuevo-equipo"][data-id="1"]`);
+  await page.waitForSelector("#inventario-tecnologico-equipo-tipo");
+  await verificar("formulario de equipo con la 007: sin nombre a mano; tipo, referencia y red", async ()=>{
+    exigir(await cuenta(page, "#inventario-tecnologico-equipo-nombre") === 0, "sigue el campo nombre");
+    exigir(await cuenta(page, "#inventario-tecnologico-equipo-referencia, #inventario-tecnologico-equipo-red") === 2, "faltan referencia/red");
+    exigir(/Elige el tipo/.test(await texto(page, "#inventario-tecnologico-equipo-nombre-auto")), "la vista previa no pide el tipo");
+  });
+  await verificar("sin tipo no se guarda (lo pide el formulario)", async ()=>{
+    await page.click("#inventario-tecnologico-equipo-guardar");
+    await page.waitForFunction(()=>/Elige el tipo de equipo/.test(document.querySelector('[data-error="tipo_equipo"]')?.textContent || ""));
+    exigir(!(await page.evaluate(()=>window.__ESCRITURAS__.some(e=>e.tabla === "equipos_radioenlace" && e.op === "insert"))), "se guardó");
+  });
+  await verificar("el nombre se arma en vivo con el tipo, el servidor y la referencia", async ()=>{
+    await page.selectOption("#inventario-tecnologico-equipo-tipo", "camara");
+    exigir((await texto(page, '[data-error="tipo_equipo"]')) === "", "sigue el aviso de que falta el tipo");
+    await page.selectOption("#inventario-tecnologico-equipo-servidor", "50");
+    exigir((await texto(page, "#inventario-tecnologico-equipo-nombre-auto")) === "Cámara en Torre Cerro Azul conectada a Switch", await texto(page, "#inventario-tecnologico-equipo-nombre-auto"));
+    await page.fill("#inventario-tecnologico-equipo-referencia", "Este");
+    exigir((await texto(page, "#inventario-tecnologico-equipo-nombre-auto")) === "Cámara (Este) en Torre Cerro Azul conectada a Switch", await texto(page, "#inventario-tecnologico-equipo-nombre-auto"));
+    await page.selectOption("#inventario-tecnologico-equipo-red", "2");
+  });
+  await verificar("guardar: nombre automático, tipo, red y referencia en la base", async ()=>{
+    await page.click("#inventario-tecnologico-equipo-guardar");
+    await esperarSinModal(page);
+    const f = await page.evaluate(()=>window.__ESCRITURAS__.find(e=>e.tabla === "equipos_radioenlace" && e.op === "insert").filas[0]);
+    exigir(f.nombre === "Cámara (Este) en Torre Cerro Azul conectada a Switch" && f.tipo_equipo === "camara" && f.red_id === 2 && f.referencia === "Este" && f.servidor_id === 50, JSON.stringify(f));
+    exigir((await texto(page, SEL.panel)).includes("Cámara (Este) en Torre Cerro Azul conectada a Switch"), "no aparece en el panel");
+  });
+  await verificar("un equipo sin tipo (anterior a la 007) conserva su nombre; su cliente lo cita por ese nombre", async ()=>{
+    await irAUbicacionDesdePanel(page, 4);
+    exigir((await texto(page, SEL.panel)).includes("SM Bodega"), "cambió el nombre del equipo sin tipo");
+  });
+
+  await page.click("#inventario-tecnologico-mapa-redes-tipos");
+  await page.waitForSelector("#inventario-tecnologico-red-nueva-nombre");
+  await verificar("redes y tipos: crear una red y renombrar un tipo (los nombres automáticos lo siguen)", async ()=>{
+    await page.fill("#inventario-tecnologico-red-nueva-nombre", "Red Producción");
+    await page.click('[data-cat="crear-red"]');
+    await toast(page, /Red «Red Producción» creada/);
+    exigir(await page.evaluate(()=>window.__DB__.redes.some(r=>r.nombre === "Red Producción")), "no se creó");
+    const fila = '#inventario-tecnologico-modal-host [data-tipo-valor="estacion"]';
+    await page.waitForSelector(fila);
+    await page.fill(`${fila} [data-campo="etiqueta"]`, "Estación CPE");
+    await page.click(`${fila} [data-cat="guardar-tipo"]`);
+    await toast(page, /Tipo guardado/);
+    await page.click("#inventario-tecnologico-modal-host .inventario-tecnologico-modal-footer .inventario-tecnologico-modal-close");
+    await esperarSinModal(page);
+    await irAUbicacionDesdePanel(page, 3);
+    exigir((await texto(page, SEL.panel)).includes("Estación CPE en Oficina Centro enlazada a AP en Torre Santa Ana"), "el nombre no siguió al tipo");
+  });
+  await verificar("sin errores de JavaScript (red de la finca)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+
+  // Alguien con «Ver mapa» que no es administrador: usa los atajos, pero no los edita.
+  const v = await abrirApp(browser, base, fixture({ rol: "visitante", permitidas: ["ver_mapa"], red007: true }));
+  await irAlMapa(v.page);
+  await verificar("sin ser administrador: enciende atajos, pero no ve «Editar», «Guardar caídas» ni «Redes y tipos»", async ()=>{
+    exigir(await v.page.locator("#inventario-tecnologico-mapa-redes-tipos").count() === 0, "ve «Redes y tipos»");
+    await v.page.click(ATAJO(1));
+    await v.page.waitForFunction(()=>/1 caído/.test(document.getElementById("inventario-tecnologico-mapa-aviso-sim")?.innerText || ""));
+    exigir(await cuenta(v.page, `${SEL.panel} [data-accion="editar-atajo"], ${SEL.panel} [data-accion="guardar-atajo"]`) === 0, "ve botones de administrador");
+    exigir(await v.page.evaluate(()=>window.__ESCRITURAS__.length) === 0, "escribió en la base");
+  });
+  await verificar("sin errores de JavaScript (red de la finca, sin ser administrador)", async ()=>{ exigir(v.errores.length === 0, v.errores.join(" | ")); });
+  await v.context.close();
+}
+
+// ------------------------------------------------------------------ inventario: modal «Nuevo activo»
+// Tipo con búsqueda y orden, campos según el tipo (con transición), «+» en
+// un submodal que no borra lo escrito, y que al guardar no viajen los campos
+// que el tipo oculta.
+const FA = id=>`#inventario-tecnologico-fa-${id}`;
+const COMBO = { boton: "#inventario-tecnologico-fa-tipo-boton", panel: "#inventario-tecnologico-fa-tipo-panel", filtro: "#inventario-tecnologico-fa-tipo-filtro", orden: "#inventario-tecnologico-fa-tipo-orden", opciones: "#inventario-tecnologico-fa-tipo-lista li" };
+const SUBMODAL = "#inventario-tecnologico-submodal-host .inventario-tecnologico-modal";
+const camposVisiblesForm = page=>page.evaluate(()=>[...document.querySelectorAll("#inventario-tecnologico-form-activo [data-campo]")].filter(el=>!el.hidden).map(el=>el.dataset.campo).sort().join(","));
+async function esperarTransicion(page){
+  await page.waitForFunction(()=>{
+    const f = document.getElementById("inventario-tecnologico-form-activo");
+    return !!f && f.getAnimations({ subtree: true }).every(a=>a.playState !== "running");
+  }, null, { timeout: 4000 });
+}
+async function elegirTipo(page, buscar){
+  await page.click(COMBO.boton);
+  await page.waitForSelector(COMBO.panel, { state: "visible" });
+  await page.fill(COMBO.filtro, buscar);
+  await page.keyboard.press("Enter");
+  await page.waitForSelector(COMBO.panel, { state: "hidden" });
+  await esperarTransicion(page);
+}
+
+async function escenarioActivo(browser, base){
+  const fx = fixture();
+  fx.tablas.tipos_activo.push(
+    { nombre:"Cámara IP", icono_svg:SVG16, color:"#007EB2", campos_pertinentes:["serie","mac_ethernet"], orden:40, activo:true },
+    { nombre:"Celular", icono_svg:SVG16, color:"#3E7D4F", campos_pertinentes:["serie"], orden:50, activo:true },
+    { nombre:"Cable", icono_svg:SVG16, color:"#A6710B", campos_pertinentes:["color","longitud_m"], orden:60, activo:true },
+    { nombre:"Switch 16 puertos", icono_svg:SVG16, color:"#57697C", campos_pertinentes:["serie","mac_ethernet"], orden:70, activo:true },
+    { nombre:"Switch 8 puertos", icono_svg:SVG16, color:"#57697C", campos_pertinentes:["serie","mac_ethernet"], orden:80, activo:true },
+    { nombre:"Fax", icono_svg:SVG16, color:"#8B9AAA", campos_pertinentes:[], orden:90, activo:false },
+  );
+  const { context, page, errores } = await abrirApp(browser, base, fx);
+  await page.click("#inventario-tecnologico-btn-nuevo");
+  await page.waitForSelector("#inventario-tecnologico-form-activo");
+
+  await verificar("nuevo activo: el Tipo es un selector con búsqueda (el <select> queda oculto)", async ()=>{
+    exigir(await page.locator(FA("tipo")).isHidden(), "el <select> se ve");
+    exigir((await texto(page, COMBO.boton)).includes("Selecciona"), await texto(page, COMBO.boton));
+    exigir(await page.evaluate(()=>document.querySelector('label[for="inventario-tecnologico-fa-tipo-boton"]')?.textContent) === "Tipo", "la etiqueta no apunta al selector");
+  });
+  await verificar("nuevo activo sin tipo: campos de cómputo sí; color, longitud y celular no", async ()=>{
+    const v = await camposVisiblesForm(page);
+    exigir(v === "disco_gb,mac_ethernet,mac_wifi,procesador,ram_gb,serie,so", v);
+    exigir(await page.locator("#inventario-tecnologico-fs-celular").isHidden(), "celular visible");
+  });
+  await page.fill(FA("marca"), "Hikvision");
+  await page.fill(FA("modelo"), "DS-2CD1043");
+  await page.fill(FA("serie"), "SN-OCULTA");
+  await page.fill(FA("so"), "Linux");
+
+  await verificar("lista de tipos: A–Z con acentos y números bien ordenados, sin los inactivos", async ()=>{
+    await page.click(COMBO.boton);
+    await page.waitForSelector(COMBO.panel, { state: "visible" });
+    exigir(await page.evaluate(()=>document.activeElement?.id) === "inventario-tecnologico-fa-tipo-filtro", "el foco no quedó en la búsqueda");
+    const t = (await page.locator(COMBO.opciones).allInnerTexts()).map(x=>x.replace("✓", "").trim());
+    exigir(t.join("|") === "— Sin tipo —|Antena|Cable|Cámara IP|Celular|Laptop|Monitor|Switch 8 puertos|Switch 16 puertos", t.join("|"));
+    exigir((await texto(page, COMBO.orden)) === "A–Z", "el botón de orden no dice A–Z");
+  });
+  await verificar("orden Z–A: invierte la lista (la opción vacía sigue primero) y se recuerda", async ()=>{
+    await page.click(COMBO.orden);
+    const t = (await page.locator(COMBO.opciones).allInnerTexts()).map(x=>x.replace("✓", "").trim());
+    exigir(t.join("|") === "— Sin tipo —|Switch 16 puertos|Switch 8 puertos|Monitor|Laptop|Celular|Cámara IP|Cable|Antena", t.join("|"));
+    exigir(await page.evaluate(()=>localStorage.getItem("inventario-tecnologico-orden-tipos")) === "desc", "no se guardó el orden");
+    await page.click(COMBO.orden);
+  });
+  await verificar("búsqueda sin tildes: «cam» encuentra «Cámara IP» y resalta la coincidencia", async ()=>{
+    await page.fill(COMBO.filtro, "cam");
+    await page.screenshot({ path: path.join(CAPTURAS, "10-nuevo-activo-selector.png") });
+    const t = await page.locator(COMBO.opciones).allInnerTexts();
+    exigir(t.length === 1 && t[0].includes("Cámara IP"), t.join("|"));
+    exigir(await page.locator(`${COMBO.opciones} mark`).innerText() === "Cám", "no resaltó «Cám»");
+    await page.fill(COMBO.filtro, "zzz");
+    exigir(await page.locator(COMBO.opciones).count() === 0, "con «zzz» quedaron opciones");
+    exigir((await texto(page, "#inventario-tecnologico-fa-tipo-panel .inventario-tecnologico-combo-vacio")).includes("zzz"), "sin aviso de «ningún tipo»");
+  });
+  await verificar("Esc en la búsqueda cierra solo la lista: el formulario sigue abierto", async ()=>{
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(COMBO.panel, { state: "hidden" });
+    exigir(await page.locator("#inventario-tecnologico-form-activo").count() === 1, "se cerró el modal");
+    exigir(await page.evaluate(()=>document.activeElement?.id) === "inventario-tecnologico-fa-tipo-boton", "el foco no volvió al selector");
+  });
+  await verificar("elegir «Cámara IP» con teclado: quedan serie y MAC Ethernet, con transición y sin perder lo escrito", async ()=>{
+    await page.click(COMBO.boton);
+    await page.fill(COMBO.filtro, "cama");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(COMBO.panel, { state: "hidden" });
+    // A mitad de la transición hay animaciones corriendo (no es un cambio plano).
+    const animando = await page.evaluate(()=>document.getElementById("inventario-tecnologico-form-activo").getAnimations({ subtree: true }).length);
+    exigir(animando > 0, "no hubo animación");
+    await esperarTransicion(page);
+    exigir(await page.inputValue(FA("tipo")) === "Cámara IP", await page.inputValue(FA("tipo")));
+    exigir((await texto(page, COMBO.boton)).includes("Cámara IP"), "el botón no muestra el tipo");
+    const v = await camposVisiblesForm(page);
+    exigir(v === "mac_ethernet,serie", v);
+    exigir(await page.inputValue(FA("marca")) === "Hikvision" && await page.inputValue(FA("modelo")) === "DS-2CD1043", "se perdió marca/modelo");
+  });
+  await verificar("«Cable»: solo color y longitud; «Celular»: aparecen los datos de celular", async ()=>{
+    await elegirTipo(page, "cable");
+    let v = await camposVisiblesForm(page);
+    exigir(v === "color,longitud_m", v);
+    await elegirTipo(page, "celu");
+    v = await camposVisiblesForm(page);
+    exigir(v === "celular,serie", v);
+    exigir(await page.locator("#inventario-tecnologico-fs-celular").isVisible(), "celular oculto");
+  });
+  await verificar("«+» de Tipo abre un modal aparte encima; Esc lo cierra y el formulario queda intacto", async ()=>{
+    await page.click("#inventario-tecnologico-btn-nuevo-tipo");
+    await page.waitForSelector(SUBMODAL, { state: "visible" });
+    exigir(await page.locator("#inventario-tecnologico-form-activo").isVisible(), "el formulario de abajo desapareció");
+    exigir(await page.evaluate(()=>document.activeElement?.id) === "inventario-tecnologico-nt-nombre", "el foco no está en el nombre");
+    exigir(await page.locator("#inventario-tecnologico-fs-nuevo-tipo").count() === 0, "sigue la sección dentro del modal");
+    await page.keyboard.press("Escape");
+    await page.waitForSelector("#inventario-tecnologico-submodal-host", { state: "detached" });
+    exigir(await page.locator("#inventario-tecnologico-form-activo").isVisible(), "Esc cerró también el formulario");
+    exigir(await page.inputValue(FA("marca")) === "Hikvision", "se perdió la marca");
+    exigir(await page.evaluate(()=>document.activeElement?.id) === "inventario-tecnologico-btn-nuevo-tipo", "el foco no volvió al «+»");
+  });
+  await verificar("Tab queda atrapado dentro del submodal", async ()=>{
+    await page.click("#inventario-tecnologico-btn-nuevo-tipo");
+    await page.waitForSelector(SUBMODAL, { state: "visible" });
+    for(let i = 0; i < 16; i++) await page.keyboard.press("Tab");
+    exigir(await page.evaluate(()=>!!document.activeElement?.closest("#inventario-tecnologico-submodal-host")), "el foco salió del submodal");
+    await page.click("#inventario-tecnologico-btn-cancelar-tipo");
+    await page.waitForSelector("#inventario-tecnologico-submodal-host", { state: "detached" });
+  });
+  await verificar("crear el tipo «Switch PoE» desde el submodal: queda elegido y los campos siguen al tipo nuevo", async ()=>{
+    await page.click("#inventario-tecnologico-btn-nuevo-tipo");
+    await page.waitForSelector(SUBMODAL, { state: "visible" });
+    await page.fill("#inventario-tecnologico-nt-nombre", "Switch PoE");
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: path.join(CAPTURAS, "11-nuevo-activo-submodal.png") });
+    for(const c of ["serie","so","ram_gb","disco_gb","procesador","mac_wifi"]) await page.uncheck(`#inventario-tecnologico-nt-campos input[value="${c}"]`);
+    await page.focus("#inventario-tecnologico-nt-nombre");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("#inventario-tecnologico-submodal-host", { state: "detached" });
+    await toast(page, /Tipo creado/);
+    await esperarTransicion(page);
+    const ins = await page.evaluate(()=>window.__ESCRITURAS__.filter(e=>e.tabla === "tipos_activo" && e.op === "insert").map(e=>e.filas[0]));
+    exigir(ins.length === 1 && ins[0].nombre === "Switch PoE" && JSON.stringify(ins[0].campos_pertinentes) === '["mac_ethernet"]', JSON.stringify(ins));
+    exigir(await page.inputValue(FA("tipo")) === "Switch PoE", await page.inputValue(FA("tipo")));
+    const v = await camposVisiblesForm(page);
+    exigir(v === "mac_ethernet", v);
+    exigir(await page.inputValue(FA("marca")) === "Hikvision", "se perdió la marca");
+  });
+  await verificar("«+» de Propiedad también es un submodal y deja la propiedad nueva elegida", async ()=>{
+    await page.click("#inventario-tecnologico-btn-nueva-propiedad");
+    await page.waitForSelector(SUBMODAL, { state: "visible" });
+    await page.fill("#inventario-tecnologico-np-etiqueta", "Comodato");
+    await page.click("#inventario-tecnologico-btn-crear-propiedad");
+    await page.waitForSelector("#inventario-tecnologico-submodal-host", { state: "detached" });
+    exigir(await page.inputValue(FA("propiedad")) === "comodato", await page.inputValue(FA("propiedad")));
+  });
+  await page.screenshot({ path: path.join(CAPTURAS, "12-nuevo-activo-switch.png") });
+  await verificar("guardar: van los campos del tipo; la serie y el SO escritos antes (ahora ocultos) no viajan", async ()=>{
+    await page.fill(FA("maceth"), "AA:BB:CC:00:11:22");
+    await page.click("#inventario-tecnologico-btn-guardar-activo");
+    await page.waitForFunction(()=>window.__ESCRITURAS__.some(e=>e.tabla === "activos" && e.op === "insert"));
+    const fila = await page.evaluate(()=>window.__ESCRITURAS__.find(e=>e.tabla === "activos" && e.op === "insert").filas[0]);
+    exigir(fila.tipo === "Switch PoE" && fila.marca === "Hikvision" && fila.propiedad === "comodato", JSON.stringify(fila));
+    exigir(fila.mac_ethernet === "AA:BB:CC:00:11:22", "no guardó la MAC");
+    exigir(fila.serie === null && fila.sistema_operativo === null, `viajaron campos ocultos: serie=${fila.serie} so=${fila.sistema_operativo}`);
+    exigir(fila.celular_gmail === null, "viajó el gmail");
+  });
+
+  await verificar("editar datos base: solo los campos del tipo (Antena: serie y MAC Ethernet)", async ()=>{
+    await page.evaluate(async ()=>{ (await import("/assets/js/inventario-tecnologico/nucleo/../ui/render-raiz.js")).cerrarModal(); });
+    await page.evaluate(async ()=>{ (await import("/assets/js/inventario-tecnologico/ui/detalle/form-activo.js")).abrirFormActivo(2); });
+    await page.waitForSelector("#inventario-tecnologico-form-activo");
+    const v = await camposVisiblesForm(page);
+    exigir(v === "mac_ethernet,serie", v);
+    exigir((await texto(page, COMBO.boton)).includes("Antena"), "el selector no muestra Antena");
+    exigir(await page.inputValue(FA("serie")) === "SN-A2", "no cargó la serie");
+  });
+  await verificar("editar: pasar a Laptop y volver a Antena anima los campos; al guardar no se toca lo oculto", async ()=>{
+    await elegirTipo(page, "lapt");
+    exigir((await camposVisiblesForm(page)) === "disco_gb,mac_ethernet,mac_wifi,procesador,ram_gb,serie,so", await camposVisiblesForm(page));
+    await page.fill(FA("so"), "Windows 11");
+    await elegirTipo(page, "anten");
+    exigir((await camposVisiblesForm(page)) === "mac_ethernet,serie", await camposVisiblesForm(page));
+    await page.fill(FA("serie"), "SN-A2-NUEVA");
+    await page.click("#inventario-tecnologico-btn-guardar-activo");
+    await page.waitForFunction(()=>window.__ESCRITURAS__.some(e=>e.tabla === "activos" && e.op === "update"));
+    const parche = await page.evaluate(()=>window.__ESCRITURAS__.find(e=>e.tabla === "activos" && e.op === "update").parche);
+    exigir(parche.serie === "SN-A2-NUEVA" && parche.tipo === "Antena", JSON.stringify(parche));
+    exigir(!("sistema_operativo" in parche) && !("ram_gb" in parche) && !("color" in parche), `tocó campos ocultos: ${Object.keys(parche).join(",")}`);
+  });
+  await verificar("con movimiento reducido el cambio de campos es inmediato", async ()=>{
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.evaluate(async ()=>{ (await import("/assets/js/inventario-tecnologico/ui/render-raiz.js")).cerrarModal(); });
+    await page.evaluate(async ()=>{ (await import("/assets/js/inventario-tecnologico/ui/detalle/form-activo.js")).abrirFormActivo(2); });
+    await page.waitForSelector("#inventario-tecnologico-form-activo");
+    await page.click(COMBO.boton);
+    await page.fill(COMBO.filtro, "lapt");
+    await page.keyboard.press("Enter");
+    const v = await camposVisiblesForm(page);
+    exigir(v === "disco_gb,mac_ethernet,mac_wifi,procesador,ram_gb,serie,so", v);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+  });
+  await verificar("sin errores de JavaScript (nuevo activo)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+}
+
 // ------------------------------------------------------------------ main
 const srv = await servir(RAIZ);
 const base = `http://127.0.0.1:${srv.address().port}`;
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 try{
-  await escenarioAdmin(browser, base);
-  await escenarioPermisos(browser, base);
-  await escenarioFallas(browser, base);
-  await escenarioCelular(browser, base);
+  // SOLO=plano (u otro nombre) corre un solo escenario, para depurar.
+  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, activo: escenarioActivo };
+  for(const [nombre, fn] of Object.entries(escenarios)) if(!process.env.SOLO || process.env.SOLO === nombre) await fn(browser, base);
 }finally{
   await browser.close();
   srv.close();

@@ -594,7 +594,7 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
 .inventario-tecnologico-mapa-aviso[hidden]{display:none;}
 
 /* Panel lateral */
-.inventario-tecnologico-mapa-panel{overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);min-height:0;padding:14px 14px 18px;}
+.inventario-tecnologico-mapa-panel{overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);min-height:0;min-width:0;padding:14px 14px 18px;}
 .inventario-tecnologico-mapa-panel-cabecera{display:flex;flex-direction:column;gap:6px;padding-bottom:12px;border-bottom:1px solid var(--border);}
 .inventario-tecnologico-mapa-panel-nav{margin:-4px 0 0 -6px;}
 .inventario-tecnologico-mapa-panel-titulo{font-size:17px;font-weight:700;color:var(--accent-ink);line-height:1.25;word-break:break-word;}
@@ -624,7 +624,7 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
 .inventario-tecnologico-mapa-icono-radio{display:inline-flex;color:var(--brand-orange);flex-shrink:0;}
 .inventario-tecnologico-mapa-icono-tipo{display:inline-flex;flex-shrink:0;}
 .inventario-tecnologico-mapa-contador{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink-muted);background:var(--surface-2);border-radius:10px;padding:1px 7px;flex-shrink:0;}
-.inventario-tecnologico-mapa-equipo-sel > .inventario-tecnologico-mapa-fila{border-color:var(--brand-orange);background:var(--warn-soft);}
+.inventario-tecnologico-mapa-equipo-sel > .inventario-tecnologico-mapa-equipo-fila > .inventario-tecnologico-mapa-fila{border-color:var(--brand-orange);background:var(--warn-soft);}
 .inventario-tecnologico-mapa-equipo-sel .inventario-tecnologico-mapa-contador{background:var(--surface);color:var(--warn);}
 .inventario-tecnologico-mapa-equipo-detalle{margin:6px 0 4px 12px;padding-left:10px;border-left:2px solid var(--brand-orange);display:flex;flex-direction:column;gap:8px;}
 .inventario-tecnologico-mapa-enlace{border:1px solid var(--border);border-radius:8px;padding:9px 10px;background:var(--surface);}
@@ -772,9 +772,9 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
 .inventario-tecnologico-mapa-estado-respaldo{--estado-color:#1E8A5A;}
 .inventario-tecnologico-mapa-estado-sin_conexion{--estado-color:#B3432D;}
 .inventario-tecnologico-mapa-estado-servicio{--estado-color:#3E7D4F;}
-.inventario-tecnologico-mapa-equipo-sin_conexion > .inventario-tecnologico-mapa-fila,
-.inventario-tecnologico-mapa-equipo-caido > .inventario-tecnologico-mapa-fila{background:var(--danger-soft);}
-.inventario-tecnologico-mapa-equipo-respaldo > .inventario-tecnologico-mapa-fila{background:var(--good-soft);}
+.inventario-tecnologico-mapa-equipo-sin_conexion > .inventario-tecnologico-mapa-equipo-fila > .inventario-tecnologico-mapa-fila,
+.inventario-tecnologico-mapa-equipo-caido > .inventario-tecnologico-mapa-equipo-fila > .inventario-tecnologico-mapa-fila{background:var(--danger-soft);}
+.inventario-tecnologico-mapa-equipo-respaldo > .inventario-tecnologico-mapa-equipo-fila > .inventario-tecnologico-mapa-fila{background:var(--good-soft);}
 .inventario-tecnologico-mapa-equipo-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;}
 .inventario-tecnologico-mapa-bloque{display:flex;flex-direction:column;gap:6px;}
 .inventario-tecnologico-mapa-bloque-cab{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
@@ -784,13 +784,34 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
 .inventario-tecnologico-mapa-enlace-texto:hover{text-decoration:underline;}
 .inventario-tecnologico-mapa-enlace-texto[aria-current="true"]{font-weight:700;color:var(--brand-orange);}
 .inventario-tecnologico-mapa-enlace-cortado{border-color:var(--danger);border-style:dashed;}
-.inventario-tecnologico-mapa-camino{list-style:none;margin:0;padding:0 0 0 12px;border-left:2px solid var(--brand-orange);display:flex;flex-direction:column;gap:4px;font-size:12.5px;}
-.inventario-tecnologico-mapa-camino li{position:relative;}
-.inventario-tecnologico-mapa-camino li::before{content:"";position:absolute;left:-17px;top:6px;width:8px;height:8px;border-radius:50%;background:var(--brand-orange);box-shadow:0 0 0 2px var(--surface);}
-.inventario-tecnologico-mapa-camino-roto::before{background:var(--danger) !important;}
-.inventario-tecnologico-mapa-camino-roto{color:var(--danger);}
-.inventario-tecnologico-mapa-camino-marca{display:inline-block;font-size:10px;font-weight:700;color:var(--ink-muted);background:var(--surface-2);border-radius:4px;padding:0 5px;margin-right:5px;}
+/* Camino a la raíz: nodos (equipos) unidos por conectores; cada conector
+   lleva el símbolo del medio (onda = inalámbrico, enchufe = cable) sobre la
+   línea y el badge al lado de la línea, no en el texto del equipo. */
+.inventario-tecnologico-mapa-camino{list-style:none;margin:2px 0 0;padding:0;display:flex;flex-direction:column;font-size:12.5px;}
+.inventario-tecnologico-mapa-camino-paso{position:relative;}
+.inventario-tecnologico-mapa-camino-nodo{position:relative;padding:3px 0 3px 28px;line-height:18px;}
+.inventario-tecnologico-mapa-camino-punto{position:absolute;left:5px;top:7px;width:10px;height:10px;border-radius:50%;background:var(--surface);border:2px solid var(--brand-orange);}
+.inventario-tecnologico-mapa-camino-paso:first-child .inventario-tecnologico-mapa-camino-punto{background:var(--brand-orange);}
+.inventario-tecnologico-mapa-camino-roto .inventario-tecnologico-mapa-camino-punto{border-color:var(--danger);}
+.inventario-tecnologico-mapa-camino-roto .inventario-tecnologico-mapa-camino-nodo{color:var(--danger);}
+.inventario-tecnologico-mapa-camino-conector{
+  --conector-color:var(--accent);
+  position:relative;display:flex;align-items:center;flex-wrap:wrap;gap:4px;min-height:32px;padding:5px 0 5px 28px;
+}
+.inventario-tecnologico-mapa-camino-conector::before{content:"";position:absolute;left:9px;top:-7px;bottom:-8px;border-left:2px solid var(--conector-color);}
+.inventario-tecnologico-mapa-camino-inalambrico::before{border-left-style:dashed;}
+.inventario-tecnologico-mapa-camino-cable{--conector-color:var(--ink-muted);}
+.inventario-tecnologico-mapa-camino-conector-respaldo{--conector-color:#1E8A5A;}
+.inventario-tecnologico-mapa-camino-conector-roto{--conector-color:var(--danger);}
+.inventario-tecnologico-mapa-camino-simbolo{
+  position:absolute;left:0;top:50%;transform:translateY(-50%);z-index:1;
+  width:20px;height:20px;border-radius:50%;background:var(--surface);border:1.5px solid var(--conector-color);color:var(--conector-color);
+  display:flex;align-items:center;justify-content:center;
+}
+.inventario-tecnologico-mapa-camino-medio{font-size:10.5px;font-weight:700;color:var(--conector-color);background:var(--surface);border:1px solid var(--conector-color);border-radius:10px;padding:0 7px;line-height:16px;white-space:nowrap;}
+.inventario-tecnologico-mapa-camino-marca{display:inline-block;font-size:10.5px;font-weight:700;color:var(--ink-muted);background:var(--surface-2);border-radius:10px;padding:0 7px;line-height:16px;white-space:nowrap;}
 .inventario-tecnologico-mapa-camino-respaldo{color:#fff;background:#1E8A5A;}
+.inventario-tecnologico-mapa-camino-cortado{color:#fff;background:var(--danger);}
 .inventario-tecnologico-mapa-sublista{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12.5px;}
 .inventario-tecnologico-mapa-respaldos{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px;}
 .inventario-tecnologico-mapa-respaldo{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;border:1px dashed var(--border-strong);border-radius:8px;padding:6px 8px;}
@@ -813,6 +834,38 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
 .inventario-tecnologico-mapa-sim-sub{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--ink-faint);}
 .inventario-tecnologico-mapa-sim-lista{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:12.5px;}
 .inventario-tecnologico-mapa-sim-recuperado{color:var(--good);font-weight:600;}
+/* Capa "Plano" (migración 006) y "Ajustar plano" */
+.inventario-tecnologico-mapa-plano{user-select:none;-webkit-user-select:none;}
+.inventario-tecnologico-mapa-plano-ajustando{cursor:move;touch-action:none;}
+.inventario-tecnologico-mapa-ajustando-plano .leaflet-marker-pane .leaflet-interactive,
+.inventario-tecnologico-mapa-ajustando-plano .leaflet-overlay-pane .leaflet-interactive,
+.inventario-tecnologico-mapa-ajustando-plano .leaflet-tooltip-pane,
+.inventario-tecnologico-mapa-ajustando-plano .leaflet-overlay-pane > svg,
+.inventario-tecnologico-mapa-ajustando-plano .leaflet-inventarioPlanoManijas-pane > svg{pointer-events:none !important;}
+.inventario-tecnologico-mapa-plano-esquina{background:#fff;border:2px solid #EC741D;border-radius:3px;box-shadow:0 1px 4px rgba(0,0,0,.4);}
+.inventario-tecnologico-mapa-plano-esquina-no,.inventario-tecnologico-mapa-plano-esquina-se{cursor:nwse-resize;}
+.inventario-tecnologico-mapa-plano-esquina-ne,.inventario-tecnologico-mapa-plano-esquina-so{cursor:nesw-resize;}
+.inventario-tecnologico-mapa-plano-control{background:var(--surface);padding:7px 9px;display:flex;flex-direction:column;gap:6px;font-size:12px;min-width:168px;}
+.inventario-tecnologico-mapa-plano-control[hidden]{display:none;}
+.inventario-tecnologico-mapa-plano-control-fila{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.inventario-tecnologico-mapa-plano-control-titulo{font-weight:700;color:var(--accent-ink);}
+.inventario-tecnologico-mapa-plano-control-opacidad{display:flex;flex-direction:column;gap:2px;color:var(--ink-muted);}
+.inventario-tecnologico-mapa-plano-control input[type=range],.inventario-tecnologico-mapa-aviso-plano input[type=range]{accent-color:var(--accent);width:100%;margin:0;}
+.inventario-tecnologico-mapa-aviso-plano{flex-wrap:wrap;white-space:normal;width:min(760px, calc(100% - 20px));border-radius:12px;padding:8px 10px 8px 14px;row-gap:6px;}
+.inventario-tecnologico-mapa-aviso-plano-texto{flex:1 1 260px;}
+.inventario-tecnologico-mapa-aviso-plano-info{font-size:12px;opacity:.85;flex:1 1 100%;order:3;}
+.inventario-tecnologico-mapa-aviso-plano-controles{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.inventario-tecnologico-mapa-aviso-plano-controles .inventario-tecnologico-btn{background:#fff;}
+.inventario-tecnologico-mapa-aviso-plano-controles .inventario-tecnologico-btn-primary{background:var(--accent);color:#fff;}
+.inventario-tecnologico-mapa-aviso-plano-opacidad{display:flex;align-items:center;gap:6px;font-size:12px;}
+.inventario-tecnologico-mapa-aviso-plano-opacidad input{width:90px;}
+.inventario-tecnologico-mapa-leyenda-plano{border-top:1px solid var(--border);padding-top:6px !important;}
+.inventario-tecnologico-mapa-leyenda-plano[hidden]{display:none !important;}
+.inventario-tecnologico-mapa-leyenda-subtitulo{font-weight:600;color:var(--ink-muted);}
+.inventario-tecnologico-mapa-leyenda-plano-drenaje{border-top:5px solid #00FFFF;}
+.inventario-tecnologico-mapa-leyenda-plano-reservorio{border-top:5px solid #10568A;}
+.inventario-tecnologico-mapa-leyenda-plano-lluvias{border-top:5px solid #AFD9AA;}
+.inventario-tecnologico-mapa-leyenda-plano-via{border-top:3px solid #F8991E;}
 .inventario-tecnologico-mapa-sim-barra{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding:7px 10px;border:1.5px solid var(--danger);border-radius:8px;background:#FFF8F6;font-size:12px;font-weight:600;}
 @media (max-width:1024px){
   .inventario-tecnologico-mapa-layout{grid-template-columns:minmax(0,1fr) 320px;}
@@ -820,7 +873,7 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
 @media (max-width:720px){
   main.inventario-tecnologico-main-mapa{padding:10px 8px 30px;}
   .inventario-tecnologico-mapa-vista{height:auto;min-height:0;}
-  .inventario-tecnologico-mapa-layout{grid-template-columns:1fr;}
+  .inventario-tecnologico-mapa-layout{grid-template-columns:minmax(0,1fr);}
   .inventario-tecnologico-mapa-lienzo-wrap{height:58vh;min-height:320px;}
   .inventario-tecnologico-mapa-panel{overflow:visible;}
   .inventario-tecnologico-mapa-buscador{max-width:none;flex-basis:100%;}
@@ -936,3 +989,161 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
 @media (max-width:400px){
   .inventario-tecnologico-login-card{padding:22px 16px;}
 }
+
+/* ---------- Formulario de activo: campos según el tipo, selector de Tipo y submodal ---------- */
+.inventario-tecnologico-form-activo [data-campo][hidden]{display:none !important;}
+.inventario-tecnologico-form-activo > fieldset{margin-top:14px;}
+.inventario-tecnologico-fa-fila{display:flex;gap:6px;align-items:stretch;}
+.inventario-tecnologico-fa-fila > .inventario-tecnologico-btn-sm{flex:none;min-width:36px;font-size:16px;line-height:1;}
+
+/* Selector de Tipo: botón + panel con búsqueda y orden A–Z / Z–A */
+.inventario-tecnologico-combo{position:relative;flex:1;min-width:0;}
+.inventario-tecnologico-combo-boton{
+  width:100%;display:flex;align-items:center;gap:8px;text-align:left;
+  border:1px solid var(--border-strong);border-radius:var(--radius-sm);
+  padding:8px 10px;background:var(--surface);color:var(--ink);font-size:14px;min-height:38px;
+  transition:border-color .15s, box-shadow .15s;
+}
+.inventario-tecnologico-combo-boton:hover{border-color:var(--accent);}
+.inventario-tecnologico-combo-boton:focus-visible,
+.inventario-tecnologico-combo-abierto .inventario-tecnologico-combo-boton{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+.inventario-tecnologico-combo-icono{display:inline-flex;flex:none;width:16px;justify-content:center;}
+.inventario-tecnologico-combo-icono svg{width:16px;height:16px;}
+.inventario-tecnologico-combo-texto{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-combo-placeholder{color:var(--ink-faint);}
+.inventario-tecnologico-combo-flecha{flex:none;width:7px;height:7px;margin:0 3px;border-right:2px solid var(--ink-muted);border-bottom:2px solid var(--ink-muted);transform:translateY(-2px) rotate(45deg);transition:transform .2s;}
+.inventario-tecnologico-combo-abierto .inventario-tecnologico-combo-flecha{transform:translateY(2px) rotate(-135deg);}
+.inventario-tecnologico-combo-panel{
+  position:absolute;top:calc(100% + 4px);left:0;right:0;min-width:250px;z-index:40;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);
+  padding:8px;transform-origin:top center;animation:inventario-tecnologico-combo-entra .16s cubic-bezier(.2,.7,.2,1);
+}
+.inventario-tecnologico-combo-panel[hidden]{display:none;}
+.inventario-tecnologico-combo-herramientas{display:flex;gap:6px;margin-bottom:6px;}
+.inventario-tecnologico-field .inventario-tecnologico-combo-filtro{flex:1;width:auto;min-width:0;padding:7px 9px;}
+.inventario-tecnologico-field .inventario-tecnologico-combo-filtro:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+.inventario-tecnologico-combo-orden{
+  flex:none;min-width:54px;padding:0 10px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);
+  background:var(--surface-2);font-size:12.5px;font-weight:600;color:var(--ink-muted);
+}
+.inventario-tecnologico-combo-orden:hover{color:var(--accent-ink);border-color:var(--accent);}
+.inventario-tecnologico-combo-lista{position:relative;list-style:none;margin:0;padding:0;max-height:260px;overflow-y:auto;overscroll-behavior:contain;}
+.inventario-tecnologico-combo-opcion{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:5px;cursor:pointer;font-size:13.5px;color:var(--ink);}
+.inventario-tecnologico-combo-opcion-activa{background:var(--accent-soft);}
+.inventario-tecnologico-combo-opcion[aria-selected="true"]{font-weight:600;color:var(--accent-ink);}
+.inventario-tecnologico-combo-opcion-vacia{color:var(--ink-faint);font-style:italic;}
+.inventario-tecnologico-combo-opcion mark{background:#FDE7C8;color:inherit;border-radius:2px;padding:0 1px;}
+.inventario-tecnologico-combo-check{margin-left:auto;color:var(--accent);font-weight:700;}
+.inventario-tecnologico-combo-vacio{padding:10px 8px;font-size:12.5px;color:var(--ink-faint);}
+.inventario-tecnologico-combo-vacio[hidden]{display:none;}
+@keyframes inventario-tecnologico-combo-entra{from{opacity:0;transform:translateY(-4px) scale(.98);}to{opacity:1;transform:none;}}
+
+/* Submodal: un segundo modal encima del que está abierto (no lo borra) */
+.inventario-tecnologico-submodal-backdrop{z-index:150;padding-top:70px;background:rgba(20,28,36,0.32);animation:inventario-tecnologico-submodal-fondo .18s ease-out;}
+.inventario-tecnologico-submodal-backdrop > .inventario-tecnologico-modal{max-width:560px;animation:inventario-tecnologico-submodal-entra .24s cubic-bezier(.2,.7,.2,1);}
+.inventario-tecnologico-submodal-backdrop > .inventario-tecnologico-submodal-angosto{max-width:420px;}
+.inventario-tecnologico-submodal-saliendo .inventario-tecnologico-submodal-backdrop{animation:inventario-tecnologico-submodal-fondo-sale .16s ease-in forwards;}
+.inventario-tecnologico-submodal-saliendo .inventario-tecnologico-modal{animation:inventario-tecnologico-submodal-sale .16s ease-in forwards;}
+.inventario-tecnologico-submodal .inventario-tecnologico-field input[type=color]{height:38px;padding:3px;cursor:pointer;}
+.inventario-tecnologico-field-titulo{font-size:12px;font-weight:600;color:var(--ink-muted);}
+.inventario-tecnologico-nt-campos{display:flex;flex-wrap:wrap;gap:8px 16px;margin:4px 0 2px;}
+.inventario-tecnologico-field .inventario-tecnologico-nt-campos label{display:flex;align-items:center;gap:6px;font-weight:400;font-size:13px;color:var(--ink);cursor:pointer;}
+.inventario-tecnologico-field .inventario-tecnologico-nt-campos input[type=checkbox]{width:16px;height:16px;padding:0;margin:0;flex:none;accent-color:var(--accent);}
+@keyframes inventario-tecnologico-submodal-entra{from{opacity:0;transform:translateY(12px) scale(.98);}to{opacity:1;transform:none;}}
+@keyframes inventario-tecnologico-submodal-sale{from{opacity:1;transform:none;}to{opacity:0;transform:translateY(8px) scale(.98);}}
+@keyframes inventario-tecnologico-submodal-fondo{from{background:rgba(20,28,36,0);}to{background:rgba(20,28,36,0.32);}}
+@keyframes inventario-tecnologico-submodal-fondo-sale{from{opacity:1;}to{opacity:0;}}
+@media (prefers-reduced-motion:reduce){
+  .inventario-tecnologico-combo-panel,
+  .inventario-tecnologico-submodal-backdrop,
+  .inventario-tecnologico-submodal-backdrop > .inventario-tecnologico-modal,
+  .inventario-tecnologico-submodal-saliendo .inventario-tecnologico-submodal-backdrop,
+  .inventario-tecnologico-submodal-saliendo .inventario-tecnologico-modal{animation:none;}
+  .inventario-tecnologico-combo-flecha{transition:none;}
+}
+
+/* ---------- Mapa: equipos de la torre (casilla de caída, acordeón) ---------- */
+.inventario-tecnologico-mapa-equipo-fila{display:flex;align-items:stretch;gap:4px;min-width:0;}
+.inventario-tecnologico-mapa-equipo-fila > .inventario-tecnologico-mapa-fila{flex:1;width:auto;min-width:0;}
+.inventario-tecnologico-mapa-caida-check{position:relative;flex:none;display:flex;align-items:center;justify-content:center;width:30px;border-radius:8px;cursor:pointer;}
+.inventario-tecnologico-mapa-caida-check:hover{background:var(--danger-soft);}
+.inventario-tecnologico-mapa-caida-check input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;}
+.inventario-tecnologico-mapa-caida-caja{
+  width:18px;height:18px;border:2px solid var(--border-strong);border-radius:5px;background:var(--surface);
+  display:flex;align-items:center;justify-content:center;transition:background .15s, border-color .15s, transform .15s;
+}
+.inventario-tecnologico-mapa-caida-check:hover .inventario-tecnologico-mapa-caida-caja{border-color:#8B1E12;}
+.inventario-tecnologico-mapa-caida-check input:checked + .inventario-tecnologico-mapa-caida-caja{background:#8B1E12;border-color:#8B1E12;transform:scale(1.06);}
+.inventario-tecnologico-mapa-caida-check input:checked + .inventario-tecnologico-mapa-caida-caja::after{content:"";width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:translateY(-1px) rotate(45deg);}
+.inventario-tecnologico-mapa-caida-check input:focus-visible + .inventario-tecnologico-mapa-caida-caja{outline:2px solid var(--accent);outline-offset:2px;}
+.inventario-tecnologico-mapa-ayuda-caida{font-size:11.5px;color:var(--ink-faint);margin:-4px 0 6px;}
+.inventario-tecnologico-mapa-chevron{flex:none;width:7px;height:7px;margin:0 2px 0 1px;border-right:2px solid var(--ink-faint);border-bottom:2px solid var(--ink-faint);transform:translateY(-2px) rotate(45deg);transition:transform .28s cubic-bezier(.2,.7,.2,1), border-color .2s;}
+.inventario-tecnologico-mapa-fila[aria-expanded="true"] .inventario-tecnologico-mapa-chevron{transform:translateY(2px) rotate(-135deg);border-color:var(--brand-orange);}
+@media (prefers-reduced-motion:reduce){
+  .inventario-tecnologico-mapa-chevron, .inventario-tecnologico-mapa-caida-caja{transition:none;}
+}
+
+/* ---------- Mapa: red de la finca (007): red, atajos, cableado, nombre automático ---------- */
+.inventario-tecnologico-modal.inventario-tecnologico-modal-angosto{max-width:480px;}
+.inventario-tecnologico-mapa-red-chip{
+  --red-color:var(--accent);
+  display:inline-flex;align-items:center;gap:4px;margin-right:6px;padding:0 7px 0 5px;border-radius:10px;
+  font-size:10.5px;font-weight:700;line-height:16px;white-space:nowrap;color:var(--ink);background:var(--surface);border:1px solid var(--red-color);
+}
+.inventario-tecnologico-mapa-red-chip::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--red-color);}
+.inventario-tecnologico-mapa-caida-bloqueada{cursor:not-allowed;}
+.inventario-tecnologico-mapa-caida-bloqueada input{cursor:not-allowed;}
+.inventario-tecnologico-mapa-caida-bloqueada .inventario-tecnologico-mapa-caida-caja{opacity:.55;}
+.inventario-tecnologico-mapa-caida-bloqueada:hover{background:transparent;}
+
+.inventario-tecnologico-mapa-atajos{margin:12px 0;}
+.inventario-tecnologico-mapa-atajos-lista{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;}
+.inventario-tecnologico-mapa-atajo{display:flex;align-items:center;gap:4px;}
+.inventario-tecnologico-mapa-atajo-switch{
+  flex:1;min-width:0;display:flex;align-items:center;gap:9px;text-align:left;
+  border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:7px 10px;color:var(--ink);font-size:13px;
+}
+.inventario-tecnologico-mapa-atajo-switch:hover{background:var(--surface-2);}
+.inventario-tecnologico-mapa-atajo-switch:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+.inventario-tecnologico-mapa-atajo-on .inventario-tecnologico-mapa-atajo-switch{border-color:#8B1E12;background:var(--danger-soft);}
+.inventario-tecnologico-mapa-atajo-nombre{flex:1;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-mapa-switch{position:relative;flex:none;width:30px;height:17px;border-radius:9px;background:var(--border-strong);transition:background .2s;}
+.inventario-tecnologico-mapa-switch::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .2s cubic-bezier(.2,.7,.2,1);}
+.inventario-tecnologico-mapa-atajo-on .inventario-tecnologico-mapa-switch{background:#8B1E12;}
+.inventario-tecnologico-mapa-atajo-on .inventario-tecnologico-mapa-switch::after{transform:translateX(13px);}
+.inventario-tecnologico-mapa-atajo-equipos{list-style:none;margin:4px 0 8px;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12.5px;max-height:220px;overflow-y:auto;}
+.inventario-tecnologico-mapa-atajo-equipos li{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);}
+
+.inventario-tecnologico-mapa-cableado-arbol,
+.inventario-tecnologico-mapa-cableado-hijos{list-style:none;margin:0;padding:0;}
+.inventario-tecnologico-mapa-cableado-arbol{display:flex;flex-direction:column;gap:6px;font-size:12.5px;}
+.inventario-tecnologico-mapa-cableado-arbol > .inventario-tecnologico-mapa-cableado-nodo{border:1px solid var(--border);border-radius:8px;padding:6px 8px;background:var(--surface);}
+.inventario-tecnologico-mapa-cableado-fila{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;min-height:24px;}
+.inventario-tecnologico-mapa-cableado-hijos{position:relative;margin-left:9px;padding-left:16px;border-left:2px solid var(--ink-muted);}
+.inventario-tecnologico-mapa-cableado-hijos > .inventario-tecnologico-mapa-cableado-nodo{position:relative;padding:3px 0;}
+.inventario-tecnologico-mapa-cableado-hijos > .inventario-tecnologico-mapa-cableado-nodo::before{content:"";position:absolute;left:-16px;top:15px;width:12px;border-top:2px solid var(--ink-muted);}
+.inventario-tecnologico-mapa-cableado-simbolo{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--ink-muted);color:var(--ink-muted);background:var(--surface);}
+.inventario-tecnologico-mapa-cableado-subida{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;color:var(--accent);border:1px solid var(--accent);border-radius:10px;padding:0 7px;line-height:16px;white-space:nowrap;}
+.inventario-tecnologico-mapa-cableado-caido > .inventario-tecnologico-mapa-cableado-fila .inventario-tecnologico-mapa-enlace-texto,
+.inventario-tecnologico-mapa-cableado-sin_conexion > .inventario-tecnologico-mapa-cableado-fila .inventario-tecnologico-mapa-enlace-texto{color:var(--danger);}
+
+.inventario-tecnologico-mapa-nombre-auto{display:block;padding:8px 10px;border:1px dashed var(--border-strong);border-radius:var(--radius-sm);background:var(--surface-2);font-weight:600;color:var(--ink);}
+.inventario-tecnologico-mapa-nombre-auto-vacio{font-weight:400;color:var(--ink-faint);font-style:italic;}
+
+.inventario-tecnologico-catalogo + .inventario-tecnologico-catalogo{margin-top:18px;}
+.inventario-tecnologico-catalogo-lista{list-style:none;margin:8px 0;padding:0;display:flex;flex-direction:column;gap:6px;}
+.inventario-tecnologico-catalogo-fila{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;}
+.inventario-tecnologico-catalogo-fila input[type=text]{flex:1;min-width:160px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:6px 9px;}
+.inventario-tecnologico-catalogo-fila input[type=color]{width:38px;height:32px;padding:2px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);cursor:pointer;}
+.inventario-tecnologico-catalogo-fila select{border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:6px 8px;background:var(--surface);}
+.inventario-tecnologico-catalogo-check{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;color:var(--ink-muted);}
+.inventario-tecnologico-catalogo-cuenta{font-size:12px;min-width:74px;}
+.inventario-tecnologico-catalogo-nueva{padding-top:8px;border-top:1px dashed var(--border);}
+@media (prefers-reduced-motion:reduce){
+  .inventario-tecnologico-mapa-switch, .inventario-tecnologico-mapa-switch::after{transition:none;}
+}
+.inventario-tecnologico-mapa-equipo-fila .inventario-tecnologico-mapa-fila-titulo{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.3;}
+.inventario-tecnologico-mapa-rol.inventario-tecnologico-mapa-rol-tipo{--rol-color:var(--ink-muted);}
+.inventario-tecnologico-mapa-fila-meta{display:flex;flex-wrap:wrap;align-items:center;gap:3px 5px;margin-top:3px;min-width:0;}
+.inventario-tecnologico-mapa-fila-meta .inventario-tecnologico-mapa-red-chip{margin-right:0;}
+.inventario-tecnologico-mapa-fila-meta .inventario-tecnologico-mapa-fila-sub{flex:1 1 auto;min-width:0;}

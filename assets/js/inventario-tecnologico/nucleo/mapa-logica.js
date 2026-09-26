@@ -184,13 +184,37 @@ const ERRORES_POR_RESTRICCION = [
   ["historial_ubicacion_un_vigente", "Ese activo ya tiene una ubicación vigente. Recarga el mapa e inténtalo de nuevo."],
   ["historial_ubicacion_fechas", "La fecha de fin no puede ser anterior a la de inicio."],
   ["tipos_ubicacion_pkey", "Ya existe un tipo equivalente a esa etiqueta."],
+  // 007: tipos de equipo, redes y atajos
+  ["tipos_equipo_red_etiqueta_unica", "Ya hay un tipo de equipo con ese nombre."],
+  ["tipos_equipo_red_pkey", "Ya hay un tipo de equipo con ese nombre."],
+  ["tipos_equipo_red_etiqueta_valida", "El nombre del tipo no puede quedar vacío (hasta 40 caracteres)."],
+  ["redes_nombre_unico", "Ya hay una red con ese nombre."],
+  ["redes_nombre_valido", "El nombre de la red no puede quedar vacío (hasta 60 caracteres)."],
+  ["redes_color_valido", "Elige un color para la red."],
+  ["equipos_radioenlace_tipo_fk", "Ese tipo de equipo ya no existe. Recarga el mapa e inténtalo de nuevo."],
+  ["equipos_radioenlace_referencia_valida", "La referencia no puede quedar vacía ni pasar de 60 caracteres."],
+  ["atajos_simulacion_nombre_unico", "Ya hay un atajo con ese nombre."],
+  ["atajos_simulacion_nombre_valido", "Ponle un nombre al atajo (hasta 60 caracteres)."],
+  ["atajos_simulacion_con_equipos", "El atajo necesita al menos un equipo."],
 ];
+
+export const TEXTO_FALTA_007 = "Falta la migración 007 en Supabase (tipos de equipo, redes y atajos): hay que correr db/migraciones/007_red_tipos_atajos.sql.";
 
 export function traducirErrorMapa(error){
   if(!error) return "Error desconocido.";
   const msg = String(error.message || error);
   const code = String(error.code || "");
   for(const [restriccion, texto] of ERRORES_POR_RESTRICCION) if(msg.includes(restriccion)) return texto;
+  if(/tipos_equipo_red|atajos_simulacion|public\.redes|'redes'|"redes"/.test(msg) || (code === "PGRST204" && /tipo_equipo|red_id|referencia/.test(msg))){
+    if(code === "PGRST205" || code === "PGRST204" || code === "42P01" || /Could not find the (table|'\w+' column)|does not exist/i.test(msg)) return TEXTO_FALTA_007;
+    if(code === "42501" && /permission denied for (table|relation)/i.test(msg)) return `La base rechazó el acceso: falta el GRANT de la migración 007 (${msg}).`;
+    if(code === "23503" && /atajo apunta/i.test(msg)) return "Algún equipo del atajo ya no existe: recarga el mapa e inténtalo de nuevo.";
+  }
+  if(/planos_mapa/.test(msg)){
+    if(code === "PGRST205" || code === "42P01" || /Could not find the table|does not exist/i.test(msg)) return "Falta la tabla del plano en Supabase: hay que correr db/migraciones/006_plano_mapa.sql. Mientras tanto la capa Plano funciona, pero el ajuste no se puede guardar.";
+    if(code === "42501" && /permission denied for (table|relation)/i.test(msg)) return `La base rechazó el acceso a la tabla del plano: falta el GRANT de la migración 006 (${msg}).`;
+    if(code === "23514" && /planos_mapa_esquinas_validas/.test(msg)) return "La posición del plano no es válida (esquinas fuera de rango o alineadas): vuelve a ajustarlo.";
+  }
   if(code === "PGRST205" || code === "42P01" || /Could not find the table|does not exist/i.test(msg)){
     return /enlaces_respaldo|servidor_id/.test(msg)
       ? "Falta la jerarquía de radioenlaces en Supabase: hay que correr db/migraciones/003_jerarquia_radioenlaces.sql."

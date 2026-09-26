@@ -19,20 +19,24 @@
 // dentro de <main>. Como Leaflet engancha listeners a window, renderMain()
 // llama a destruirVistaMapa() al salir de la pestaña.
 import { cargarActivos } from "../nucleo/datos.js";
-import { estadoMapa, indicesMapa, redMapa, refrescarDatosMapa, simulacionMapa } from "../nucleo/datos-mapa.js";
+import { cargarPlanoMapa, estadoMapa, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa, simulacionMapa } from "../nucleo/datos-mapa.js";
+import { caidosEfectivos } from "../nucleo/mapa-nombres.js";
+import { cajaEsquinas } from "../nucleo/plano-mapa.js";
 import { state } from "../nucleo/estado.js";
 import { fmtCoordenadas, fmtDistancia } from "../nucleo/geo.js";
 import { esc, fmtTag } from "../nucleo/helpers.js";
 import { buscarEnMapa, infoTipoUbicacion, resumenMapa, traducirErrorMapa, ubicacionesVisibles } from "../nucleo/mapa-logica.js";
 import { ESTADOS_SIMULACION, ROLES, UMBRAL_AGRUPAR_CLIENTES, caminoARaiz, contarRoles, equipoVisible, estadoPorUbicacion, planDeAgrupados, planDeLineas, resumenRed } from "../nucleo/mapa-jerarquia.js";
 import { esAdmin, puede } from "../nucleo/permisos.js";
-import { eliminarEquipo, eliminarRespaldo, eliminarUbicacion, establecerUbicacionActiva, quitarActivoDeUbicacion } from "../negocio/operaciones-mapa.js";
+import { eliminarEquipo, eliminarRespaldo, eliminarUbicacion, establecerUbicacionActiva, guardarAjustePlano, quitarActivoDeUbicacion } from "../negocio/operaciones-mapa.js";
 import { urlFoto } from "../negocio/operaciones.js";
 import { abrirDetalle } from "./detalle/vista.js";
-import { abrirAsignarActivos, abrirFormEquipo, abrirFormRespaldo, abrirFormUbicacion, abrirMoverActivo } from "./mapa/formularios.js";
+import { abrirAsignarActivos, abrirEditarAtajo, abrirFormEquipo, abrirFormRespaldo, abrirFormUbicacion, abrirGuardarAtajo, abrirMoverActivo, abrirRedesYTipos } from "./mapa/formularios.js";
 import { CAPAS_BASE, CENTRO_POR_DEFECTO, ESTILOS_CON_HALO, ESTILOS_LINEA, HALO, OPACIDAD_ATENUADA, capaBaseInicial, cargarLeaflet, crearCapasBase, iconoAgrupado, iconoUbicacion, recordarCapaBase } from "./mapa/leaflet.js";
 import { htmlPanelCargando, htmlPanelError, htmlPanelResumen, htmlPanelUbicacion } from "./mapa/panel.js";
+import { crearCapaPlano, crearControlPlano, crearPanesPlano, htmlLeyendaPlano, iniciarAjustePlano, opacidadInicial, recordarOpacidad } from "./mapa/plano.js";
 import { abrirCarruselFotos, cerrarModal, confirmarAccion, mostrarToast, renderMain } from "./render-raiz.js";
+import { expandir, plegarFantasma } from "./transiciones.js";
 
 const P = "inventario-tecnologico-";
 
@@ -63,7 +67,8 @@ export async function renderVistaMapa(main){
   panel.addEventListener("click", alClicPanel);
   montarBarra(main);
 
-  const [rLeaflet, rDatos] = await Promise.allSettled([cargarLeaflet(), refrescarDatosMapa()]);
+  // refrescarPlanoMapa() nunca rechaza: sin la migración 006 la capa Plano usa el plano que trae la app.
+  const [rLeaflet, rDatos] = await Promise.allSettled([cargarLeaflet(), refrescarDatosMapa(), refrescarPlanoMapa()]);
   if(gen !== generacion || !main.isConnected || state.vista !== "mapa") return;
 
   const canvas = main.querySelector(`#${P}mapa-canvas`);
@@ -86,6 +91,7 @@ export function destruirVistaMapa(){
   ubicacionEnPanel = null;
   if(alClicFueraBuscador){ document.removeEventListener("click", alClicFueraBuscador); alClicFueraBuscador = null; }
   if(!vista) return;
+  if(vista.ajustePlano){ try{ vista.ajustePlano.terminar(); }catch(e){ /* el mapa ya se está desarmando */ } }
   document.removeEventListener("keydown", vista.alTeclear, true);
   // Leaflet programa un setTimeout de 250 ms al animar un zoom
   // (_onZoomTransitionEnd); si el mapa se destruye antes, ese callback revienta
@@ -120,6 +126,7 @@ function htmlEsqueleto(){
         </div>
         <span class="${P}fb-spacer"></span>
         <button type="button" class="${P}btn ${P}btn-sm" id="${P}mapa-recargar" title="Volver a leer ubicaciones, equipos y respaldos desde la base">Recargar</button>
+        ${esAdmin() ? `<button type="button" class="${P}btn ${P}btn-sm" id="${P}mapa-redes-tipos" hidden title="Redes de la finca y tipos de equipo (nombre automático)">Redes y tipos</button>` : ""}
         ${esAdmin() ? `<button type="button" class="${P}btn ${P}btn-sm ${P}btn-primary" id="${P}mapa-nueva-ubicacion">+ Ubicación</button>` : ""}
         <details class="${P}mapa-filtros-det" id="${P}mapa-filtros-det" open>
         <summary class="${P}mapa-filtros-resumen">Filtros y capas <span class="${P}mapa-chip-n" id="${P}mapa-filtros-cuenta"></span></summary>
@@ -164,6 +171,10 @@ function htmlEsqueleto(){
               <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-cortado"></span>Enlace cortado (simulado)</li>
               <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-sinConexion"></span>Sin conectividad</li>
             </ul>
+            <ul class="${P}mapa-leyenda-plano" id="${P}mapa-leyenda-plano" aria-label="Plano de la camaronera" hidden>
+              <li class="${P}mapa-leyenda-subtitulo">Plano</li>
+              ${htmlLeyendaPlano()}
+            </ul>
           </details>
         </div>
         <aside class="${P}mapa-panel" id="${P}mapa-panel" aria-label="Detalle de la ubicación"></aside>
@@ -174,13 +185,16 @@ function htmlEsqueleto(){
 function crearMapa(L, main){
   const canvas = main.querySelector(`#${P}mapa-canvas`);
   const mapa = L.map(canvas, { zoomControl: true, worldCopyJump: true }).setView([CENTRO_POR_DEFECTO.lat, CENTRO_POR_DEFECTO.lng], CENTRO_POR_DEFECTO.zoom);
-  const capas = crearCapasBase(L);
+  crearPanesPlano(mapa);
+  const capaPlano = crearCapaPlano(L, cargarPlanoMapa(), { opacidad: opacidadInicial() });
+  const capas = crearCapasBase(L, { capaPlano });
   const inicial = capaBaseInicial();
   capas[inicial].addTo(mapa);
   L.control.layers(Object.fromEntries(Object.entries(capas).map(([id, capa])=>[CAPAS_BASE[id].etiqueta, capa])), null, { position: "topright" }).addTo(mapa);
   mapa.on("baselayerchange", e=>{
     const id = Object.keys(capas).find(k=>capas[k] === e.layer);
     if(id) recordarCapaBase(id);
+    alternarPlano(id === "plano");
   });
   L.control.scale({ metric: true, imperial: false }).addTo(mapa);
   const capaLineas = L.layerGroup().addTo(mapa);
@@ -189,13 +203,16 @@ function crearMapa(L, main){
   mapa.on("click", alClicMapa);
   mapa.on("contextmenu", alClicDerechoMapa);
 
-  vista = { L, mapa, capaLineas, capaMarcadores, capaAgrupados, marcadores: new Map(), main, colocando: null, encuadrado: false, alTeclear: null };
+  vista = { L, mapa, capaLineas, capaMarcadores, capaAgrupados, marcadores: new Map(), main, colocando: null, encuadrado: false, alTeclear: null,
+    capas, capaPlano, controlPlano: null, ajustePlano: null };
+  alternarPlano(inicial === "plano");
 
   // Captura: corre antes que el Esc de los modales (render-raiz.js), así
   // puede ignorar la tecla si hay un modal abierto.
   vista.alTeclear = e=>{
     if(e.key !== "Escape" || state.vista !== "mapa" || !vista) return;
     if(hayModalAbierto()) return;
+    if(vista.ajustePlano) return; // el Esc lo maneja "Ajustar plano" (cancela el ajuste)
     if(e.target && e.target.id === `${P}mapa-buscar`) return; // el buscador maneja su propio Esc
     if(vista.colocando){ e.preventDefault(); cancelarColocacion(); return; }
     const s = estadoMapa().seleccion;
@@ -252,6 +269,12 @@ function contextoPanel(c){
     esAdmin: esAdmin(),
     puedeAsignar: puede("asignar_ubicacion"),
     puedeSimular: puede("ver_mapa"),
+    // Red de la finca (007)
+    red007: hayRedFinca(),
+    atajos: m.atajos,
+    simEstado: m.simulacion,
+    redPorId: new Map(m.redes.map(r=>[r.id, r])),
+    tipoPorValor: new Map(m.tiposEquipo.map(x=>[x.valor, x])),
     ubicacionesVisibles: m.ubicaciones.filter(u=>c.visibleUbicacion(u.id)),
     ubicacionesTotal: m.ubicaciones.length,
     estadoUbicaciones: c.estadoUbicaciones,
@@ -263,6 +286,8 @@ function contextoPanel(c){
 // Repinta todo: barra de filtros, marcadores, líneas, indicadores y panel.
 function refrescar(){
   const c = calcular();
+  const botonRedes = document.getElementById(`${P}mapa-redes-tipos`);
+  if(botonRedes) botonRedes.hidden = !hayRedFinca();
   pintarFiltros(c);
   pintarAvisoSimulacion(c);
   if(vista){
@@ -399,14 +424,14 @@ function pintarMarcadores(c){
 
 function textoLinea(red, d){
   const cliente = red.equipoPorId.get(d.clienteId), servidor = red.equipoPorId.get(d.servidorId);
-  const partes = [`${cliente ? cliente.nombre : "?"} ← ${servidor ? servidor.nombre : "?"}`, fmtDistancia(d.distanciaKm), d.banda || ""].filter(Boolean);
+  const partes = [`${cliente ? cliente.nombre : "?"} ← ${servidor ? servidor.nombre : "?"}`, fmtDistancia(d.distanciaKm)].filter(Boolean);
   const extra = { cortado: "enlace cortado (simulado)", sinConexion: "sin servicio en la simulación", recuperado: "recuperado vía respaldo", respaldo: `respaldo (prioridad ${d.prioridad})`, cadenaRota: "camino cortado" }[d.estilo];
   return partes.join(" · ") + (extra ? ` — ${extra}` : "");
 }
 
 function etiquetaCorta(d){
   if(d.estilo === "recuperado" || d.estilo === "cadenaRespaldo") return `↺ vía respaldo → ${d.ubicacionRespaldo}`;
-  return [fmtDistancia(d.distanciaKm), d.banda].filter(Boolean).join(" · ");
+  return fmtDistancia(d.distanciaKm);
 }
 
 function pintarLineas(c){
@@ -456,6 +481,30 @@ function pintarAgrupados(c){
   }
 }
 
+// El panel se repinta entero con HTML. Para que no se note como un cambio de
+// pantalla: se conserva el foco (mismo control), y al elegir otro equipo de la
+// MISMA ubicación su detalle se despliega suavemente (acordeón) mientras el
+// que estaba abierto se pliega.
+function focoEnPanel(panel){
+  const el = document.activeElement;
+  if(!el || !panel.contains(el) || !el.dataset || !el.dataset.accion) return null;
+  return { accion: el.dataset.accion, id: el.dataset.id };
+}
+function restaurarFoco(panel, foco){
+  if(!foco) return;
+  const sel = `[data-accion="${CSS.escape(foco.accion)}"]${foco.id !== undefined ? `[data-id="${CSS.escape(foco.id)}"]` : ""}`;
+  const el = panel.querySelector(sel);
+  if(el) el.focus({ preventScroll: true });
+}
+function mostrarEnPanel(panel, el){
+  if(!el || !el.isConnected) return;
+  const p = panel.getBoundingClientRect(), r = el.getBoundingClientRect();
+  if(r.top >= p.top && r.bottom <= p.bottom) return;
+  // Si no entra entero, que al menos se vea desde su fila.
+  const delta = r.height > p.height || r.top < p.top ? r.top - p.top - 8 : r.bottom - p.bottom + 8;
+  panel.scrollBy({ top: delta, behavior: "smooth" });
+}
+
 function pintarPanel(c){
   const panel = document.getElementById(`${P}mapa-panel`);
   if(!panel) return;
@@ -463,12 +512,31 @@ function pintarPanel(c){
   const ctx = contextoPanel(c);
   const u = m.seleccion.ubicacionId ? m.ubicaciones.find(x=>x.id === m.seleccion.ubicacionId) : null;
   const scroll = panel.scrollTop;
+  const mismaUbicacion = !!u && u.id === ubicacionEnPanel;
+  // Qué equipo estaba desplegado y cuánto medía su detalle (para plegarlo).
+  const abiertoAntes = mismaUbicacion ? panel.querySelector(`.${P}mapa-equipo-sel`) : null;
+  const idAntes = abiertoAntes ? Number(abiertoAntes.dataset.equipoId) : null;
+  const detalleAntes = abiertoAntes ? abiertoAntes.querySelector(`.${P}mapa-equipo-detalle`) : null;
+  const altoAntes = detalleAntes ? detalleAntes.getBoundingClientRect().height + parseFloat(getComputedStyle(detalleAntes).marginTop) + parseFloat(getComputedStyle(detalleAntes).marginBottom) : 0;
+  const foco = focoEnPanel(panel);
   panel.innerHTML = u ? htmlPanelUbicacion(ctx, u) : htmlPanelResumen(ctx);
   panel.scrollTop = (u ? u.id : null) === ubicacionEnPanel ? scroll : 0;
   ubicacionEnPanel = u ? u.id : null;
+  restaurarFoco(panel, foco);
+  const idAhora = m.seleccion.equipoId !== null && m.seleccion.equipoId !== undefined ? m.seleccion.equipoId : null;
   const destino = m.seleccion.activoId
     ? panel.querySelector(`[data-activo-id="${m.seleccion.activoId}"]`)
-    : (m.seleccion.equipoId ? panel.querySelector(`[data-equipo-id="${m.seleccion.equipoId}"]`) : null);
+    : (idAhora !== null ? panel.querySelector(`[data-equipo-id="${idAhora}"]`) : null);
+  if(mismaUbicacion && idAntes !== idAhora && !m.seleccion.activoId){
+    const liAntes = idAntes !== null ? panel.querySelector(`[data-equipo-id="${idAntes}"]`) : null;
+    if(liAntes && altoAntes) plegarFantasma(liAntes.querySelector(`.${P}mapa-equipo-fila`), altoAntes, { antes: false });
+    const detalle = destino ? destino.querySelector(`.${P}mapa-equipo-detalle`) : null;
+    if(detalle){
+      expandir(detalle).then(()=>mostrarEnPanel(panel, destino));
+      return;
+    }
+    if(liAntes) return; // solo se plegó: la lista queda donde estaba
+  }
   if(destino && destino.scrollIntoView) destino.scrollIntoView({ block: "nearest" });
 }
 
@@ -578,8 +646,27 @@ function alternarCaida(equipoId){
 }
 
 function restablecerSimulacion(){
-  estadoMapa().simulacion.caidos = [];
+  const s = estadoMapa().simulacion;
+  s.caidos = [];
+  s.atajos = [];
   refrescar();
+}
+
+// Atajo (007): enciende o apaga la caída de sus equipos. Encenderlo activa la
+// simulación.
+function alternarAtajo(id){
+  const s = estadoMapa().simulacion;
+  const lista = s.atajos || [];
+  s.atajos = lista.includes(id) ? lista.filter(x=>x !== id) : [...lista, id];
+  if(s.atajos.length) s.activa = true;
+  refrescar();
+}
+
+// Equipos caídos ahora (marcados a mano + atajos encendidos), para guardarlos como atajo.
+function caidosActuales(){
+  const m = estadoMapa();
+  const red = redMapa();
+  return caidosEfectivos({ manuales: m.simulacion.caidos, atajosActivos: m.simulacion.atajos || [], atajos: m.atajos, existe: id=>red.equipoPorId.has(id) });
 }
 
 function alternarModoSimulacion(activa){
@@ -593,7 +680,7 @@ function alternarModoSimulacion(activa){
 // Eventos del mapa
 // ---------------------------------------------------------------------------
 function alClicMarcador(id){
-  if(!vista || vista.colocando) return;
+  if(!vista || vista.colocando || vista.ajustePlano) return;
   const s = estadoMapa().seleccion;
   // Con un equipo seleccionado, clic en la ubicación de su servidor (o de uno
   // de sus clientes) pasa a ese equipo y el camino se sigue viendo.
@@ -610,7 +697,7 @@ function alClicMarcador(id){
 }
 
 function alClicMapa(e){
-  if(!vista) return;
+  if(!vista || vista.ajustePlano) return;
   if(vista.colocando){
     const { alColocar } = vista.colocando;
     salirDeColocacion();
@@ -622,12 +709,71 @@ function alClicMapa(e){
 }
 
 function alClicDerechoMapa(e){
-  if(!vista || vista.colocando || !esAdmin()) return;
+  if(!vista || vista.colocando || vista.ajustePlano || !esAdmin()) return;
   abrirNuevaUbicacion({ lat: e.latlng.lat, lng: e.latlng.lng });
+}
+
+// ---------------------------------------------------------------------------
+// Capa "Plano": control (opacidad, encuadrar, ajustar) y modo "Ajustar plano"
+// ---------------------------------------------------------------------------
+function alternarPlano(activa){
+  if(!vista) return;
+  if(!activa && vista.ajustePlano) vista.ajustePlano.terminar();
+  if(activa && !vista.controlPlano){
+    vista.controlPlano = crearControlPlano(vista.L, {
+      opacidad: vista.capaPlano.options.opacity,
+      puedeAjustar: esAdmin(),
+      alCambiarOpacidad: v=>{ if(!vista || vista.ajustePlano) return; vista.capaPlano.setOpacity(v); recordarOpacidad(v); },
+      alEncuadrar: encuadrarPlano,
+      alAjustar: entrarAjustePlano,
+    }).addTo(vista.mapa);
+  } else if(!activa && vista.controlPlano){
+    vista.controlPlano.remove();
+    vista.controlPlano = null;
+  }
+  const leyenda = vista.main.querySelector(`#${P}mapa-leyenda-plano`);
+  if(leyenda) leyenda.hidden = !activa;
+}
+
+function encuadrarPlano(){
+  if(!vista) return;
+  const caja = cajaEsquinas(vista.capaPlano.getEsquinas());
+  moverVista(mapa=>mapa.fitBounds(caja, { padding: [24, 24] })); // espera si hay un zoom animándose
+}
+
+function entrarAjustePlano(){
+  if(!vista || vista.ajustePlano || !esAdmin()) return;
+  if(vista.colocando){ mostrarToast("Primero termina de colocar la ubicación (o cancela con Esc).", "info"); return; }
+  const plano = cargarPlanoMapa();
+  const contenedor = vista.main.querySelector(`.${P}mapa-lienzo-wrap`);
+  if(vista.controlPlano) vista.controlPlano.getContainer().hidden = true;
+  vista.ajustePlano = iniciarAjustePlano({
+    L: vista.L,
+    mapa: vista.mapa,
+    capa: vista.capaPlano,
+    contenedor,
+    esquinasGuardadas: plano.esquinas,
+    esquinasOriginales: plano.esquinasOriginales,
+    alGuardar: async esquinas=>{
+      try{
+        await guardarAjustePlano(cargarPlanoMapa(), esquinas);
+        mostrarToast("Ajuste del plano guardado: todos los usuarios lo ven así.", "success");
+      }catch(err){
+        mostrarToast(err.message || String(err), "error");
+        throw err;
+      }
+    },
+    alTerminar: ()=>{
+      if(!vista) return;
+      vista.ajustePlano = null;
+      if(vista.controlPlano) vista.controlPlano.getContainer().hidden = false;
+    },
+  });
 }
 
 function entrarEnColocacion(alColocar, alCancelar){
   if(!vista) return;
+  if(vista.ajustePlano) vista.ajustePlano.terminar(); // no se mezclan los dos modos
   vista.colocando = { alColocar, alCancelar };
   vista.main.querySelector(`.${P}mapa-vista`).classList.add(`${P}mapa-colocando`);
   const aviso = document.getElementById(`${P}mapa-aviso`);
@@ -787,6 +933,8 @@ function montarBarra(main){
     else alternarModoSimulacion(false);
   });
   main.querySelector(`#${P}mapa-recargar`).addEventListener("click", e=>recargar(e.currentTarget));
+  const redesTipos = main.querySelector(`#${P}mapa-redes-tipos`);
+  if(redesTipos) redesTipos.addEventListener("click", ()=>abrirRedesYTipos({ alCambiar: ()=>{ if(document.getElementById(`${P}mapa-panel`)) refrescar(); } }));
   const nueva = main.querySelector(`#${P}mapa-nueva-ubicacion`);
   if(nueva) nueva.addEventListener("click", ()=>{
     if(!vista){ mostrarToast("El mapa no está disponible (Leaflet no cargó).", "error"); return; }
@@ -831,7 +979,17 @@ async function alClicPanel(e){
         if(s.equipoId === id) return seleccionarUbicacion(s.ubicacionId);
         return seleccionarEquipo(id);
       case "seleccionar-equipo-mapa": return seleccionarEquipo(id);
-      case "simular-caida": return alternarCaida(id);
+      case "simular-caida":
+      case "casilla-caida": return alternarCaida(id);
+      case "alternar-atajo": return alternarAtajo(id);
+      case "guardar-atajo": return abrirGuardarAtajo({ equipos: caidosActuales() }, { alGuardar: trasGuardar(nuevo=>{
+        // El atajo recién guardado queda encendido y las caídas pasan a ser suyas.
+        const sim = estadoMapa().simulacion;
+        sim.caidos = [];
+        sim.atajos = [...new Set([...(sim.atajos || []), nuevo])];
+        refrescar();
+      }) });
+      case "editar-atajo": return abrirEditarAtajo(id, { caidosActuales: caidosActuales(), alGuardar: trasGuardar(()=>refrescar()) });
       case "restablecer-simulacion": return restablecerSimulacion();
       case "alternar-expandido":
         m.expandidos = m.expandidos.includes(id) ? m.expandidos.filter(x=>x !== id) : [...m.expandidos, id];

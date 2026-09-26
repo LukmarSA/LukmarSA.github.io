@@ -5,12 +5,17 @@ import { esc, fmtFecha, fmtTag } from "../../nucleo/helpers.js";
 import { fmtAzimut, fmtCoordenadas, fmtDistancia, urlGoogleMaps } from "../../nucleo/geo.js";
 import { infoTipoUbicacion, ordenarUbicaciones } from "../../nucleo/mapa-logica.js";
 import { caminoARaiz, describirConexion, infoEstado, infoRol, tramosDeCamino } from "../../nucleo/mapa-jerarquia.js";
+import { atajosQueLoApagan } from "../../nucleo/mapa-nombres.js";
 import { colorTipo, iconoTipoTam, tintarClaro } from "../../nucleo/opciones-configurables.js";
 import { urlFoto } from "../../negocio/operaciones.js";
 import { GLIFO_RADIO } from "./leaflet.js";
 
 const P = "inventario-tecnologico-";
 const MAX_CLIENTES_LISTA = 12;
+
+// Símbolos del camino a la raíz: onda = enlace inalámbrico, enchufe = cable.
+const ICONO_ONDA = `<svg viewBox="0 0 20 12" width="14" height="9" aria-hidden="true" focusable="false"><path d="M1 6c1.5-4 3-4 4.5 0s3 4 4.5 0 3-4 4.5 0 3 4 4.5 0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>`;
+const ICONO_CABLE = `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false"><path d="M5.5 1.5v3M10.5 1.5v3M3.5 4.5h9v3a4.5 4.5 0 0 1-9 0zM8 12v2.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 function btn(accion, texto, { id = null, clase = "", titulo = "", pressed = null } = {}){
   return `<button type="button" class="${P}btn ${P}btn-sm ${clase}" data-accion="${accion}"${id !== null ? ` data-id="${id}"` : ""}${titulo ? ` title="${esc(titulo)}"` : ""}${pressed !== null ? ` aria-pressed="${pressed}"` : ""}>${texto}</button>`;
@@ -24,6 +29,32 @@ export function pillTipoUbicacion(tipos, valor){
 function pillRol(rol){
   const r = infoRol(rol);
   return `<span class="${P}mapa-rol" style="--rol-color:${r.color}" title="${esc(r.ayuda)}">${esc(r.etiqueta)}</span>`;
+}
+
+// Tipos de radio (inalámbricos): para ellos el rol calculado (backbone,
+// distribución…) tiene sentido. Para el resto (switch, cámara, router…) se
+// muestra su tipo.
+const TIPOS_RADIO = new Set(["ptp", "ap", "estacion"]);
+function pillRolOTipo(ctx, e){
+  const t = ctx.red007 && e.tipo_equipo ? ctx.tipoPorValor.get(e.tipo_equipo) : null;
+  if(t && !TIPOS_RADIO.has(e.tipo_equipo)) return `<span class="${P}mapa-rol ${P}mapa-rol-tipo" title="Tipo de equipo">${esc(t.etiqueta)}</span>`;
+  return pillRol(ctx.red.rol.get(e.id));
+}
+
+// Dentro del panel de una ubicación, todos sus equipos están ahí: el nombre
+// automático se muestra sin " en {esa ubicación}" (el completo queda en el
+// title y en el detalle).
+function nombreEnUbicacion(ctx, e, u){
+  if(!ctx.red007 || !e.tipo_equipo || !u) return e.nombre;
+  const s = ` en ${u.nombre}`;
+  const i = e.nombre.indexOf(s);
+  return i > 0 ? e.nombre.slice(0, i) + e.nombre.slice(i + s.length) : e.nombre;
+}
+
+// Red de la finca (007) de un equipo, como chip con su color.
+function chipRed(ctx, e){
+  const r = ctx.red007 && e.red_id !== null && e.red_id !== undefined ? ctx.redPorId.get(e.red_id) : null;
+  return r ? `<span class="${P}mapa-red-chip" style="--red-color:${esc(r.color)}" title="Red ${esc(r.nombre)}">${esc(r.nombre)}</span>` : "";
 }
 
 function pillEstado(estado){
@@ -73,10 +104,11 @@ export function htmlPanelResumen(ctx){
       <div class="${P}mapa-panel-titulo">Ubicaciones y radioenlaces</div>
       <div class="${P}mapa-panel-sub">Haz clic en un marcador para ver sus equipos y activos, y en un equipo para ver su camino hasta la raíz.${ctx.esAdmin ? " Clic derecho en el mapa para crear una ubicación ahí." : ""}</div>
     </div>
+    ${ctx.red007 && ctx.puedeSimular ? htmlAtajos(ctx) : ""}
     ${ctx.simActiva ? htmlResumenSimulacion(ctx) : ""}
     <div class="${P}mapa-cifras">
       <div class="${P}mapa-cifra"><span class="${P}mapa-cifra-num">${r.ubicaciones}</span><span class="${P}mapa-cifra-lbl">${r.ubicaciones === 1 ? "ubicación" : "ubicaciones"}</span></div>
-      <div class="${P}mapa-cifra"><span class="${P}mapa-cifra-num">${r.equipos}</span><span class="${P}mapa-cifra-lbl">equipos de radio</span></div>
+      <div class="${P}mapa-cifra"><span class="${P}mapa-cifra-num">${r.equipos}</span><span class="${P}mapa-cifra-lbl">equipos de red</span></div>
       <div class="${P}mapa-cifra"><span class="${P}mapa-cifra-num">${r.enlaces}</span><span class="${P}mapa-cifra-lbl">${r.enlaces === 1 ? "radioenlace" : "radioenlaces"}</span></div>
       <div class="${P}mapa-cifra"><span class="${P}mapa-cifra-num">${r.activosUbicados}</span><span class="${P}mapa-cifra-lbl">activos ubicados</span></div>
     </div>
@@ -84,6 +116,32 @@ export function htmlPanelResumen(ctx){
     ${r.activosSinUbicacion ? `<div class="${P}mapa-nota">${plural(r.activosSinUbicacion, "activo todavía no tiene", "activos todavía no tienen")} ubicación.${ctx.puedeAsignar ? " Se asignan desde el panel de cada ubicación (botón «+ Asignar»)." : ""}</div>` : ""}
     <div class="${P}section-title">Ubicaciones${ocultas > 0 ? ` <span class="${P}mapa-muted">(${ocultas} oculta${ocultas === 1 ? "" : "s"} por filtros)</span>` : ""}</div>
     ${filas ? `<ul class="${P}mapa-lista">${filas}</ul>` : `<div class="${P}mapa-vacio">${ctx.ubicacionesTotal ? "Ninguna ubicación coincide con los filtros." : `Todavía no hay ubicaciones.${ctx.esAdmin ? " Usa «+ Ubicación» o clic derecho en el mapa." : ""}`}</div>`}`;
+}
+
+// Atajos de simulación (007): cada uno apaga uno o más equipos con un toggle.
+function htmlAtajos(ctx){
+  const activos = new Set(ctx.simEstado.atajos || []);
+  const hayCaidas = !!(ctx.sim && ctx.sim.caidos.size);
+  const filas = ctx.atajos.map(a=>{
+    const on = activos.has(a.id);
+    const n = (a.equipos || []).filter(id=>ctx.red.equipoPorId.has(id)).length;
+    return `<li class="${P}mapa-atajo${on ? ` ${P}mapa-atajo-on` : ""}">
+      <button type="button" class="${P}mapa-atajo-switch" role="switch" aria-checked="${on}" data-accion="alternar-atajo" data-id="${a.id}" title="${on ? "Levantar" : "Simular la caída de"} ${esc(plural(n, "equipo", "equipos"))}">
+        <span class="${P}mapa-switch" aria-hidden="true"></span>
+        <span class="${P}mapa-atajo-nombre">${esc(a.nombre)}</span>
+        <span class="${P}mapa-muted">${plural(n, "equipo", "equipos")}</span>
+      </button>
+      ${ctx.esAdmin ? btn("editar-atajo", "Editar", { id: a.id, clase: `${P}btn-ghost`, titulo: `Editar el atajo «${a.nombre}»` }) : ""}
+    </li>`;
+  }).join("");
+  return `<section class="${P}mapa-atajos" aria-label="Atajos de simulación">
+    <div class="${P}mapa-seccion-cab">
+      <span class="${P}section-title">Atajos de simulación</span>
+      ${ctx.esAdmin && hayCaidas ? btn("guardar-atajo", "Guardar caídas como atajo", { titulo: "Guarda los equipos caídos ahora como un atajo con nombre" }) : ""}
+    </div>
+    ${filas ? `<ul class="${P}mapa-atajos-lista">${filas}</ul>`
+      : `<div class="${P}mapa-vacio">Sin atajos todavía.${ctx.esAdmin ? " Marca las caídas que quieras (casillas de cada torre) y usa «Guardar caídas como atajo»." : " Los crea el administrador."}</div>`}
+  </section>`;
 }
 
 function htmlResumenSimulacion(ctx){
@@ -142,15 +200,18 @@ export function htmlPanelUbicacion(ctx, u){
     </div>
     ${ctx.simActiva ? htmlResumenSimulacionCorto(ctx) : ""}
 
-    <section class="${P}mapa-seccion" aria-label="Equipos de radioenlace">
+    <section class="${P}mapa-seccion" aria-label="Equipos de red">
       <div class="${P}mapa-seccion-cab">
-        <span class="${P}section-title">Equipos de radioenlace (${equipos.length})</span>
+        <span class="${P}section-title">Equipos de red (${equipos.length})</span>
         ${ctx.esAdmin ? btn("nuevo-equipo", "+ Equipo", { id: u.id }) : ""}
       </div>
+      ${equipos.length && ctx.puedeSimular ? `<div class="${P}mapa-ayuda-caida">Marca la casilla de un equipo para simular su caída (solo en esta pantalla, no se guarda).</div>` : ""}
       ${equipos.length
-        ? `<ul class="${P}mapa-lista">${equipos.map(e=>htmlEquipo(ctx, e, s.equipoId === e.id)).join("")}</ul>`
-        : `<div class="${P}mapa-vacio">Sin equipos de radioenlace.</div>`}
+        ? `<ul class="${P}mapa-lista">${equipos.map(e=>htmlEquipo(ctx, e, s.equipoId === e.id, u)).join("")}</ul>`
+        : `<div class="${P}mapa-vacio">Sin equipos de red.</div>`}
     </section>
+
+    ${htmlCableado(ctx, u, equipos)}
 
     <section class="${P}mapa-seccion" aria-label="Activos en esta ubicación">
       <div class="${P}mapa-seccion-cab">
@@ -163,6 +224,44 @@ export function htmlPanelUbicacion(ctx, u){
     </section>`;
 }
 
+// Diagrama del cableado dentro de la ubicación: un árbol por cada equipo que
+// recibe la conexión de afuera (o es raíz), con sus equipos por cable debajo
+// (switches, cámaras…). Solo aparece si en la ubicación hay alguna conexión
+// por cable.
+function htmlCableado(ctx, u, equipos){
+  const aqui = new Set(equipos.map(e=>e.id));
+  const hijos = new Map();
+  for(const e of equipos){
+    if(e.servidor_id !== null && e.servidor_id !== undefined && aqui.has(e.servidor_id)){
+      if(!hijos.has(e.servidor_id)) hijos.set(e.servidor_id, []);
+      hijos.get(e.servidor_id).push(e);
+    }
+  }
+  if(!hijos.size) return "";
+  const raices = equipos.filter(e=>!(e.servidor_id !== null && e.servidor_id !== undefined && aqui.has(e.servidor_id)));
+  const nodo = (e, profundidad)=>{
+    const st = ctx.sim ? ctx.sim.estado.get(e.id) : null;
+    const s = e.servidor_id !== null && e.servidor_id !== undefined ? ctx.red.equipoPorId.get(e.servidor_id) : null;
+    const us = s ? ctx.red.ubicacionPorId.get(s.ubicacion_id) : null;
+    const subida = profundidad === 0
+      ? (s ? `<span class="${P}mapa-cableado-subida">${ICONO_ONDA} de ${esc(us ? us.nombre : "otra ubicación")}</span>` : `<span class="${P}mapa-cableado-subida">raíz</span>`)
+      : "";
+    const lista = (hijos.get(e.id) || []).map(h=>nodo(h, profundidad + 1)).join("");
+    return `<li class="${P}mapa-cableado-nodo${st && st.estado !== "servicio" ? ` ${P}mapa-cableado-${st.estado}` : ""}">
+      <div class="${P}mapa-cableado-fila">
+        ${profundidad > 0 ? `<span class="${P}mapa-cableado-simbolo" aria-label="por cable">${ICONO_CABLE}</span>` : ""}
+        <button type="button" class="${P}mapa-enlace-texto" data-accion="seleccionar-equipo-mapa" data-id="${e.id}" title="${esc(e.nombre)}">${esc(nombreEnUbicacion(ctx, e, u))}</button>
+        ${chipRed(ctx, e)}${st && st.estado !== "servicio" ? pillEstado(st.estado) : ""}${subida}
+      </div>
+      ${lista ? `<ul class="${P}mapa-cableado-hijos">${lista}</ul>` : ""}
+    </li>`;
+  };
+  return `<section class="${P}mapa-seccion ${P}mapa-cableado" aria-label="Cableado en esta ubicación">
+    <div class="${P}mapa-seccion-cab"><span class="${P}section-title">Cableado en esta ubicación</span></div>
+    <ul class="${P}mapa-cableado-arbol">${raices.map(e=>nodo(e, 0)).join("")}</ul>
+  </section>`;
+}
+
 function htmlResumenSimulacionCorto(ctx){
   const c = ctx.sim.cuentas;
   return `<div class="${P}mapa-sim-barra">
@@ -172,20 +271,59 @@ function htmlResumenSimulacionCorto(ctx){
   </div>`;
 }
 
-function htmlEquipo(ctx, e, seleccionado){
+function htmlEquipo(ctx, e, seleccionado, u = null){
   const activo = e.activo_id !== null && e.activo_id !== undefined ? ctx.indices.activoPorId.get(e.activo_id) : null;
   const clientes = ctx.red.clientes.get(e.id) || [];
   const st = ctx.sim ? ctx.sim.estado.get(e.id) : null;
   const sub = [e.modelo, activo ? fmtTag(activo) : (e.activo_id ? `activo #${e.activo_id}` : "")].filter(Boolean).join(" · ");
+  const caido = !!(ctx.sim && ctx.sim.caidos.has(e.id));
+  // Caído solo por un atajo encendido: la casilla se ve marcada y bloqueada
+  // (se levanta apagando el atajo).
+  const porAtajo = caido && !(ctx.simEstado.caidos || []).includes(e.id) ? atajosQueLoApagan(e.id, { atajosActivos: ctx.simEstado.atajos, atajos: ctx.atajos }) : [];
+  const tituloCasilla = porAtajo.length
+    ? `Caído por el atajo ${porAtajo.map(a=>`«${a.nombre}»`).join(", ")}: apágalo para levantarlo`
+    : (caido ? "Quitar la caída simulada" : "Simular la caída de este equipo (solo en esta pantalla)");
+  // Casilla para simular la caída sin abrir el detalle (va fuera del botón de
+  // la fila: un control no puede ir dentro de otro).
+  const casilla = ctx.puedeSimular
+    ? `<label class="${P}mapa-caida-check${porAtajo.length ? ` ${P}mapa-caida-bloqueada` : ""}" title="${esc(tituloCasilla)}">
+        <input type="checkbox" data-accion="casilla-caida" data-id="${e.id}"${caido ? " checked" : ""}${porAtajo.length ? " disabled" : ""} aria-label="Simular caída de «${esc(e.nombre)}»">
+        <span class="${P}mapa-caida-caja" aria-hidden="true"></span>
+      </label>`
+    : "";
+  const red = chipRed(ctx, e);
   return `<li class="${P}mapa-equipo${seleccionado ? ` ${P}mapa-equipo-sel` : ""}${st && st.estado !== "servicio" ? ` ${P}mapa-equipo-${st.estado}` : ""}" data-equipo-id="${e.id}">
-    <button type="button" class="${P}mapa-fila" data-accion="seleccionar-equipo" data-id="${e.id}" aria-pressed="${seleccionado}" aria-expanded="${seleccionado}" title="${seleccionado ? "Soltar este equipo" : "Ver su camino hasta la raíz"}">
-      <span class="${P}mapa-icono-radio">${GLIFO_RADIO}</span>
-      <span class="${P}mapa-fila-texto"><span class="${P}mapa-fila-titulo">${esc(e.nombre)}</span>${sub ? `<span class="${P}mapa-fila-sub">${esc(sub)}</span>` : ""}</span>
-      <span class="${P}mapa-fila-marcas">${pillRol(ctx.red.rol.get(e.id))}${st ? pillEstado(st.estado) : ""}</span>
-      <span class="${P}mapa-contador" title="${plural(clientes.length, "cliente", "clientes")}">↓ ${clientes.length}</span>
-    </button>
+    <div class="${P}mapa-equipo-fila">
+      ${casilla}
+      <button type="button" class="${P}mapa-fila" data-accion="seleccionar-equipo" data-id="${e.id}" aria-pressed="${seleccionado}" aria-expanded="${seleccionado}" title="${seleccionado ? "Plegar el detalle de este equipo" : "Desplegar su detalle y su camino hasta la raíz"}">
+        <span class="${P}mapa-icono-radio">${GLIFO_RADIO}</span>
+        <span class="${P}mapa-fila-texto">
+          <span class="${P}mapa-fila-titulo" title="${esc(e.nombre)}">${esc(nombreEnUbicacion(ctx, e, u))}</span>
+          <span class="${P}mapa-fila-meta">${pillRolOTipo(ctx, e)}${st ? pillEstado(st.estado) : ""}${red}${sub ? `<span class="${P}mapa-fila-sub">${esc(sub)}</span>` : ""}</span>
+        </span>
+        <span class="${P}mapa-contador" title="${plural(clientes.length, "cliente", "clientes")}">↓ ${clientes.length}</span>
+        <span class="${P}mapa-chevron" aria-hidden="true"></span>
+      </button>
+    </div>
     ${seleccionado ? htmlEquipoDetalle(ctx, e, activo) : ""}
   </li>`;
+}
+
+// Tramo entre dos puntos del camino: la línea separadora lleva el símbolo del
+// medio (onda o cable) y, junto a ella, el badge «inalámbrico» / «cable»
+// (más «vía respaldo» o «cortado» en la simulación y la distancia si es radio).
+function htmlConectorCamino(ctx, t){
+  const medio = t.cable ? "cable" : "inalambrico";
+  const d = t.cable ? null : describirConexion(ctx.red, t.cliente, t.servidor);
+  const roto = !!(ctx.sim && !t.funciona);
+  const badges = [
+    `<span class="${P}mapa-camino-medio">${t.cable ? "cable" : "inalámbrico"}${d && d.distanciaKm !== null && d.distanciaKm !== undefined ? ` · ${esc(fmtDistancia(d.distanciaKm))}` : ""}</span>`,
+    t.respaldo ? `<span class="${P}mapa-camino-marca ${P}mapa-camino-respaldo">vía respaldo</span>` : "",
+    roto ? `<span class="${P}mapa-camino-marca ${P}mapa-camino-cortado">cortado</span>` : "",
+  ].join("");
+  return `<div class="${P}mapa-camino-conector ${P}mapa-camino-${medio}${t.respaldo ? ` ${P}mapa-camino-conector-respaldo` : ""}${roto ? ` ${P}mapa-camino-conector-roto` : ""}">
+    <span class="${P}mapa-camino-simbolo" aria-hidden="true">${t.cable ? ICONO_CABLE : ICONO_ONDA}</span>${badges}
+  </div>`;
 }
 
 function htmlDatosConexion(d){
@@ -194,8 +332,6 @@ function htmlDatosConexion(d){
       <div><dt>Distancia</dt><dd>${fmtDistancia(d.distanciaKm)}</dd></div>
       <div><dt>Azimut desde aquí</dt><dd>${fmtAzimut(d.azimutIda)}</dd></div>
       <div><dt>Azimut desde allá</dt><dd>${fmtAzimut(d.azimutVuelta)}</dd></div>
-      ${d.banda ? `<div><dt>Banda</dt><dd>${esc(d.banda)}</dd></div>` : ""}
-      ${d.frecuencia ? `<div><dt>Frecuencia</dt><dd>${esc(d.frecuencia)} MHz</dd></div>` : ""}
     </dl>`;
 }
 
@@ -240,10 +376,9 @@ function htmlEquipoDetalle(ctx, e, activo){
     </div>`;
 
   const pasos = camino.map((id, i)=>{
-    const t = tramos[i - 1];
-    const marca = i === 0 ? "" : (t.respaldo ? `<span class="${P}mapa-camino-marca ${P}mapa-camino-respaldo">vía respaldo</span>` : (t.cable ? `<span class="${P}mapa-camino-marca">cable</span>` : ""));
-    const roto = ctx.sim && i > 0 && !t.funciona;
-    return `<li class="${roto ? `${P}mapa-camino-roto` : ""}">${marca}<button type="button" class="${P}mapa-enlace-texto" data-accion="seleccionar-equipo-mapa" data-id="${id}"${id === e.id ? ` aria-current="true"` : ""}>${esc(nombreEquipo(ctx, id))}</button> <span class="${P}mapa-muted">${esc(nombreUbicacionDe(ctx, id))}</span>${i === camino.length - 1 && red.rol.get(id) === "raiz" ? ` ${pillRol("raiz")}` : ""}</li>`;
+    const conector = i === 0 ? "" : htmlConectorCamino(ctx, tramos[i - 1]);
+    const roto = ctx.sim && i > 0 && !tramos[i - 1].funciona;
+    return `<li class="${P}mapa-camino-paso${roto ? ` ${P}mapa-camino-roto` : ""}">${conector}<div class="${P}mapa-camino-nodo"><span class="${P}mapa-camino-punto" aria-hidden="true"></span><button type="button" class="${P}mapa-enlace-texto" data-accion="seleccionar-equipo-mapa" data-id="${id}"${id === e.id ? ` aria-current="true"` : ""}>${esc(nombreEquipo(ctx, id))}</button> <span class="${P}mapa-muted">${esc(nombreUbicacionDe(ctx, id))}</span>${i === camino.length - 1 && red.rol.get(id) === "raiz" ? ` ${pillRol("raiz")}` : ""}</div></li>`;
   }).join("");
   const caminoHtml = camino.length > 1 || principal ? `<div class="${P}mapa-bloque">
       <div class="${P}mapa-bloque-titulo">Camino a la raíz ${camino.length > 1 ? `<span class="${P}mapa-muted">(${plural(camino.length - 1, "salto", "saltos")})</span>` : ""}</div>
@@ -288,7 +423,7 @@ function htmlEquipoDetalle(ctx, e, activo){
 
   return `<div class="${P}mapa-equipo-detalle">
       ${ctx.puedeSimular ? simulacion : ""}
-      <div class="${P}mapa-equipo-meta">${pillRol(red.rol.get(e.id))}${e.banda || e.frecuencia_mhz ? `<span class="${P}mapa-muted">Radio: ${esc([e.banda, e.frecuencia_mhz ? `${Number(e.frecuencia_mhz)} MHz` : ""].filter(Boolean).join(" · "))}</span>` : ""}</div>
+      <div class="${P}mapa-equipo-meta">${pillRolOTipo(ctx, e)}${ctx.red007 && e.tipo_equipo && ctx.tipoPorValor.get(e.tipo_equipo) ? `<span class="${P}mapa-muted">${esc(ctx.tipoPorValor.get(e.tipo_equipo).etiqueta)}${e.referencia ? ` · ${esc(e.referencia)}` : ""}</span>` : ""}${chipRed(ctx, e)}</div>
       ${servidor}
       ${caminoHtml}
       ${clientesHtml}

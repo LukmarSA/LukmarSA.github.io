@@ -7,7 +7,9 @@
 // equipos, respaldos y tipos: solo administrador; historial_ubicacion: acción
 // "asignar_ubicacion" de la matriz). La UI solo esconde los botones.
 import { sb } from "../nucleo/config.js";
-import { cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, estadoMapa, indicesMapa, redMapa, refrescarDatosMapa } from "../nucleo/datos-mapa.js";
+import { cargarAtajos, cargarRedes, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, estadoMapa, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa } from "../nucleo/datos-mapa.js";
+import { slugTipo, validarAtajo, validarRed, validarTipoEquipo } from "../nucleo/mapa-nombres.js";
+import { copiarEsquinas, esquinasValidas } from "../nucleo/plano-mapa.js";
 import { hoyLocalISO, traducirErrorMapa, validarEquipo, validarFechaMovimiento, validarTipoUbicacion, validarUbicacion } from "../nucleo/mapa-logica.js";
 import { validarRespaldo, validarServidor } from "../nucleo/mapa-jerarquia.js";
 import { slugify } from "../nucleo/opciones-configurables.js";
@@ -147,9 +149,10 @@ export async function eliminarUbicacion(id){
 // ---------------------------------------------------------------------------
 // Equipos de radioenlace. Vincular un activo lo mueve solo a la ubicación
 // del equipo (trigger de la base), con su tramo en historial_ubicacion.
-// servidor_id = servidor activo (NULL = raíz); banda/frecuencia = las de
-// operación del radio. La base rechaza los ciclos (trigger de la 003); aquí se
-// avisa antes para no gastar el viaje.
+// servidor_id = servidor activo (NULL = raíz). Banda y frecuencia ya no se
+// piden en el formulario: solo se escriben si vienen en los campos (así un
+// equipo editado conserva lo que tenía). La base rechaza los ciclos (trigger
+// de la 003); aquí se avisa antes para no gastar el viaje.
 // ---------------------------------------------------------------------------
 function numeroOpcional(v){
   if(v === "" || v === null || v === undefined) return null;
@@ -158,16 +161,21 @@ function numeroOpcional(v){
 }
 
 function filaEquipo(c){
-  return {
+  const fila = {
     ubicacion_id: Number(c.ubicacion_id),
     nombre: String(c.nombre ?? "").trim(),
     modelo: textoOpcional(c.modelo),
     activo_id: (c.activo_id === "" || c.activo_id === null || c.activo_id === undefined) ? null : Number(c.activo_id),
     notas: textoOpcional(c.notas),
     servidor_id: (c.servidor_id === "" || c.servidor_id === null || c.servidor_id === undefined) ? null : Number(c.servidor_id),
-    banda: textoOpcional(c.banda),
-    frecuencia_mhz: numeroOpcional(c.frecuencia_mhz),
   };
+  if("banda" in c) fila.banda = textoOpcional(c.banda);
+  if("frecuencia_mhz" in c) fila.frecuencia_mhz = numeroOpcional(c.frecuencia_mhz);
+  // 007: solo si el formulario los trae (sin la migración no se envían).
+  if("tipo_equipo" in c) fila.tipo_equipo = textoOpcional(c.tipo_equipo);
+  if("red_id" in c) fila.red_id = (c.red_id === "" || c.red_id === null || c.red_id === undefined) ? null : Number(c.red_id);
+  if("referencia" in c) fila.referencia = textoOpcional(c.referencia);
+  return fila;
 }
 
 function validarFilaEquipo(fila, idActual){
@@ -286,5 +294,95 @@ export async function quitarActivoDeUbicacion(activoId, fecha = hoyLocalISO()){
   const errorFecha = validarFechaMovimiento(fecha, vigente);
   if(errorFecha) throw new Error(errorFecha);
   exigirFilas(await sb.from("historial_ubicacion").update({ hasta: fecha }).eq("id", vigente.id).is("hasta", null).select("id"), "quitó la ubicación");
+  await refrescarDatosMapa();
+}
+
+// ---------------------------------------------------------------------------
+// Capa "Plano" (migración 006): guardar dónde va el plano sobre el mapa. Solo
+// administrador (RLS). Si no hay fila (tabla vacía), se crea con la imagen y
+// el calce original del plano que trae la app.
+// ---------------------------------------------------------------------------
+export async function guardarAjustePlano(plano, esquinas){
+  if(!esquinasValidas(esquinas)) throw new Error("La posición del plano no es válida: vuelve a ajustarlo.");
+  if(plano && plano.error) throw errorAmigable(plano.error);
+  const columnas = "id, esquinas, actualizado_en";
+  const res = plano && plano.id
+    ? await sb.from("planos_mapa").update({ esquinas: copiarEsquinas(esquinas) }).eq("id", plano.id).select(columnas)
+    : await sb.from("planos_mapa").insert({
+        nombre: plano.nombre,
+        imagen: plano.imagen,
+        ancho_px: plano.ancho_px,
+        alto_px: plano.alto_px,
+        esquinas: copiarEsquinas(esquinas),
+        esquinas_originales: copiarEsquinas(plano.esquinasOriginales || esquinas),
+        activo: true,
+      }).select(columnas);
+  exigirFilas(res, "guardó el ajuste del plano");
+  return refrescarPlanoMapa();
+}
+
+// ---------------------------------------------------------------------------
+// Red de la finca (migración 007): redes, tipos de equipo y atajos. Solo el
+// administrador (RLS). Cada escritura recarga los datos del mapa (los nombres
+// automáticos dependen de los tipos).
+// ---------------------------------------------------------------------------
+function exigirValido(v){ if(!v.ok) throw new ErrorValidacion(v.errores); }
+const siguienteOrden = filas=>filas.length ? Math.max(...filas.map(f=>Number(f.orden) || 0)) + 10 : 10;
+
+export async function crearRed({ nombre, color }){
+  exigirValido(validarRed({ nombre, color }, cargarRedes()));
+  const { id } = exigir(await sb.from("redes").insert({ nombre: nombre.trim(), color, orden: siguienteOrden(cargarRedes()) }).select("id").single());
+  await refrescarDatosMapa();
+  return id;
+}
+
+export async function editarRed(id, { nombre, color, activa }){
+  exigirValido(validarRed({ nombre, color }, cargarRedes(), id));
+  const parche = { nombre: nombre.trim(), color };
+  if(activa !== undefined) parche.activa = !!activa;
+  exigirFilas(await sb.from("redes").update(parche).eq("id", id).select("id"), "guardó la red");
+  await refrescarDatosMapa();
+}
+
+export async function eliminarRed(id){
+  exigirFilas(await sb.from("redes").delete().eq("id", id).select("id"), "eliminó la red");
+  await refrescarDatosMapa();
+}
+
+export async function crearTipoEquipo({ etiqueta, genero }){
+  const v = validarTipoEquipo({ etiqueta, genero }, cargarTiposEquipo());
+  exigirValido(v);
+  exigir(await sb.from("tipos_equipo_red").insert({ valor: v.valor || slugTipo(etiqueta), etiqueta: etiqueta.trim(), genero, orden: siguienteOrden(cargarTiposEquipo()) }).select("valor").single());
+  await refrescarDatosMapa();
+  return v.valor;
+}
+
+export async function editarTipoEquipo(valor, { etiqueta, genero, activo }){
+  exigirValido(validarTipoEquipo({ etiqueta, genero }, cargarTiposEquipo(), valor));
+  const parche = { etiqueta: etiqueta.trim(), genero };
+  if(activo !== undefined) parche.activo = !!activo;
+  exigirFilas(await sb.from("tipos_equipo_red").update(parche).eq("valor", valor).select("valor"), "guardó el tipo de equipo");
+  await refrescarDatosMapa();
+}
+
+export async function crearAtajo({ nombre, equipos }){
+  exigirValido(validarAtajo({ nombre, equipos }, cargarAtajos()));
+  const { id } = exigir(await sb.from("atajos_simulacion").insert({ nombre: nombre.trim(), equipos, orden: siguienteOrden(cargarAtajos()) }).select("id").single());
+  await refrescarDatosMapa();
+  return id;
+}
+
+export async function editarAtajo(id, { nombre, equipos }){
+  const actual = cargarAtajos().find(a=>a.id === id);
+  const lista = equipos === undefined ? (actual ? actual.equipos : []) : equipos;
+  exigirValido(validarAtajo({ nombre, equipos: lista }, cargarAtajos(), id));
+  const parche = { nombre: nombre.trim() };
+  if(equipos !== undefined) parche.equipos = equipos;
+  exigirFilas(await sb.from("atajos_simulacion").update(parche).eq("id", id).select("id"), "guardó el atajo");
+  await refrescarDatosMapa();
+}
+
+export async function eliminarAtajo(id){
+  exigirFilas(await sb.from("atajos_simulacion").delete().eq("id", id).select("id"), "eliminó el atajo");
   await refrescarDatosMapa();
 }

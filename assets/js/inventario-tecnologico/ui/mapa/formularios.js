@@ -3,19 +3,19 @@
 // (abrirModal/cerrarModal) y, al guardar, avisan con mostrarToast y devuelven
 // el control con alGuardar.
 import { cargarActivos } from "../../nucleo/datos.js";
-import { cargarEquiposRadioenlace, cargarRespaldos, cargarTiposUbicacion, cargarUbicaciones, estadoMapa, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
+import { cargarAtajos, cargarEquiposRadioenlace, cargarRedes, cargarRespaldos, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, estadoMapa, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
+import { GENEROS, nombreParaGuardar } from "../../nucleo/mapa-nombres.js";
 import { azimutGrados, distanciaKm, fmtAzimut, fmtCoordenadas, fmtDistancia, parsearCoordenadas } from "../../nucleo/geo.js";
 import { esc, fmtFecha, fmtTag } from "../../nucleo/helpers.js";
 import { coincideActivo, hoyLocalISO, infoTipoUbicacion, ordenarUbicaciones, validarFechaMovimiento } from "../../nucleo/mapa-logica.js";
 import { candidatosRespaldo, candidatosServidor, describirConexion, siguientePrioridad } from "../../nucleo/mapa-jerarquia.js";
 import { opcionesVigentes } from "../../nucleo/opciones-configurables.js";
 import { esAdmin } from "../../nucleo/permisos.js";
-import { ErrorValidacion, asignarActivosAUbicacion, crearEquipo, crearRespaldo, crearTipoUbicacion, crearUbicacion, editarEquipo, editarRespaldo, editarUbicacion } from "../../negocio/operaciones-mapa.js";
+import { ErrorValidacion, asignarActivosAUbicacion, crearAtajo, crearEquipo, crearRed, crearRespaldo, crearTipoEquipo, crearTipoUbicacion, crearUbicacion, editarAtajo, editarEquipo, editarRed, editarRespaldo, editarTipoEquipo, editarUbicacion, eliminarAtajo, eliminarRed } from "../../negocio/operaciones-mapa.js";
 import { urlFoto } from "../../negocio/operaciones.js";
 import { abrirModal, cerrarModal, mostrarToast } from "../render-raiz.js";
 
 const P = "inventario-tecnologico-";
-const BANDAS_SUGERIDAS = ["900 MHz", "2.4 GHz", "3.65 GHz", "4.9 GHz", "5 GHz", "6 GHz", "11 GHz", "18 GHz", "24 GHz", "60 GHz", "80 GHz"];
 
 function raizModal(){ return document.querySelector(`#${P}modal-host .${P}modal`); }
 
@@ -296,8 +296,49 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
   const servidorActual = actual && actual.servidor_id !== null && actual.servidor_id !== undefined ? actual.servidor_id : null;
   const clientesActuales = id ? (red.clientes.get(id) || []).length : 0;
 
+  // Con la migración 007 el nombre no se escribe: se arma solo con el tipo, la
+  // ubicación, el servidor y la referencia (y se ve en vivo abajo).
+  const conRed = hayRedFinca();
+  const tipos = conRed ? opcionesVigentes(cargarTiposEquipo(), actual ? actual.tipo_equipo : null, "valor") : [];
+  const redes = conRed ? cargarRedes().filter(r=>r.activa !== false || (actual && r.id === actual.red_id)) : [];
+  const camposNombre = conRed ? `
+        <div class="${P}field">
+          <label for="${P}equipo-tipo">Tipo de equipo</label>
+          <select id="${P}equipo-tipo">
+            <option value="">— Elige el tipo —</option>
+            ${tipos.map(x=>`<option value="${esc(x.valor)}" ${actual && actual.tipo_equipo === x.valor ? "selected" : ""}>${esc(x.etiqueta)}${x.activo === false ? " (inactivo)" : ""}</option>`).join("")}
+          </select>
+          <div class="${P}field-error" data-error="tipo_equipo"></div>
+        </div>
+        <div class="${P}field">
+          <label for="${P}equipo-referencia">Referencia <span class="${P}mapa-muted">(opcional)</span></label>
+          <input type="text" id="${P}equipo-referencia" maxlength="60" value="${esc(actual && actual.referencia || "")}" placeholder="Ej.: Norte, Bomba 2">
+          <div class="${P}field-error" data-error="referencia"></div>
+        </div>` : `
+        <div class="${P}field">
+          <label for="${P}equipo-nombre">Nombre</label>
+          <input type="text" id="${P}equipo-nombre" maxlength="120" value="${esc(actual ? actual.nombre : "")}" placeholder="Ej.: PTP Cerro Azul → Santa Ana">
+          <div class="${P}field-error" data-error="nombre"></div>
+        </div>`;
+  const campoRed = conRed ? `
+        <div class="${P}field">
+          <label for="${P}equipo-red">Red</label>
+          <select id="${P}equipo-red">
+            <option value="">— Sin red —</option>
+            ${redes.map(r=>`<option value="${r.id}" ${actual && actual.red_id === r.id ? "selected" : ""}>${esc(r.nombre)}${r.activa === false ? " (inactiva)" : ""}</option>`).join("")}
+          </select>
+          ${redes.length ? "" : `<div class="${P}hint">Todavía no hay redes: se crean en «Redes y tipos», en la barra del mapa.</div>`}
+        </div>` : "";
+  const vistaNombre = conRed ? `
+        <div class="${P}field ${P}span-2">
+          <span class="${P}field-titulo">Nombre <span class="${P}mapa-muted">(automático)</span></span>
+          <output class="${P}mapa-nombre-auto" id="${P}equipo-nombre-auto" aria-live="polite"></output>
+          <div class="${P}hint">Se arma con el tipo, la ubicación y el servidor; la referencia distingue equipos iguales.${actual && !actual.tipo_equipo ? ` Nombre actual: «${esc(actual.nombre)}».` : ""}</div>
+          <div class="${P}field-error" data-error="nombre"></div>
+        </div>` : "";
+
   const html = `<div class="${P}modal">
-    ${cabecera(id ? "Editar equipo de radioenlace" : "Nuevo equipo de radioenlace")}
+    ${cabecera(id ? "Editar equipo de red" : "Nuevo equipo de red")}
     <div class="${P}modal-body">
       <div class="${P}alert ${P}alert-error" data-alerta hidden></div>
       <div class="${P}form-grid">
@@ -306,31 +347,19 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
           <select id="${P}equipo-ubicacion">${opcionesUbicacion(ubicId)}</select>
           <div class="${P}field-error" data-error="ubicacion_id"></div>
         </div>
-        <div class="${P}field">
-          <label for="${P}equipo-nombre">Nombre</label>
-          <input type="text" id="${P}equipo-nombre" maxlength="120" value="${esc(actual ? actual.nombre : "")}" placeholder="Ej.: PTP Cerro Azul → Santa Ana">
-          <div class="${P}field-error" data-error="nombre"></div>
-        </div>
-        <div class="${P}field">
-          <label for="${P}equipo-modelo">Modelo <span class="${P}mapa-muted">(opcional)</span></label>
-          <input type="text" id="${P}equipo-modelo" maxlength="120" value="${esc(actual && actual.modelo || "")}" placeholder="Ej.: Cambium PTP 550">
-        </div>
+        ${camposNombre}
         <div class="${P}field ${P}span-2">
           <label for="${P}equipo-servidor">Servidor <span class="${P}mapa-muted">(de dónde recibe la conexión)</span></label>
           <select id="${P}equipo-servidor"></select>
           <div class="${P}hint" id="${P}equipo-servidor-calculo"></div>
           <div class="${P}field-error" data-error="servidor_id"></div>
         </div>
-        <div class="${P}field">
-          <label for="${P}equipo-banda">Banda <span class="${P}mapa-muted">(opcional)</span></label>
-          <input type="text" id="${P}equipo-banda" list="${P}equipo-bandas" maxlength="40" value="${esc(actual && actual.banda || "")}" placeholder="Ej.: 5 GHz">
-          <datalist id="${P}equipo-bandas">${BANDAS_SUGERIDAS.map(b=>`<option value="${b}">`).join("")}</datalist>
+        ${campoRed}
+        <div class="${P}field${conRed ? "" : ` ${P}span-2`}">
+          <label for="${P}equipo-modelo">Modelo <span class="${P}mapa-muted">(opcional)</span></label>
+          <input type="text" id="${P}equipo-modelo" maxlength="120" value="${esc(actual && actual.modelo || "")}" placeholder="Ej.: Cambium PTP 550">
         </div>
-        <div class="${P}field">
-          <label for="${P}equipo-frecuencia">Frecuencia en MHz <span class="${P}mapa-muted">(opcional)</span></label>
-          <input type="number" id="${P}equipo-frecuencia" min="0" step="any" inputmode="decimal" value="${actual && actual.frecuencia_mhz !== null && actual.frecuencia_mhz !== undefined ? esc(Number(actual.frecuencia_mhz)) : ""}" placeholder="Ej.: 5745">
-          <div class="${P}field-error" data-error="frecuencia_mhz"></div>
-        </div>
+        ${vistaNombre}
         <div class="${P}field ${P}span-2">
           <label for="${P}equipo-activo-filtro">Activo del inventario <span class="${P}mapa-muted">(opcional)</span></label>
           <input type="search" id="${P}equipo-activo-filtro" placeholder="Filtrar por tag, tipo, marca, modelo…" autocomplete="off">
@@ -393,12 +422,31 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
     };
     pintarServidores();
     pintarCalculoServ();
-    selServ.addEventListener("change", ()=>{ servidorElegido = selServ.value ? Number(selServ.value) : null; pintarCalculoServ(); });
+    selServ.addEventListener("change", ()=>{ servidorElegido = selServ.value ? Number(selServ.value) : null; pintarCalculoServ(); pintarNombre(); });
+
+    // Nombre automático (007), en vivo.
+    const selTipo = $(`#${P}equipo-tipo`);
+    const inputRef = $(`#${P}equipo-referencia`);
+    const salidaNombre = $(`#${P}equipo-nombre-auto`);
+    const filaNombre = ()=>({ ubicacion_id: Number(selUbic.value), tipo_equipo: selTipo ? selTipo.value || null : null, referencia: inputRef ? inputRef.value : null, servidor_id: selServ.value ? Number(selServ.value) : null });
+    const nombreAuto = ()=>nombreParaGuardar(filaNombre(), { equipos: cargarEquiposRadioenlace(), ubicaciones: cargarUbicaciones(), tipos: cargarTiposEquipo() }, id);
+    function pintarNombre(){
+      if(!salidaNombre) return;
+      // Elegido el tipo, se borra el aviso de "falta el tipo" de un intento anterior.
+      const errorTipo = raiz.querySelector('[data-error="tipo_equipo"]');
+      if(errorTipo && selTipo && selTipo.value) errorTipo.textContent = "";
+      const n = nombreAuto();
+      salidaNombre.textContent = n || "Elige el tipo de equipo para armar el nombre.";
+      salidaNombre.classList.toggle(`${P}mapa-nombre-auto-vacio`, !n);
+    }
+    if(selTipo) selTipo.addEventListener("change", pintarNombre);
+    if(inputRef) inputRef.addEventListener("input", pintarNombre);
+    pintarNombre();
 
     pintarCandidatos();
     pintarAviso();
     filtro.addEventListener("input", pintarCandidatos);
-    selUbic.addEventListener("change", ()=>{ pintarAviso(); pintarServidores(); pintarCalculoServ(); });
+    selUbic.addEventListener("change", ()=>{ pintarAviso(); pintarServidores(); pintarCalculoServ(); pintarNombre(); });
     sel.addEventListener("change", ()=>{
       activoElegido = sel.value ? Number(sel.value) : null;
       const modelo = $(`#${P}equipo-modelo`);
@@ -411,14 +459,20 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
       mostrarErrores(raiz, {}, "");
       const campos = {
         ubicacion_id: Number(selUbic.value),
-        nombre: $(`#${P}equipo-nombre`).value,
+        nombre: conRed ? (nombreAuto() || "") : $(`#${P}equipo-nombre`).value,
         modelo: $(`#${P}equipo-modelo`).value,
         activo_id: activoElegido,
         notas: $(`#${P}equipo-notas`).value,
         servidor_id: selServ.value ? Number(selServ.value) : null,
-        banda: $(`#${P}equipo-banda`).value,
-        frecuencia_mhz: $(`#${P}equipo-frecuencia`).value,
+        // Banda y frecuencia ya no se piden (a la persona no le interesan):
+        // no se envían, así lo que ya tenga guardado un equipo no se borra.
       };
+      if(conRed){
+        campos.tipo_equipo = selTipo.value || null;
+        campos.referencia = inputRef.value;
+        campos.red_id = $(`#${P}equipo-red`).value ? Number($(`#${P}equipo-red`).value) : null;
+        if(!campos.tipo_equipo){ mostrarErrores(raiz, { tipo_equipo: "Elige el tipo de equipo: con él se arma el nombre." }, ""); selTipo.focus(); return; }
+      }
       // Si el servidor elegido era uno de sus respaldos, la base lo quita de los respaldos.
       const promovido = id && campos.servidor_id !== null && campos.servidor_id !== servidorActual
         && cargarRespaldos().some(r=>r.equipo_id === id && r.servidor_alternativo_id === campos.servidor_id);
@@ -703,3 +757,204 @@ export async function abrirMoverActivo(activoId, { alGuardar, alCancelar } = {})
     });
   });
 }
+
+// ===========================================================================
+// Red de la finca (migración 007): atajos de simulación, redes y tipos.
+// ===========================================================================
+function nombreDeEquipo(id){
+  const e = cargarEquiposRadioenlace().find(x=>x.id === id);
+  return e ? e.nombre : `equipo #${id}`;
+}
+function listaEquiposHtml(ids, { quitar = false } = {}){
+  if(!ids.length) return `<div class="${P}mapa-vacio">Sin equipos.</div>`;
+  return `<ul class="${P}mapa-atajo-equipos">${ids.map(id=>`<li><span>${esc(nombreDeEquipo(id))}</span>${quitar ? `<button type="button" class="${P}btn ${P}btn-sm ${P}btn-ghost" data-quitar-equipo="${id}" aria-label="Quitar «${esc(nombreDeEquipo(id))}» del atajo">✕</button>` : ""}</li>`).join("")}</ul>`;
+}
+
+// Guarda los equipos caídos ahora (a mano + atajos encendidos) como un atajo con nombre.
+export function abrirGuardarAtajo({ equipos = [] } = {}, { alGuardar } = {}){
+  if(!equipos.length){ mostrarToast("No hay equipos caídos para guardar: marca alguno primero.", "info"); return; }
+  const html = `<div class="${P}modal ${P}modal-angosto">
+    ${cabecera("Guardar caídas como atajo")}
+    <div class="${P}modal-body">
+      <div class="${P}alert ${P}alert-error" data-alerta hidden></div>
+      <div class="${P}field">
+        <label for="${P}atajo-nombre">Nombre del atajo</label>
+        <input type="text" id="${P}atajo-nombre" maxlength="60" placeholder="Ej.: Red Cámaras, PtP Torre K" autocomplete="off">
+        <div class="${P}field-error" data-error="nombre"></div>
+      </div>
+      <div class="${P}field">
+        <span class="${P}field-titulo">Equipos que apaga (${equipos.length})</span>
+        ${listaEquiposHtml(equipos)}
+        <div class="${P}field-error" data-error="equipos"></div>
+      </div>
+    </div>
+    <div class="${P}modal-footer">
+      <button type="button" class="${P}btn ${P}modal-close">Cancelar</button>
+      <button type="button" class="${P}btn ${P}btn-primary" id="${P}atajo-guardar">Guardar atajo</button>
+    </div>
+  </div>`;
+  abrirModal(html, ()=>{
+    const raiz = raizModal();
+    const nombre = raiz.querySelector(`#${P}atajo-nombre`);
+    const guardar = async boton=>{
+      mostrarErrores(raiz, {}, "");
+      try{
+        const id = await conBotonOcupado(boton, "Guardando…", ()=>crearAtajo({ nombre: nombre.value, equipos }));
+        cerrarModal();
+        mostrarToast(`Atajo «${nombre.value.trim()}» guardado.`, "success");
+        if(alGuardar) alGuardar(id);
+      }catch(err){ manejarErrorGuardado(raiz, err); }
+    };
+    const boton = raiz.querySelector(`#${P}atajo-guardar`);
+    boton.addEventListener("click", ()=>guardar(boton));
+    nombre.addEventListener("keydown", e=>{ if(e.key === "Enter"){ e.preventDefault(); guardar(boton); } });
+  });
+}
+
+export function abrirEditarAtajo(id, { caidosActuales = [], alGuardar } = {}){
+  const atajo = cargarAtajos().find(a=>a.id === id);
+  if(!atajo){ mostrarToast("Ese atajo ya no existe. Recarga el mapa.", "error"); return; }
+  let equipos = [...(atajo.equipos || [])];
+  const html = `<div class="${P}modal ${P}modal-angosto">
+    ${cabecera("Editar atajo")}
+    <div class="${P}modal-body">
+      <div class="${P}alert ${P}alert-error" data-alerta hidden></div>
+      <div class="${P}field">
+        <label for="${P}atajo-nombre">Nombre del atajo</label>
+        <input type="text" id="${P}atajo-nombre" maxlength="60" value="${esc(atajo.nombre)}" autocomplete="off">
+        <div class="${P}field-error" data-error="nombre"></div>
+      </div>
+      <div class="${P}field">
+        <span class="${P}field-titulo" id="${P}atajo-equipos-titulo"></span>
+        <div id="${P}atajo-equipos"></div>
+        ${caidosActuales.length ? `<button type="button" class="${P}btn ${P}btn-sm" id="${P}atajo-usar-caidas">Usar las caídas actuales (${caidosActuales.length})</button>` : ""}
+        <div class="${P}field-error" data-error="equipos"></div>
+      </div>
+    </div>
+    <div class="${P}modal-footer">
+      <button type="button" class="${P}btn ${P}btn-danger" id="${P}atajo-eliminar">Eliminar</button>
+      <span class="${P}fb-spacer"></span>
+      <button type="button" class="${P}btn ${P}modal-close">Cancelar</button>
+      <button type="button" class="${P}btn ${P}btn-primary" id="${P}atajo-guardar">Guardar</button>
+    </div>
+  </div>`;
+  abrirModal(html, ()=>{
+    const raiz = raizModal();
+    const cont = raiz.querySelector(`#${P}atajo-equipos`);
+    const pintar = ()=>{
+      raiz.querySelector(`#${P}atajo-equipos-titulo`).textContent = `Equipos que apaga (${equipos.length})`;
+      cont.innerHTML = listaEquiposHtml(equipos, { quitar: true });
+      cont.querySelectorAll("[data-quitar-equipo]").forEach(b=>b.addEventListener("click", ()=>{ equipos = equipos.filter(x=>x !== Number(b.dataset.quitarEquipo)); pintar(); }));
+    };
+    pintar();
+    const usar = raiz.querySelector(`#${P}atajo-usar-caidas`);
+    if(usar) usar.addEventListener("click", ()=>{ equipos = [...caidosActuales]; pintar(); });
+    raiz.querySelector(`#${P}atajo-guardar`).addEventListener("click", async e=>{
+      mostrarErrores(raiz, {}, "");
+      try{
+        await conBotonOcupado(e.currentTarget, "Guardando…", ()=>editarAtajo(id, { nombre: raiz.querySelector(`#${P}atajo-nombre`).value, equipos }));
+        cerrarModal();
+        mostrarToast("Atajo actualizado.", "success");
+        if(alGuardar) alGuardar(id);
+      }catch(err){ manejarErrorGuardado(raiz, err); }
+    });
+    // Eliminar pide confirmación en el mismo botón (sin abrir otro modal encima).
+    const eliminar = raiz.querySelector(`#${P}atajo-eliminar`);
+    eliminar.addEventListener("click", async ()=>{
+      if(eliminar.dataset.confirmar !== "1"){ eliminar.dataset.confirmar = "1"; eliminar.textContent = "¿Eliminar? Confirmar"; return; }
+      try{
+        await conBotonOcupado(eliminar, "Eliminando…", ()=>eliminarAtajo(id));
+        const sim = estadoMapa().simulacion;
+        sim.atajos = (sim.atajos || []).filter(x=>x !== id);
+        cerrarModal();
+        mostrarToast("Atajo eliminado.", "success");
+        if(alGuardar) alGuardar(id);
+      }catch(err){ manejarErrorGuardado(raiz, err); }
+    });
+  });
+}
+
+// Redes de la finca y tipos de equipo (solo administrador).
+export function abrirRedesYTipos({ alCambiar } = {}){
+  const equipos = cargarEquiposRadioenlace();
+  const cuenta = pred=>equipos.filter(pred).length;
+  const filaRed = r=>`<li class="${P}catalogo-fila" data-red-id="${r.id}">
+      <input type="color" value="${esc(r.color)}" aria-label="Color de ${esc(r.nombre)}" data-campo="color">
+      <input type="text" value="${esc(r.nombre)}" maxlength="60" aria-label="Nombre de la red" data-campo="nombre">
+      <label class="${P}catalogo-check"><input type="checkbox" data-campo="activa"${r.activa !== false ? " checked" : ""}> Activa</label>
+      <span class="${P}mapa-muted ${P}catalogo-cuenta">${plural(cuenta(e=>e.red_id === r.id), "equipo", "equipos")}</span>
+      <button type="button" class="${P}btn ${P}btn-sm" data-cat="guardar-red">Guardar</button>
+      <button type="button" class="${P}btn ${P}btn-sm ${P}btn-ghost" data-cat="eliminar-red" title="Eliminar la red (sus equipos quedan sin red)">Eliminar</button>
+    </li>`;
+  const filaTipo = x=>`<li class="${P}catalogo-fila" data-tipo-valor="${esc(x.valor)}">
+      <input type="text" value="${esc(x.etiqueta)}" maxlength="40" aria-label="Nombre del tipo" data-campo="etiqueta">
+      <select data-campo="genero" aria-label="Género del tipo">${GENEROS.map(g=>`<option value="${g.id}"${x.genero === g.id ? " selected" : ""}>${g.id === "f" ? "la" : "el"}</option>`).join("")}</select>
+      <label class="${P}catalogo-check"><input type="checkbox" data-campo="activo"${x.activo !== false ? " checked" : ""}> Activo</label>
+      <span class="${P}mapa-muted ${P}catalogo-cuenta">${plural(cuenta(e=>e.tipo_equipo === x.valor), "equipo", "equipos")}</span>
+      <button type="button" class="${P}btn ${P}btn-sm" data-cat="guardar-tipo">Guardar</button>
+    </li>`;
+  const html = `<div class="${P}modal ${P}modal-wide">
+    ${cabecera("Redes y tipos de equipo")}
+    <div class="${P}modal-body">
+      <section class="${P}catalogo" aria-label="Redes de la finca">
+        <div class="${P}section-title">Redes de la finca</div>
+        <div class="${P}hint">Cada equipo de red pertenece a una red. Para apagar una red entera en la simulación, guarda un atajo con su router.</div>
+        <ul class="${P}catalogo-lista">${cargarRedes().map(filaRed).join("") || `<li class="${P}mapa-vacio">Todavía no hay redes.</li>`}</ul>
+        <div class="${P}catalogo-fila ${P}catalogo-nueva">
+          <input type="color" value="#007EB2" id="${P}red-nueva-color" aria-label="Color de la red nueva">
+          <input type="text" id="${P}red-nueva-nombre" maxlength="60" placeholder="Nombre de la red nueva (ej.: Red Cámaras)">
+          <button type="button" class="${P}btn ${P}btn-sm ${P}btn-primary" data-cat="crear-red">+ Agregar red</button>
+        </div>
+      </section>
+      <section class="${P}catalogo" aria-label="Tipos de equipo">
+        <div class="${P}section-title">Tipos de equipo</div>
+        <div class="${P}hint">El nombre del tipo arma el nombre automático de cada equipo («Estación en Torre K enlazada a Punto a Punto en Torre L»); el género hace concordar «enlazado/enlazada».</div>
+        <ul class="${P}catalogo-lista">${cargarTiposEquipo().map(filaTipo).join("")}</ul>
+        <div class="${P}catalogo-fila ${P}catalogo-nueva">
+          <input type="text" id="${P}tipo-nuevo-etiqueta" maxlength="40" placeholder="Tipo nuevo (ej.: Cámara PTZ)">
+          <select id="${P}tipo-nuevo-genero" aria-label="Género del tipo nuevo">${GENEROS.map(g=>`<option value="${g.id}">${g.id === "f" ? "la" : "el"}</option>`).join("")}</select>
+          <button type="button" class="${P}btn ${P}btn-sm ${P}btn-primary" data-cat="crear-tipo">+ Agregar tipo</button>
+        </div>
+      </section>
+    </div>
+    <div class="${P}modal-footer"><button type="button" class="${P}btn ${P}modal-close">Cerrar</button></div>
+  </div>`;
+  abrirModal(html, ()=>{
+    const raiz = raizModal();
+    const valor = (fila, campo)=>{ const el = fila.querySelector(`[data-campo="${campo}"]`); return el.type === "checkbox" ? el.checked : el.value; };
+    const hecho = mensaje=>{ mostrarToast(mensaje, "success"); if(alCambiar) alCambiar(); abrirRedesYTipos({ alCambiar }); };
+    raiz.addEventListener("click", async e=>{
+      const b = e.target.closest("[data-cat]");
+      if(!b) return;
+      const fila = b.closest(`.${P}catalogo-fila`);
+      try{
+        switch(b.dataset.cat){
+          case "crear-red": {
+            const nombre = raiz.querySelector(`#${P}red-nueva-nombre`).value;
+            await conBotonOcupado(b, "Agregando…", ()=>crearRed({ nombre, color: raiz.querySelector(`#${P}red-nueva-color`).value }));
+            return hecho(`Red «${nombre.trim()}» creada.`);
+          }
+          case "guardar-red":
+            await conBotonOcupado(b, "Guardando…", ()=>editarRed(Number(fila.dataset.redId), { nombre: valor(fila, "nombre"), color: valor(fila, "color"), activa: valor(fila, "activa") }));
+            return hecho("Red guardada.");
+          case "eliminar-red":
+            if(b.dataset.confirmar !== "1"){ b.dataset.confirmar = "1"; b.textContent = "¿Eliminar? Confirmar"; return; }
+            await conBotonOcupado(b, "Eliminando…", ()=>eliminarRed(Number(fila.dataset.redId)));
+            return hecho("Red eliminada: sus equipos quedaron sin red.");
+          case "crear-tipo": {
+            const etiqueta = raiz.querySelector(`#${P}tipo-nuevo-etiqueta`).value;
+            await conBotonOcupado(b, "Agregando…", ()=>crearTipoEquipo({ etiqueta, genero: raiz.querySelector(`#${P}tipo-nuevo-genero`).value }));
+            return hecho(`Tipo «${etiqueta.trim()}» creado.`);
+          }
+          case "guardar-tipo":
+            await conBotonOcupado(b, "Guardando…", ()=>editarTipoEquipo(fila.dataset.tipoValor, { etiqueta: valor(fila, "etiqueta"), genero: valor(fila, "genero"), activo: valor(fila, "activo") }));
+            return hecho("Tipo guardado: los nombres automáticos ya lo usan.");
+        }
+      }catch(err){
+        mostrarToast(err instanceof ErrorValidacion ? Object.values(err.errores)[0] : (err.message || String(err)), "error");
+      }
+    });
+  });
+}
+
+function plural(n, uno, varios){ return `${n} ${n === 1 ? uno : varios}`; }

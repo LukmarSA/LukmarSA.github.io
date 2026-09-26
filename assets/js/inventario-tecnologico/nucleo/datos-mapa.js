@@ -12,11 +12,19 @@
 // La jerarquía (migración 003) viaja en equipos_radioenlace.servidor_id; los
 // respaldos, en enlaces_respaldo. La simulación de fallas vive solo aquí, en
 // memoria (state.mapa.simulacion): nunca se escribe en Supabase.
+//
+// Red de la finca (migración 007): tipos de equipo, redes y atajos de
+// simulación. Se leen junto con lo demás, pero sin exigirlos: si la 007 no se
+// corrió, m.red007.disponible queda en false y la app sigue como antes (nombre
+// a mano, sin tipo, red ni atajos). Con la 007, cada equipo en memoria queda
+// con nombre = el nombre automático y nombre_guardado = el de la base.
 import { sb } from "./config.js";
 import { cargarActivos } from "./datos.js";
 import { state } from "./estado.js";
 import { indexarMapa } from "./mapa-logica.js";
 import { analizarRed, simularFallas } from "./mapa-jerarquia.js";
+import { aplicarNombres, caidosEfectivos } from "./mapa-nombres.js";
+import { normalizarPlano } from "./plano-mapa.js";
 
 export function crearEstadoMapa(){
   return {
@@ -24,7 +32,7 @@ export function crearEstadoMapa(){
     error: null,
     tiposUbicacion: [],   // filas de tipos_ubicacion (valor, etiqueta, color, orden, activo)
     ubicaciones: [],      // filas de ubicaciones (incluye archivadas: activa=false)
-    equipos: [],          // filas de equipos_radioenlace (con servidor_id, banda, frecuencia_mhz)
+    equipos: [],          // filas de equipos_radioenlace (servidor_id; con la 007: tipo_equipo, red_id, referencia, nombre_guardado)
     respaldos: [],        // filas de enlaces_respaldo
     vigentes: [],         // tramos de historial_ubicacion con hasta = null
     seleccion: { ubicacionId: null, equipoId: null, activoId: null },
@@ -36,8 +44,13 @@ export function crearEstadoMapa(){
       estadosOcultos: [], // servicio / respaldo / sin_conexion / caido (solo en simulación)
     },
     expandidos: [],       // servidores agrupados (muchos clientes) con sus líneas desplegadas
-    simulacion: { activa: false, caidos: [] },
+    simulacion: { activa: false, caidos: [], atajos: [] }, // caidos = marcados a mano; atajos = ids de atajos encendidos
+    tiposEquipo: [],      // tipos_equipo_red (007)
+    redes: [],            // redes de la finca (007)
+    atajos: [],           // atajos_simulacion (007)
+    red007: { disponible: false, error: null },
     foco: null,           // { ubicacionId, activoId } pendiente de aplicar al abrir el mapa (p. ej. "Ver en mapa")
+    plano: null,          // capa "Plano" (migración 006): normalizarPlano(fila) + error (null si se leyó bien)
   };
 }
 
@@ -46,14 +59,20 @@ export function estadoMapa(){
   return state.mapa;
 }
 
+// Una consulta que puede fallar sin romper el mapa (tablas de la 007).
+const opcional = consulta=>Promise.resolve(consulta).then(r=>r, err=>({ data: null, error: err }));
+
 export async function refrescarDatosMapa(){
   const m = estadoMapa();
-  const [t, u, e, r, h] = await Promise.all([
+  const [t, u, e, r, h, te, rd, at] = await Promise.all([
     sb.from("tipos_ubicacion").select("*").order("orden"),
     sb.from("ubicaciones").select("*").order("nombre"),
     sb.from("equipos_radioenlace").select("*").order("nombre"),
     sb.from("enlaces_respaldo").select("*").order("prioridad").order("id"),
     sb.from("historial_ubicacion").select("id, activo_id, ubicacion_id, desde, notas").is("hasta", null),
+    opcional(sb.from("tipos_equipo_red").select("*").order("orden").order("etiqueta")),
+    opcional(sb.from("redes").select("*").order("orden").order("nombre")),
+    opcional(sb.from("atajos_simulacion").select("*").order("orden").order("nombre")),
   ]);
   const error = t.error || u.error || e.error || r.error || h.error;
   if(error){ m.error = error; throw error; }
@@ -62,6 +81,12 @@ export async function refrescarDatosMapa(){
   m.equipos = e.data || [];
   m.respaldos = r.data || [];
   m.vigentes = h.data || [];
+  m.red007 = { disponible: !te.error, error: te.error || rd.error || at.error || null };
+  m.tiposEquipo = te.error ? [] : (te.data || []);
+  m.redes = rd.error ? [] : (rd.data || []);
+  m.atajos = at.error ? [] : (at.data || []);
+  aplicarNombres(m.equipos, { ubicaciones: m.ubicaciones, tipos: m.tiposEquipo });
+  m.equipos.sort((a, b)=>String(a.nombre).localeCompare(String(b.nombre), "es"));
   m.cargado = true;
   m.error = null;
   // Lo que apunta a algo que ya no existe (lo borró otra persona) se suelta.
@@ -71,6 +96,31 @@ export async function refrescarDatosMapa(){
   if(s.equipoId && !hayEquipo(s.equipoId)) s.equipoId = null;
   m.expandidos = m.expandidos.filter(hayEquipo);
   m.simulacion.caidos = m.simulacion.caidos.filter(hayEquipo);
+  m.simulacion.atajos = (m.simulacion.atajos || []).filter(id=>m.atajos.some(a=>a.id === id));
+}
+
+// Plano de la capa "Plano" (migración 006). Va aparte de refrescarDatosMapa()
+// y nunca lanza: si la tabla no existe o no se puede leer, la capa sigue con
+// el plano que trae la app (PLANO_POR_DEFECTO) y solo no se puede guardar
+// un ajuste. El error queda en m.plano.error para explicarlo al intentarlo.
+export async function refrescarPlanoMapa(){
+  const m = estadoMapa();
+  try{
+    const { data, error } = await sb.from("planos_mapa")
+      .select("id, nombre, imagen, ancho_px, alto_px, esquinas, esquinas_originales, actualizado_en")
+      .eq("activo", true).order("id").limit(1);
+    if(error){ m.plano = { ...normalizarPlano(null), error }; return m.plano; }
+    m.plano = { ...normalizarPlano((data || [])[0] || null), error: null };
+  }catch(err){
+    m.plano = { ...normalizarPlano(null), error: err };
+  }
+  return m.plano;
+}
+
+export function cargarPlanoMapa(){
+  const m = estadoMapa();
+  if(!m.plano) m.plano = { ...normalizarPlano(null), error: null, pendiente: true };
+  return m.plano;
 }
 
 export function cargarTiposUbicacion(){ return estadoMapa().tiposUbicacion; }
@@ -82,6 +132,15 @@ export function cargarEquiposRadioenlace(){ return estadoMapa().equipos; }
 export function cargarRespaldos(){ return estadoMapa().respaldos; }
 
 export function cargarUbicacionesVigentes(){ return estadoMapa().vigentes; }
+
+export function cargarTiposEquipo(){ return estadoMapa().tiposEquipo; }
+
+export function cargarRedes(){ return estadoMapa().redes; }
+
+export function cargarAtajos(){ return estadoMapa().atajos; }
+
+// true si la migración 007 está corrida (tipo, red, atajos y nombre automático).
+export function hayRedFinca(){ return !!estadoMapa().red007.disponible; }
 
 // Índices calculados sobre lo ya cargado + los activos del listado. Es barato
 // (decenas de ubicaciones, ~100 activos), así que se recalcula cuando se pide
@@ -96,10 +155,13 @@ export function redMapa(){
   return analizarRed({ equipos: m.equipos, ubicaciones: m.ubicaciones, respaldos: m.respaldos });
 }
 
-// Resultado de la simulación, o null si está apagada.
+// Resultado de la simulación, o null si está apagada. Caen los marcados a
+// mano y los de los atajos encendidos.
 export function simulacionMapa(red = redMapa()){
-  const s = estadoMapa().simulacion;
-  return s.activa ? simularFallas(red, s.caidos) : null;
+  const m = estadoMapa();
+  const s = m.simulacion;
+  if(!s.activa) return null;
+  return simularFallas(red, caidosEfectivos({ manuales: s.caidos, atajosActivos: s.atajos || [], atajos: m.atajos, existe: id=>red.equipoPorId.has(id) }));
 }
 
 // ---------------------------------------------------------------------------

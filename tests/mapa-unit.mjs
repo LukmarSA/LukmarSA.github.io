@@ -1,5 +1,6 @@
 // Pruebas unitarias de la lógica pura del mapa (nucleo/geo.js,
-// nucleo/mapa-logica.js y nucleo/mapa-jerarquia.js). No necesitan navegador
+// nucleo/mapa-logica.js, nucleo/mapa-jerarquia.js, nucleo/plano-mapa.js y
+// nucleo/mapa-nombres.js). No necesitan navegador
 // ni Supabase.
 //   node mapa-unit.mjs        (o: npm run test:mapa)
 process.env.TZ = "America/Guayaquil"; // para probar el caso "después de las 19:00" de hoyLocalISO
@@ -9,6 +10,8 @@ import * as geo from "../assets/js/inventario-tecnologico/nucleo/geo.js";
 import * as H from "../assets/js/inventario-tecnologico/nucleo/helpers.js";
 import * as L from "../assets/js/inventario-tecnologico/nucleo/mapa-logica.js";
 import * as J from "../assets/js/inventario-tecnologico/nucleo/mapa-jerarquia.js";
+import * as PL from "../assets/js/inventario-tecnologico/nucleo/plano-mapa.js";
+import * as N from "../assets/js/inventario-tecnologico/nucleo/mapa-nombres.js";
 
 let ok = 0, total = 0;
 const fallas = [];
@@ -488,6 +491,193 @@ prueba("indicadores de agrupados: nombre, cantidad y cuántos clientes quedaron 
   assert.deepEqual({ id:g.servidorId, n:g.clientes, exp:g.expandido }, { id:303, n:9, exp:false });
   const [g2] = J.planDeAgrupados(red, { sim:J.simularFallas(red, [300, 200]), seleccionId:303 });
   assert.equal(g2.servidorSinConexion, true); assert.equal(g2.clientesSinConexion, 9); assert.equal(g2.expandido, true);
+});
+
+// ---------------------------------------------------------------- capa Plano (nucleo/plano-mapa.js)
+const E0 = PL.PLANO_POR_DEFECTO.esquinas;
+const m = (a, b)=>Math.hypot(...PL.aMetros(a, b));
+prueba("plano: las esquinas que trae la app son válidas y el plano mide ≈ 4,2 × 5,3 km", ()=>{
+  assert.equal(PL.esquinasValidas(E0), true);
+  const t = PL.tamanoEnMetros(E0);
+  cerca(t.ancho, 4207, 15, "ancho"); cerca(t.alto, 5286, 15, "alto");
+  cerca(t.ancho / t.alto, PL.PLANO_POR_DEFECTO.ancho_px / PL.PLANO_POR_DEFECTO.alto_px, 0.002, "misma proporción que la imagen");
+});
+prueba("plano: esquinas inválidas (falta una, alineadas, fuera de rango, texto, nada)", ()=>{
+  assert.equal(PL.esquinasValidas({ no:[-2.3,-79.7], ne:[-2.3,-79.6] }), false);
+  assert.equal(PL.esquinasValidas({ no:[-2.3,-79.7], ne:[-2.3,-79.6], so:[-2.3,-79.5] }), false);
+  assert.equal(PL.esquinasValidas({ no:[-200,-79.7], ne:[-2.3,-79.6], so:[-2.4,-79.7] }), false);
+  assert.equal(PL.esquinasValidas({ no:["-2.3",-79.7], ne:[-2.3,-79.6], so:[-2.4,-79.7] }), false);
+  assert.equal(PL.esquinasValidas(null), false);
+});
+prueba("plano: metros ↔ grados ida y vuelta sin error (< 1 mm)", ()=>{
+  const o = PL.centroEsquinas(E0), p = [-2.3401, -79.7123];
+  const q = PL.desdeMetros(o, PL.aMetros(o, p));
+  assert.ok(m(p, q) < 0.001, `error ${m(p, q)} m`);
+});
+prueba("plano: la cuarta esquina cierra el paralelogramo y el centro está en la diagonal", ()=>{
+  const c = PL.esquinasCompletas(E0), cen = PL.centroEsquinas(E0);
+  cerca(m(c.no, cen), m(c.se, cen), 0.2); cerca(m(c.ne, cen), m(c.so, cen), 0.2); // cm en 3 km: la escala de la longitud cambia con la latitud
+});
+prueba("plano: mover 10 m al este y 5 m al norte mueve las tres esquinas igual y no cambia el tamaño", ()=>{
+  const e = PL.moverEsquinas(E0, 10, 5);
+  for(const k of PL.ESQUINAS){ const [x, y] = PL.aMetros(E0[k], e[k]); cerca(x, 10, 0.05, k + " x"); cerca(y, 5, 0.05, k + " y"); }
+  cerca(PL.tamanoEnMetros(e).ancho, PL.tamanoEnMetros(E0).ancho, 0.05);
+});
+prueba("plano: arrastrar la esquina de abajo a la derecha por la diagonal agranda sin deformar y deja fija la opuesta", ()=>{
+  const c = PL.esquinasCompletas(E0);
+  const destino = PL.desdeMetros(c.no, PL.aMetros(c.no, c.se).map(v=>v * 1.1));
+  const e = PL.escalarDesdeEsquina(E0, "se", destino);
+  assert.ok(m(e.no, E0.no) < 0.02, "la esquina opuesta (no) no se mueve");
+  const t0 = PL.tamanoEnMetros(E0), t1 = PL.tamanoEnMetros(e);
+  cerca(t1.ancho / t0.ancho, 1.1, 1e-4); cerca(t1.alto / t0.alto, 1.1, 1e-4);
+  cerca(PL.giroGrados(e), PL.giroGrados(E0), 1e-3, "sin giro"); // las esquinas se redondean a 1e-7° (≈ 1 cm)
+});
+prueba("plano: un arrastre fuera de la diagonal igual mantiene la proporción (proyección sobre la diagonal)", ()=>{
+  const c = PL.esquinasCompletas(E0);
+  const [x, y] = PL.aMetros(c.so, c.ne);
+  const e = PL.escalarDesdeEsquina(E0, "ne", PL.desdeMetros(c.so, [x * 0.9 + 150, y * 0.9 - 80]));
+  const t0 = PL.tamanoEnMetros(E0), t1 = PL.tamanoEnMetros(e);
+  cerca(t1.ancho / t1.alto, t0.ancho / t0.alto, 1e-5);
+  assert.ok(m(e.so, E0.so) < 0.02, "so fija");
+});
+prueba("plano: si el puntero cruza la esquina opuesta, el factor se limita (no se da vuelta)", ()=>{
+  const c = PL.esquinasCompletas(E0);
+  assert.equal(PL.factorDesdeArrastre(E0, "se", PL.desdeMetros(c.no, PL.aMetros(c.no, c.se).map(v=>-v))), PL.FACTOR_MINIMO);
+});
+prueba("plano: girar 0,1° y volver deja todo igual; el giro se mide en el borde superior", ()=>{
+  const g = PL.girarEsquinas(E0, 0.1);
+  cerca(PL.giroGrados(g) - PL.giroGrados(E0), 0.1, 1e-3);
+  cerca(PL.tamanoEnMetros(g).ancho, PL.tamanoEnMetros(E0).ancho, 0.02);
+  assert.ok(PL.distanciaMaxima(PL.girarEsquinas(g, -0.1), E0) < 0.02);
+});
+prueba("plano: la matriz CSS lleva las esquinas de la imagen a sus puntos de pantalla", ()=>{
+  const p0 = { x: 10, y: 20 }, p1 = { x: 310, y: 35 }, p2 = { x: -5, y: 420 };
+  const [a, b, c, d, e, f] = PL.matrizCss(p0, p1, p2, 3198, 4018);
+  const ap = (x, y)=>[a * x + c * y + e, b * x + d * y + f];
+  assert.deepEqual(ap(0, 0).map(v=>+v.toFixed(9)), [10, 20]);
+  assert.deepEqual(ap(3198, 0).map(v=>+v.toFixed(9)), [310, 35]);
+  assert.deepEqual(ap(0, 4018).map(v=>+v.toFixed(9)), [-5, 420]);
+});
+prueba("plano: normalizarPlano completa con el plano de la app lo que falte o esté mal", ()=>{
+  const sin = PL.normalizarPlano(null);
+  assert.equal(sin.guardado, false); assert.deepEqual(sin.esquinas, PL.copiarEsquinas(E0));
+  const mal = PL.normalizarPlano({ id: 4, esquinas: { no: [1, 2] }, esquinas_originales: null, ancho_px: 0 });
+  assert.equal(mal.guardado, true); assert.equal(mal.id, 4);
+  assert.deepEqual(mal.esquinas, PL.copiarEsquinas(E0)); assert.equal(mal.ancho_px, PL.PLANO_POR_DEFECTO.ancho_px);
+  const e2 = PL.moverEsquinas(E0, 30, 0);
+  const bien = PL.normalizarPlano({ id: 1, nombre: "X", imagen: "assets/img/mapa/x.webp", ancho_px: 100, alto_px: 50, esquinas: e2, esquinas_originales: E0 });
+  assert.deepEqual([bien.imagen, bien.ancho_px, bien.alto_px], ["assets/img/mapa/x.webp", 100, 50]);
+  assert.deepEqual(bien.esquinas, e2); assert.deepEqual(bien.esquinasOriginales, PL.copiarEsquinas(E0));
+});
+prueba("plano: la caja del plano contiene sus cuatro esquinas", ()=>{
+  const [[a, b], [c, d]] = PL.cajaEsquinas(PL.girarEsquinas(E0, 5));
+  for(const p of Object.values(PL.esquinasCompletas(PL.girarEsquinas(E0, 5)))) assert.ok(p[0] >= a && p[0] <= c && p[1] >= b && p[1] <= d);
+});
+// Calce: tres puntos de la carretera medidos sobre el satélite (zoom 17) caen
+// a menos de 12 m del eje de la vía del plano puesto con las esquinas de la app.
+prueba("plano: el eje de la vía Taura–Jaguito del plano cae sobre la carretera real (< 12 m)", ()=>{
+  const X0 = 372, Y0 = 36, K = 2.5, W = 3198, H = 4018;
+  const aLatLng = ([x, y])=>{ const u = (x - X0) * K / W, v = (y - Y0) * K / H; return [E0.no[0] + u * (E0.ne[0] - E0.no[0]) + v * (E0.so[0] - E0.no[0]), E0.no[1] + u * (E0.ne[1] - E0.no[1]) + v * (E0.so[1] - E0.no[1])]; };
+  const distSeg = (p, a, b)=>{ const o = a; const [px, py] = PL.aMetros(o, p), [bx, by] = PL.aMetros(o, b); const t = Math.max(0, Math.min(1, (px * bx + py * by) / (bx * bx + by * by))); return Math.hypot(px - t * bx, py - t * by); };
+  const casos = [
+    { real: [-2.3350768, -79.7195815], eje: [[992.05, 834.3], [997.48, 841.48], [1002.91, 848.65]] },
+    { real: [-2.350987, -79.7110768], eje: [[1277.4, 1368.46], [1281.97, 1377.19], [1286.58, 1384.71]] },
+    { real: [-2.3213785, -79.7308102], eje: [[614.91, 371.96], [616.73, 380.78], [618.54, 389.59]] },
+  ];
+  for(const c of casos){
+    const pts = c.eje.map(aLatLng);
+    const d = Math.min(distSeg(c.real, pts[0], pts[1]), distSeg(c.real, pts[1], pts[2]));
+    assert.ok(d < 12, `a ${d.toFixed(1)} m de la carretera`);
+  }
+});
+prueba("error de Supabase: sin la tabla del plano pide la migración 006", ()=>{
+  assert.match(L.traducirErrorMapa({ code: "PGRST205", message: "Could not find the table 'public.planos_mapa' in the schema cache" }), /006_plano_mapa\.sql/);
+  assert.match(L.traducirErrorMapa({ code: "23514", message: 'new row for relation "planos_mapa" violates check constraint "planos_mapa_esquinas_validas"' }), /posición del plano no es válida/);
+});
+
+// ---------------------------------------------------------------- nombres automáticos y atajos (007)
+const TIPOS_RED = [
+  { valor:"router", etiqueta:"Router", genero:"m" }, { valor:"switch", etiqueta:"Switch", genero:"m" },
+  { valor:"ptp", etiqueta:"Punto a Punto", genero:"m" }, { valor:"ap", etiqueta:"AP", genero:"m" },
+  { valor:"estacion", etiqueta:"Estación", genero:"f" }, { valor:"camara", etiqueta:"Cámara", genero:"f" },
+];
+const UB_RED = [{ id:1, nombre:"Torre K" }, { id:2, nombre:"Torre L" }, { id:3, nombre:"Oficina" }, { id:4, nombre:"Piscina 12" }];
+const eqN = (id, ubicacion_id, tipo_equipo, servidor_id = null, extra = {})=>({ id, ubicacion_id, nombre:`guardado ${id}`, tipo_equipo, servidor_id, referencia:null, ...extra });
+prueba("nombre: estación enlazada a un Punto a Punto de otra torre (femenino, sin decir de dónde toma internet él)", ()=>{
+  const equipos = [eqN(1, 3, "router"), eqN(2, 2, "ptp", 1), eqN(3, 1, "estacion", 2)];
+  const n = N.nombresAutomaticos({ equipos, ubicaciones: UB_RED, tipos: TIPOS_RED });
+  assert.equal(n.get(3), "Estación en Torre K enlazada a Punto a Punto en Torre L");
+  assert.equal(n.get(2), "Punto a Punto en Torre L enlazado a Router en Oficina");
+  assert.equal(n.get(1), "Router en Oficina");
+});
+prueba("nombre: por cable (misma ubicación) dice «conectado/a» y no repite la ubicación", ()=>{
+  const equipos = [eqN(1, 1, "ptp"), eqN(2, 1, "switch", 1), eqN(3, 1, "camara", 2)];
+  const n = N.nombresAutomaticos({ equipos, ubicaciones: UB_RED, tipos: TIPOS_RED });
+  assert.equal(n.get(2), "Switch en Torre K conectado a Punto a Punto");
+  assert.equal(n.get(3), "Cámara en Torre K conectada a Switch");
+});
+prueba("nombre: la referencia va entre paréntesis (también la del servidor)", ()=>{
+  const equipos = [eqN(1, 2, "ap", null, { referencia:"Sector Norte" }), eqN(2, 4, "estacion", 1, { referencia:"  Bomba  " })];
+  const n = N.nombresAutomaticos({ equipos, ubicaciones: UB_RED, tipos: TIPOS_RED });
+  assert.equal(n.get(2), "Estación (Bomba) en Piscina 12 enlazada a AP (Sector Norte) en Torre L");
+});
+prueba("nombre: dos iguales en la misma ubicación → el de id más alto se numera (2); en otra ubicación no", ()=>{
+  const equipos = [eqN(1, 1, "switch"), eqN(5, 1, "camara", 1), eqN(4, 1, "camara", 1), eqN(6, 2, "camara")];
+  const n = N.nombresAutomaticos({ equipos, ubicaciones: UB_RED, tipos: TIPOS_RED });
+  assert.equal(n.get(4), "Cámara en Torre K conectada a Switch");
+  assert.equal(n.get(5), "Cámara en Torre K conectada a Switch (2)");
+  assert.equal(n.get(6), "Cámara en Torre L");
+});
+prueba("nombre: sin tipo (antes de la 007) conserva el nombre escrito a mano; si es servidor, se lo cita por ese nombre", ()=>{
+  const equipos = [eqN(1, 2, null, null, { nombre:"PTP viejo" }), eqN(2, 1, "estacion", 1)];
+  const n = N.nombresAutomaticos({ equipos, ubicaciones: UB_RED, tipos: TIPOS_RED });
+  assert.equal(n.get(1), "PTP viejo");
+  assert.equal(n.get(2), "Estación en Torre K enlazada a PTP viejo en Torre L");
+});
+prueba("nombre: uno escrito a mano que coincide con el armado cuenta como ocupado", ()=>{
+  const equipos = [eqN(1, 1, null, null, { nombre:"switch en torre k" }), eqN(2, 1, "switch")];
+  assert.equal(N.nombresAutomaticos({ equipos, ubicaciones: UB_RED, tipos: TIPOS_RED }).get(2), "Switch en Torre K (2)");
+});
+prueba("nombre para guardar: único en su ubicación contra el mostrado y el guardado; al editar no choca consigo mismo", ()=>{
+  const equipos = N.aplicarNombres([eqN(1, 1, "switch"), eqN(2, 1, "camara", 1), eqN(3, 1, "camara", 1, { nombre:"Cámara en Torre K conectada a Switch (3)" })], { ubicaciones: UB_RED, tipos: TIPOS_RED });
+  assert.equal(equipos[1].nombre, "Cámara en Torre K conectada a Switch");
+  assert.equal(equipos[2].nombre_guardado, "Cámara en Torre K conectada a Switch (3)");
+  const fila = { ubicacion_id:1, tipo_equipo:"camara", servidor_id:1, referencia:null };
+  assert.equal(N.nombreParaGuardar(fila, { equipos, ubicaciones: UB_RED, tipos: TIPOS_RED }, null), "Cámara en Torre K conectada a Switch (4)");
+  assert.equal(N.nombreParaGuardar(fila, { equipos, ubicaciones: UB_RED, tipos: TIPOS_RED }, 2), "Cámara en Torre K conectada a Switch");
+  assert.equal(N.nombreParaGuardar({ ...fila, referencia:"Norte" }, { equipos, ubicaciones: UB_RED, tipos: TIPOS_RED }, 2), "Cámara (Norte) en Torre K conectada a Switch");
+  assert.equal(N.nombreParaGuardar({ ubicacion_id:1, tipo_equipo:null }, { equipos, ubicaciones: UB_RED, tipos: TIPOS_RED }), null);
+});
+prueba("aplicarNombres: se puede llamar dos veces sin perder el nombre guardado", ()=>{
+  const equipos = [eqN(1, 1, "switch")];
+  N.aplicarNombres(equipos, { ubicaciones: UB_RED, tipos: TIPOS_RED });
+  N.aplicarNombres(equipos, { ubicaciones: UB_RED, tipos: [] });
+  assert.equal(equipos[0].nombre_guardado, "guardado 1");
+  assert.equal(equipos[0].nombre, "guardado 1");
+});
+prueba("participio según género y medio", ()=>{
+  assert.equal(N.participio("f", false), "enlazada"); assert.equal(N.participio("m", false), "enlazado");
+  assert.equal(N.participio("f", true), "conectada"); assert.equal(N.participio("m", true), "conectado");
+});
+prueba("atajos: caídos efectivos = marcados a mano ∪ atajos encendidos (sin repetir ni inexistentes)", ()=>{
+  const atajos = [{ id:1, equipos:[10, 11] }, { id:2, equipos:[11, 12, 99] }, { id:3, equipos:[13] }];
+  const existe = id=>id !== 99;
+  assert.deepEqual(N.caidosEfectivos({ manuales:[5, 10], atajosActivos:[1, 2], atajos, existe }), [5, 10, 11, 12]);
+  assert.deepEqual(N.caidosEfectivos({ manuales:[], atajosActivos:[], atajos, existe }), []);
+  assert.deepEqual(N.atajosQueLoApagan(11, { atajosActivos:[1, 2], atajos }).map(a=>a.id), [1, 2]);
+  assert.deepEqual(N.atajosQueLoApagan(13, { atajosActivos:[1, 2], atajos }), []);
+});
+prueba("validaciones de atajo, red y tipo de equipo", ()=>{
+  assert.equal(N.validarAtajo({ nombre:"Red 2", equipos:[1] }, [{ id:1, nombre:"red 2 " }]).errores.nombre, "Ya hay un atajo con ese nombre.");
+  assert.ok(N.validarAtajo({ nombre:"Red 2", equipos:[1] }, [{ id:1, nombre:"red 2" }], 1).ok);
+  assert.ok(N.validarAtajo({ nombre:"X", equipos:[] }).errores.equipos);
+  assert.ok(N.validarRed({ nombre:"Cámaras", color:"rojo" }).errores.color);
+  assert.ok(N.validarRed({ nombre:"Cámaras", color:"#EC741D" }).ok);
+  const v = N.validarTipoEquipo({ etiqueta:"Cámara PTZ", genero:"f" }, TIPOS_RED);
+  assert.ok(v.ok); assert.equal(v.valor, "camara_ptz");
+  assert.ok(N.validarTipoEquipo({ etiqueta:"switch", genero:"m" }, TIPOS_RED).errores.etiqueta);
+  assert.ok(N.validarTipoEquipo({ etiqueta:"Switch", genero:"m" }, TIPOS_RED, "switch").ok);
+  assert.ok(N.validarTipoEquipo({ etiqueta:"Nuevo", genero:"x" }).errores.genero);
 });
 
 console.log(`\n=== ${ok}/${total} pruebas OK ===`);

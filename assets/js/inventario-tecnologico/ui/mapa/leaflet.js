@@ -56,6 +56,8 @@ export function cargarLeaflet(){
 // Capas base. Para que el mapa ABRA en satélite: CAPA_BASE_POR_DEFECTO = "satelite".
 // (El botón de capas arriba a la derecha permite cambiar en cualquier momento,
 // y el navegador recuerda la última elegida.)
+// "Plano" (migración 006) es el satélite con el plano de la camaronera encima
+// (ui/mapa/plano.js): la entrada solo dice sobre qué fondo va.
 // ---------------------------------------------------------------------------
 export const CAPAS_BASE = {
   mapa: {
@@ -67,6 +69,10 @@ export const CAPAS_BASE = {
     etiqueta: "Satélite",
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     opciones: { maxZoom: 19, attribution: "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community" },
+  },
+  plano: {
+    etiqueta: "Plano",
+    fondo: "satelite",
   },
 };
 export const CAPA_BASE_POR_DEFECTO = "mapa";
@@ -86,9 +92,19 @@ export function recordarCapaBase(id){
   try{ localStorage.setItem(CLAVE_CAPA, id); }catch(e){ /* sin almacenamiento: no pasa nada */ }
 }
 
-export function crearCapasBase(L){
+// capaPlano: la capa de la imagen (ui/mapa/plano.js). Sin ella, "Plano" es
+// solo el satélite (así no se rompe nada si la imagen no está).
+export function crearCapasBase(L, { capaPlano = null } = {}){
   const capas = {};
-  for(const [id, c] of Object.entries(CAPAS_BASE)) capas[id] = L.tileLayer(c.url, c.opciones);
+  for(const [id, c] of Object.entries(CAPAS_BASE)){
+    if(c.fondo){
+      const f = CAPAS_BASE[c.fondo];
+      const fondo = L.tileLayer(f.url, f.opciones);
+      capas[id] = capaPlano ? L.layerGroup([fondo, capaPlano]) : fondo;
+    } else {
+      capas[id] = L.tileLayer(c.url, c.opciones);
+    }
+  }
   return capas;
 }
 
