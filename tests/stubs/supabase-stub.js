@@ -20,7 +20,9 @@
 // la tabla de piscinas (se lee con ver_mapa, la escribe el admin, nombre único
 // y forma válida). De la 010 (fixture.m010): la red entre paréntesis en el
 // nombre (la del servidor, solo si es distinta), recálculo al cambiar o borrar
-// una red y version_nombres_equipos() = 2.
+// una red y version_nombres_equipos() = 2. De la 011 (fixture.m011, con la
+// 010): la red se hereda del servidor (en los nombres), una red propia igual
+// a la heredada se deja vacía después de cada cambio, y la versión es 3.
 // Las reglas de la base en sí se prueban contra Supabase de verdad
 // (db/pruebas/mapa_pruebas_reglas_rls.sql), no aquí.
 (function(){
@@ -36,7 +38,8 @@
   const hay007 = !!(fixture.tablas && "tipos_equipo_red" in fixture.tablas);
   const hay008 = !!fixture.m008;
   const hay009 = !!(fixture.tablas && "piscinas" in fixture.tablas);
-  const hay010 = !!fixture.m010;
+  const hay010 = !!fixture.m010 || !!fixture.m011;
+  const hay011 = !!fixture.m011;
 
   const tabla = t=>(DB[t] ||= []);
   const siguienteId = t=>tabla(t).reduce((m, r)=>Math.max(m, Number(r.id) || 0), 0) + 1;
@@ -104,20 +107,35 @@
     const porId = new Map(eqs.map(e=>[e.id, e]));
     const clave = t=>String(t ?? "").normalize("NFC").trim().toLowerCase().replace(/\s+/g, " ");
     const redes = new Map(tabla("redes").map(r=>[r.id, r]));
+    // 011: la red propia o la heredada del servidor, subiendo hasta la raíz.
+    const efectiva = e=>{
+      const vistos = new Set();
+      let x = e;
+      while(x && !vistos.has(x.id)){ vistos.add(x.id); if(!vacio(x.red_id)) return x.red_id; x = vacio(x.servidor_id) ? null : porId.get(x.servidor_id); }
+      return null;
+    };
+    const redDe = e=>!hay010 ? null : (hay011 ? efectiva(e) : (vacio(e.red_id) ? null : e.red_id));
+    // 011 (normalizar_redes_equipos): la red propia igual a la heredada se deja vacía.
+    if(hay011){
+      const repetidas = eqs.filter(e=>!vacio(e.red_id) && !vacio(e.servidor_id) && efectiva(porId.get(e.servidor_id)) === e.red_id);
+      for(const e of repetidas) e.red_id = null;
+    }
     // « (Red · Referencia)» (010) o « (Referencia)».
     const par = (red, ref)=>{ const p = [red, ref].map(x=>String(x ?? "").trim()).filter(Boolean); return p.length ? ` (${p.join(" · ")})` : ""; };
     const base = e=>{
       const t = e.tipo_equipo ? tipos.get(e.tipo_equipo) : null;
       if(!t) return null;
       const u = ubic.get(e.ubicacion_id);
-      const r = hay010 && !vacio(e.red_id) ? redes.get(e.red_id) || null : null;
+      const rid = redDe(e);
+      const r = rid !== null ? redes.get(rid) || null : null;
       let n = `${t.etiqueta}${par(r && r.nombre, e.referencia)} en ${u ? u.nombre : "?"}`;
       const sv = vacio(e.servidor_id) ? null : porId.get(e.servidor_id);
       if(sv){
         const misma = sv.ubicacion_id === e.ubicacion_id;
         const medio = ["cable", "fibra", "inalambrico"].includes(e.medio) ? e.medio : (misma ? "cable" : "inalambrico");
         const ts = sv.tipo_equipo ? tipos.get(sv.tipo_equipo) : null;
-        const rs = hay010 && ts && !vacio(sv.red_id) ? redes.get(sv.red_id) || null : null;
+        const rsid = ts ? redDe(sv) : null;
+        const rs = rsid !== null && rsid !== undefined ? redes.get(rsid) || null : null;
         const otra = rs && (!r || rs.id !== r.id) ? rs.nombre : null;
         const us = ubic.get(sv.ubicacion_id);
         n += ` ${medio === "inalambrico" ? "enlazad" : "conectad"}${t.genero === "f" ? "a" : "o"} a ${ts ? `${ts.etiqueta}${par(otra, sv.referencia)}` : sv.nombre}${misma ? "" : ` en ${us ? us.nombre : "?"}`}`;
@@ -356,7 +374,7 @@
         if(fallas[`rpc:${nombre}`]) return { data: null, error: fallas[`rpc:${nombre}`] };
         // Solo lectura (migración 004): no se anota como escritura.
         if(nombre === "version_nombres_equipos"){
-          return hay010 ? { data: 2, error: null } : { data: null, error: { code: "PGRST202", message: "Could not find the function public.version_nombres_equipos without parameters in the schema cache" } };
+          return hay010 ? { data: hay011 ? 3 : 2, error: null } : { data: null, error: { code: "PGRST202", message: "Could not find the function public.version_nombres_equipos without parameters in the schema cache" } };
         }
         if(nombre === "equipo_radio_de_activo"){
           const e = (puede("ver_listado") || puede("ver_mapa")) ? tabla("equipos_radioenlace").find(x=>x.activo_id === args.p_activo_id) : null;
@@ -380,5 +398,8 @@
       },
     };
   }
+  // Con la 011, la base arranca como queda después de aplicarla: redes propias
+  // repetidas ya vacías y nombres guardados al día.
+  if(hay011) recalcularNombres();
   window.supabase = { createClient: crearCliente };
 })();

@@ -146,7 +146,7 @@ const PISCINAS_POLIGONOS = [
 // v8: un Data Center junto a la Oficina con un Router del inventario ubicado
 // ahí que todavía no es equipo de red (y otro Router sin ubicación).
 const DATA_CENTER = { id:5, nombre:"Data Center", tipo:"oficina", lat:-2.1896, lng:-79.8894, direccion:null, notas:null, fotos:[], activa:true };
-function fixture({ rol = "administrador", permitidas = [], fallas = {}, red007 = false, red008 = false, red010 = false, servidor = false, piscinas = false } = {}){
+function fixture({ rol = "administrador", permitidas = [], fallas = {}, red007 = false, red008 = false, red010 = false, red011 = false, servidor = false, piscinas = false } = {}){
   const uid = rol === "administrador" ? "u-admin" : "u-usuario";
   const permisos = [];
   for(const r of ["registrador", "visitante"]){
@@ -171,7 +171,8 @@ function fixture({ rol = "administrador", permitidas = [], fallas = {}, red007 =
     hoy: HOY,
     fallas,
     m008: red008,
-    m010: red010,
+    m010: red010 || red011,
+    m011: red011,
     sesion: { user: { id: uid, email: `${rol}@lukmar.local` } },
     tablas: conExtras((red007 ? conRed007 : x=>x)({
       perfiles: [{ id:"u-admin", rol:"administrador", nombre_completo:"Admin Pruebas" }, { id:"u-usuario", rol, nombre_completo:"Usuario Pruebas" }],
@@ -1899,6 +1900,337 @@ async function escenarioServidor(browser, base){
   await cel.context.close();
 }
 
+// ------------------------------------------------------------------ v9: la red se hereda del servidor (011)
+// Con la 011 el stub arranca normalizado: solo el Router de la Oficina (Red
+// Administrativa) y el Switch de Cerro Azul (Red Cámaras) tienen red propia;
+// lo demás la hereda.
+const CHIP_RED = (id, heredada)=>`${SEL.panel} [data-equipo-id="${id}"] .inventario-tecnologico-mapa-red-chip${heredada ? ".inventario-tecnologico-mapa-red-chip-heredada" : ":not(.inventario-tecnologico-mapa-red-chip-heredada)"}`;
+async function abrirEdicionEquipo(page, ubicacionId, equipoId){
+  await irAUbicacionDesdePanel(page, ubicacionId);
+  await page.click(SEL.equipo(equipoId));
+  await page.click(`${SEL.panel} [data-accion="editar-equipo"][data-id="${equipoId}"]`);
+  await page.waitForSelector("#inventario-tecnologico-equipo-red");
+}
+async function cerrarFormulario(page){
+  await page.click("#inventario-tecnologico-modal-host .inventario-tecnologico-modal-footer .inventario-tecnologico-modal-close");
+  await esperarSinModal(page);
+}
+const primeraOpcionRed = page=>page.locator("#inventario-tecnologico-equipo-red option").first().innerText();
+async function escenarioHerencia(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixture({ red007: true, red008: true, red011: true }));
+  await irAlMapa(page);
+  await verificar("011: al aplicar la migración las redes propias repetidas quedan vacías y los nombres llevan la red heredada", async ()=>{
+    const eqs = await db(page, "equipos_radioenlace");
+    const e = id=>eqs.find(x=>x.id === id);
+    const conPropia = eqs.filter(x=>x.red_id !== null).map(x=>x.id).sort((a, b)=>a - b);
+    exigir(JSON.stringify(conPropia) === "[30,50]", "con red propia: " + JSON.stringify(conPropia));
+    exigir(e(10).nombre === "Punto a Punto (Red Administrativa) en Torre Cerro Azul enlazado a Punto a Punto en Oficina Centro", e(10).nombre);
+    exigir(e(50).nombre === "Switch (Red Cámaras) en Torre Cerro Azul conectado a Punto a Punto (Red Administrativa)", e(50).nombre);
+    exigir(e(51).nombre === "Cámara (Red Cámaras · Norte) en Torre Cerro Azul conectada a Switch", e(51).nombre);
+    exigir(e(32).nombre === "Estación (Red Administrativa) en Oficina Centro enlazada a AP en Torre Santa Ana", e(32).nombre);
+  });
+  await verificar("011: los chips REDES cuentan la red efectiva (sin «Sin red»: todo hereda alguna)", async ()=>{
+    const chips = await page.locator(".inventario-tecnologico-mapa-filtros [data-red]").evaluateAll(l=>l.map(c=>c.dataset.red + ":" + c.querySelector(".inventario-tecnologico-mapa-chip-n").textContent));
+    exigir(chips.join("|") === "1:18|2:3", chips.join("|"));
+  });
+  await verificar("011: en la torre, la red propia va con borde lleno y la heredada punteada, diciendo de quién la hereda", async ()=>{
+    await irAUbicacionDesdePanel(page, 1);
+    exigir(await cuenta(page, CHIP_RED(50, false)) === 1, "el switch (red propia) no tiene chip lleno");
+    exigir(await cuenta(page, CHIP_RED(51, true)) === 1, "la cámara no tiene chip heredado");
+    exigir(/heredada de «Switch \(Red Cámaras\)/.test(await page.getAttribute(CHIP_RED(51, true), "title")), await page.getAttribute(CHIP_RED(51, true), "title"));
+    exigir(/Red Administrativa/.test(await texto(page, CHIP_RED(10, true))), "el PTP no hereda la red del Router");
+    exigir(/heredada de «Router \(Red Administrativa\) en Oficina Centro»/.test(await page.getAttribute(CHIP_RED(10, true), "title")), await page.getAttribute(CHIP_RED(10, true), "title"));
+  });
+  await verificar("011: formulario de un equipo que hereda: «Heredada del servidor: …», sin repetir esa red como propia, y de quién la hereda", async ()=>{
+    await abrirEdicionEquipo(page, 2, 21);
+    exigir(await primeraOpcionRed(page) === "Heredada del servidor: Red Administrativa", await primeraOpcionRed(page));
+    exigir(await page.inputValue("#inventario-tecnologico-equipo-red") === "", "no quedó heredando");
+    const valores = await page.locator("#inventario-tecnologico-equipo-red option").evaluateAll(o=>o.map(x=>x.value));
+    exigir(JSON.stringify(valores) === '["","2"]', "la red heredada no debe ofrecerse como propia: " + JSON.stringify(valores));
+    const ayuda = await texto(page, "#inventario-tecnologico-equipo-red-ayuda");
+    exigir(/La hereda de «Router \(Red Administrativa\) en Oficina Centro» y la pasa a los 2 equipos que cuelgan de él/.test(ayuda), ayuda);
+    exigir(await page.getAttribute("#inventario-tecnologico-equipo-red", "aria-describedby") === "inventario-tecnologico-equipo-red-ayuda", "la ayuda no está asociada al campo");
+  });
+  await verificar("011: otra red en un equipo intermedio: se explica que forma una red aparte y el nombre la muestra", async ()=>{
+    await page.selectOption("#inventario-tecnologico-equipo-red", "2");
+    const ayuda = await texto(page, "#inventario-tecnologico-equipo-red-ayuda");
+    exigir(/Red aparte de «Red Administrativa», la de su servidor\. «Red Cámaras» vale también para los 2 equipos que cuelgan de él/.test(ayuda), ayuda);
+    const n = await texto(page, "#inventario-tecnologico-equipo-nombre-auto");
+    exigir(n === "AP (Red Cámaras) en Torre Santa Ana conectado a Punto a Punto (Red Administrativa)", n);
+  });
+  await verificar("011: al guardar, él y lo que cuelga de él quedan en esa red (en la base y en los nombres)", async ()=>{
+    await page.click("#inventario-tecnologico-equipo-guardar");
+    await esperarSinModal(page);
+    const u = (await ESCRITURAS_EQUIPOS(page)).filter(e=>e.op === "update").pop();
+    exigir(u.parche.red_id === 2, "parche: " + JSON.stringify(u.parche));
+    const eqs = await db(page, "equipos_radioenlace");
+    exigir(eqs.find(x=>x.id === 32).nombre === "Estación (Red Cámaras) en Oficina Centro enlazada a AP en Torre Santa Ana", eqs.find(x=>x.id === 32).nombre);
+    const chips = await page.locator(".inventario-tecnologico-mapa-filtros [data-red]").evaluateAll(l=>l.map(c=>c.dataset.red + ":" + c.querySelector(".inventario-tecnologico-mapa-chip-n").textContent));
+    exigir(chips.join("|") === "1:15|2:6", chips.join("|"));
+  });
+  await verificar("011: «Colorear líneas por red»: la red aparte sale con su color y el resto con el de la red que hereda", async ()=>{
+    await clicVacio(page); // sin selección: el camino resaltado tiene su propio color
+    await page.waitForFunction(()=>!document.querySelector("path.inventario-tecnologico-mapa-linea-cadena"), null, { timeout: 4000 });
+    await page.click("#inventario-tecnologico-mapa-color-red");
+    const color = sel=>page.evaluate(sel=>(document.querySelector(sel)?.getAttribute("stroke") || "").toUpperCase(), sel);
+    await page.waitForFunction(()=>(document.querySelector('path.inventario-tecnologico-mapa-linea[data-cliente-id="32"]')?.getAttribute("stroke") || "").toUpperCase() === "#EC741D", null, { timeout: 4000 });
+    exigir(await color('path.inventario-tecnologico-mapa-linea[data-cliente-id="40"]') === "#EC741D", "SM Bodega (sin tipo) hereda la red aparte");
+    exigir(await color('path.inventario-tecnologico-mapa-linea[data-cliente-id="20"]') === "#004DAB", "el enlace Cerro Azul → Santa Ana sigue en la red del Router");
+    exigir(await color('path.inventario-tecnologico-mapa-linea[data-cliente-id="10"]') === "#004DAB", "el PTP de Cerro Azul hereda la red del Router");
+    await page.screenshot({ path: path.join(CAPTURAS, "34-red-heredada-colores.png") });
+    await page.click("#inventario-tecnologico-mapa-color-red");
+  });
+  await verificar("011: ocultar una red oculta lo que la hereda, pero no la red aparte que cuelga de ella", async ()=>{
+    exigir(await cuenta(page, 'path.inventario-tecnologico-mapa-linea[data-cliente-id="20"]') === 1, "falta la línea de Santa Ana");
+    await page.click('.inventario-tecnologico-mapa-filtros [data-red="1"]');
+    await page.waitForFunction(()=>!document.querySelector('path.inventario-tecnologico-mapa-linea[data-cliente-id="20"]'), null, { timeout: 4000 });
+    exigir(await cuenta(page, 'path.inventario-tecnologico-mapa-linea[data-cliente-id="32"]') === 1, "la red aparte también se ocultó");
+    await page.click('.inventario-tecnologico-mapa-filtros [data-red="1"]');
+    await page.waitForSelector('path.inventario-tecnologico-mapa-linea[data-cliente-id="20"]');
+  });
+  await verificar("011: al cambiar el servidor en el formulario, cambia la red que se hereda", async ()=>{
+    await abrirEdicionEquipo(page, 3, 32);
+    exigir(await primeraOpcionRed(page) === "Heredada del servidor: Red Cámaras", await primeraOpcionRed(page));
+    await elegirServidor(page, "11");
+    exigir(await primeraOpcionRed(page) === "Heredada del servidor: Red Administrativa", await primeraOpcionRed(page));
+    exigir(/^Estación \(Red Administrativa\) en Oficina Centro enlazada a AP en Torre Cerro Azul/.test(await texto(page, "#inventario-tecnologico-equipo-nombre-auto")), await texto(page, "#inventario-tecnologico-equipo-nombre-auto"));
+    await cerrarFormulario(page);
+  });
+  await verificar("011: en la raíz, su red propia y a cuántos equipos pasa", async ()=>{
+    await abrirEdicionEquipo(page, 3, 30);
+    exigir(await primeraOpcionRed(page) === "— Sin red —", await primeraOpcionRed(page));
+    exigir(await page.inputValue("#inventario-tecnologico-equipo-red") === "1", "la raíz perdió su red");
+    const ayuda = await texto(page, "#inventario-tecnologico-equipo-red-ayuda");
+    exigir(/«Red Administrativa» vale también para los 14 equipos que cuelgan de él \(los que tienen otra red propia la conservan\)/.test(ayuda), ayuda);
+    await cerrarFormulario(page);
+  });
+  await verificar("011: lote: «Quitar la propia (hereda la del servidor)», la columna dice «heredada» y avisa cuántos cambian por herencia", async ()=>{
+    await irAUbicacionDesdePanel(page, 3);
+    await page.click("#inventario-tecnologico-mapa-lote");
+    await page.waitForSelector("#inventario-tecnologico-lote-red");
+    exigir(/Quitar la propia \(hereda la del servidor\)/.test(await page.locator('#inventario-tecnologico-lote-red option[value=""]').innerText()), "texto de quitar");
+    const fila32 = await texto(page, '#inventario-tecnologico-lote-filas tr[data-id="32"]');
+    exigir(/Red Cámaras/.test(fila32) && /heredada/.test(fila32), fila32);
+    for(const id of await page.locator("#inventario-tecnologico-lote-filas input[data-lote-id]:checked").evaluateAll(l=>l.map(x=>x.dataset.loteId))) await page.uncheck(`#inventario-tecnologico-lote-filas input[data-lote-id="${id}"]`);
+    await page.check('#inventario-tecnologico-lote-filas input[data-lote-id="30"]');
+    await page.selectOption("#inventario-tecnologico-lote-red", "2");
+    const vista = await texto(page, "#inventario-tecnologico-lote-vista");
+    exigir(/Por herencia también cambian de red 14 equipos que cuelgan de ellos/.test(vista), vista);
+    exigir(/AP \(Red Administrativa\) en Torre Cerro Azul conectado a Punto a Punto\s*→\s*AP \(Red Cámaras\) en Torre Cerro Azul conectado a Punto a Punto/.test(vista), "la vista previa no muestra los nombres de los que heredan: " + vista.replace(/\s+/g, " ").slice(0, 600));
+    await page.screenshot({ path: path.join(CAPTURAS, "35-red-heredada-lote.png") });
+    await page.click("#inventario-tecnologico-lote-aplicar");
+    await esperarSinModal(page);
+    const eqs = await db(page, "equipos_radioenlace");
+    const conPropia = eqs.filter(x=>x.red_id !== null).map(x=>x.id + ":" + x.red_id);
+    exigir(JSON.stringify(conPropia) === '["30:2"]', "las redes propias iguales a la heredada no quedaron vacías: " + JSON.stringify(conPropia));
+    exigir(eqs.find(x=>x.id === 50).nombre === "Switch (Red Cámaras) en Torre Cerro Azul conectado a Punto a Punto", eqs.find(x=>x.id === 50).nombre);
+  });
+  await verificar("011: «Redes y tipos» cuenta los que heredan cada red y cuántos la tienen propia", async ()=>{
+    await page.click("#inventario-tecnologico-mapa-redes-tipos");
+    await page.waitForSelector("#inventario-tecnologico-red-nueva-nombre");
+    const cuentaRed = id=>texto(page, `#inventario-tecnologico-modal-host [data-red-id="${id}"] .inventario-tecnologico-catalogo-cuenta`);
+    exigir(await cuentaRed(2) === "21 equipos (1 con la red propia)", await cuentaRed(2));
+    exigir(await cuentaRed(1) === "0 equipos", await cuentaRed(1));
+    await cerrarFormulario(page);
+  });
+  await verificar("sin errores de JavaScript (red heredada)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+
+  // Sin la 011 (con la 010): cada equipo tiene solo su red, como en el v8.
+  const s10 = await abrirApp(browser, base, fixture({ red007: true, red008: true, red010: true }));
+  await irAlMapa(s10.page);
+  await verificar("sin la 011: el campo Red es el de siempre («— Sin red —», sin ayuda de herencia) y el chip no dice «heredada»", async ()=>{
+    await irAUbicacionDesdePanel(s10.page, 1);
+    exigir(await cuenta(s10.page, `${SEL.panel} .inventario-tecnologico-mapa-red-chip-heredada`) === 0, "hay chips heredados sin la 011");
+    await abrirEdicionEquipo(s10.page, 2, 21);
+    exigir(await primeraOpcionRed(s10.page) === "— Sin red —", await primeraOpcionRed(s10.page));
+    exigir(await s10.page.inputValue("#inventario-tecnologico-equipo-red") === "1", "perdió su red");
+    exigir(await cuenta(s10.page, "#inventario-tecnologico-equipo-red-ayuda") === 0, "ayuda de herencia sin la 011");
+    await cerrarFormulario(s10.page);
+  });
+  await verificar("sin errores de JavaScript (sin la 011)", async ()=>{ exigir(s10.errores.length === 0, s10.errores.join(" | ")); });
+  await s10.context.close();
+}
+
+// ------------------------------------------------------------------ v9: pantalla completa y grosor de las líneas
+const VENTANA = { barra: ".inventario-tecnologico-mapa-barra", panel: ".inventario-tecnologico-mapa-panel-ventana" };
+const ALTERNAR = cual=>`[data-ventana-alternar="${cual}"]`;
+const BOTON_COMPLETA = "#inventario-tecnologico-mapa-pantalla-completa";
+const COMPLETA = ".inventario-tecnologico-mapa-vista.inventario-tecnologico-mapa-completa";
+const anchoLinea = (page, cliente)=>page.evaluate(id=>Number(document.querySelector(`path.inventario-tecnologico-mapa-linea[data-cliente-id="${id}"]`)?.getAttribute("stroke-width")), cliente);
+async function escenarioPantalla(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixture());
+  await irAlMapa(page);
+  await verificar("grosor: un control en «Líneas» (1× al empezar) que engrosa todas las líneas y sus punteados", async ()=>{
+    exigir(await page.inputValue("#inventario-tecnologico-mapa-grosor") === "1", "valor inicial");
+    exigir(await texto(page, "#inventario-tecnologico-mapa-grosor-valor") === "1×", "texto inicial");
+    exigir(await page.locator("#inventario-tecnologico-mapa-grosor-normal").isHidden(), "«Normal» a la vista con 1×");
+    const antes = await anchoLinea(page, 20);
+    exigir(antes === 5, "backbone: " + antes);
+    await page.locator("#inventario-tecnologico-mapa-grosor").fill("2");
+    await page.waitForFunction(()=>Number(document.querySelector('path.inventario-tecnologico-mapa-linea[data-cliente-id="20"]')?.getAttribute("stroke-width")) === 10, null, { timeout: 4000 });
+    exigir(await anchoLinea(page, 101) === 4.4 || await cuenta(page, 'path.inventario-tecnologico-mapa-linea[data-cliente-id="101"]') === 0, "P2MP");
+    exigir(await texto(page, "#inventario-tecnologico-mapa-grosor-valor") === "2×" && await page.getAttribute("#inventario-tecnologico-mapa-grosor", "aria-valuetext") === "2×", "texto");
+    exigir(await page.evaluate(()=>localStorage.getItem("inventario-tecnologico-mapa-grosor-lineas")) === "2", "no se recordó");
+    exigir(!(await page.locator("#inventario-tecnologico-mapa-grosor-normal").isHidden()), "sin «Normal»");
+  });
+  await verificar("grosor: el camino resaltado y los punteados también (el punteado conserva su forma)", async ()=>{
+    await seleccionarEquipoDesdeSuUbicacion(page, 1, 11);
+    const w = await page.evaluate(()=>[...document.querySelectorAll("path.inventario-tecnologico-mapa-linea-cadena")].map(p=>Number(p.getAttribute("stroke-width"))));
+    exigir(w.length && w.every(x=>x === 12), "cadena: " + w.join(","));
+    await seleccionarEquipoDesdeSuUbicacion(page, 2, 20);
+    await page.click(SEL.simular(20));
+    await page.waitForSelector("path.inventario-tecnologico-mapa-linea-cortado");
+    const dash = await page.getAttribute("path.inventario-tecnologico-mapa-linea-cortado", "stroke-dasharray");
+    exigir(dash === "6 16" || dash === "6,16", "punteado de «cortado» (3 8 × 2): " + dash);
+    exigir(Number(await page.getAttribute("path.inventario-tecnologico-mapa-linea-cortado", "stroke-width")) === 6, "ancho de «cortado»");
+    await page.click("#inventario-tecnologico-mapa-simulacion");
+    await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+  });
+  await verificar("grosor: se recuerda al volver al mapa y «Normal» lo deja en 1×", async ()=>{
+    await page.click(SEL.tab("activos"));
+    await irAlMapa(page);
+    exigir(await page.inputValue("#inventario-tecnologico-mapa-grosor") === "2", "no se recordó: " + await page.inputValue("#inventario-tecnologico-mapa-grosor"));
+    exigir(await anchoLinea(page, 20) === 10, "al volver: " + await anchoLinea(page, 20));
+    await page.click("#inventario-tecnologico-mapa-grosor-normal");
+    await page.waitForFunction(()=>Number(document.querySelector('path.inventario-tecnologico-mapa-linea[data-cliente-id="20"]')?.getAttribute("stroke-width")) === 5, null, { timeout: 4000 });
+    exigir(await page.evaluate(()=>localStorage.getItem("inventario-tecnologico-mapa-grosor-lineas")) === "1", "no se guardó el 1×");
+    exigir(await page.evaluate(()=>document.activeElement.id) === "inventario-tecnologico-mapa-grosor", "el foco no volvió al control");
+  });
+
+  await verificar("pantalla completa: botón debajo del zoom; el mapa cubre la ventana y las dos ventanas arrancan minimizadas", async ()=>{
+    exigir(await page.getAttribute(BOTON_COMPLETA, "aria-label") === "Ver el mapa en pantalla completa", "rótulo");
+    const antes = await page.locator("#inventario-tecnologico-mapa-canvas").boundingBox();
+    await page.click(BOTON_COMPLETA);
+    await page.waitForSelector(COMPLETA);
+    await page.waitForFunction(()=>{ const r = document.getElementById("inventario-tecnologico-mapa-canvas").getBoundingClientRect(); return r.width >= innerWidth - 1 && r.height >= innerHeight - 1; }, null, { timeout: 4000 });
+    exigir(antes.width < 1300, "el mapa ya ocupaba todo antes");
+    exigir(await page.getAttribute(BOTON_COMPLETA, "aria-pressed") === "true" && /Salir/.test(await page.getAttribute(BOTON_COMPLETA, "aria-label")), "botón");
+    for(const cual of ["barra", "panel"]){
+      exigir(await page.locator(VENTANA[cual]).evaluate(el=>el.classList.contains("inventario-tecnologico-ventana-minimizada")), `${cual} no arrancó minimizada`);
+      exigir(await page.getAttribute(ALTERNAR(cual), "aria-expanded") === "false", `${cual}: aria-expanded`);
+    }
+    exigir(await page.locator("#inventario-tecnologico-mapa-buscar").isHidden() && await page.locator("#inventario-tecnologico-mapa-panel").isHidden(), "el contenido se ve minimizado");
+    exigir(await page.evaluate(()=>document.body.classList.contains("inventario-tecnologico-con-mapa-completo") && getComputedStyle(document.body).overflow === "hidden"), "la página de atrás se desplaza");
+    exigir(await page.evaluate(()=>{ const m = window.__mapaActual; return true; }), "");
+    await page.screenshot({ path: path.join(CAPTURAS, "36-pantalla-completa.png") });
+  });
+  await verificar("pantalla completa: una ventana se muestra y se minimiza con su botón (y con doble clic en su título)", async ()=>{
+    await page.click(ALTERNAR("panel"));
+    exigir(await page.getAttribute(ALTERNAR("panel"), "aria-expanded") === "true", "no se abrió");
+    exigir(!(await page.locator("#inventario-tecnologico-mapa-panel").isHidden()), "el panel no se ve");
+    exigir(await texto(page, `${VENTANA.panel} [data-ventana-titulo]`) === "Ubicaciones y radioenlaces", await texto(page, `${VENTANA.panel} [data-ventana-titulo]`));
+    const caja = await page.locator(VENTANA.panel).boundingBox();
+    const controles = await page.locator(".leaflet-top.leaflet-right").boundingBox();
+    exigir(caja.y >= controles.y + controles.height - 1, "el panel tapa los controles de capas");
+    await page.dblclick(`${VENTANA.panel} [data-ventana-titulo]`);
+    exigir(await page.getAttribute(ALTERNAR("panel"), "aria-expanded") === "false", "doble clic no la minimizó");
+    await page.dblclick(`${VENTANA.panel} [data-ventana-titulo]`);
+    exigir(await page.getAttribute(ALTERNAR("panel"), "aria-expanded") === "true", "doble clic no la mostró");
+  });
+  await verificar("pantalla completa: al elegir una ubicación en el mapa, el título de la ventana la nombra (y se ilumina si está minimizada)", async ()=>{
+    await page.click(SEL.marcador("Torre Cerro Azul"));
+    await page.waitForFunction(()=>document.querySelector('.inventario-tecnologico-mapa-panel-ventana [data-ventana-titulo]').textContent === "Torre Cerro Azul", null, { timeout: 4000 });
+    await page.click(ALTERNAR("panel"));
+    await page.click(SEL.marcador("Torre Santa Ana"));
+    await page.waitForFunction(()=>document.querySelector('.inventario-tecnologico-mapa-panel-ventana [data-ventana-titulo]').textContent === "Torre Santa Ana", null, { timeout: 4000 });
+    exigir(await page.locator(VENTANA.panel).evaluate(el=>el.classList.contains("inventario-tecnologico-ventana-aviso")), "no avisa: " + await page.locator(VENTANA.panel).evaluate(el=>el.className));
+    await page.click(`${VENTANA.panel} [data-ventana-titulo]`);
+    exigir(await page.getAttribute(ALTERNAR("panel"), "aria-expanded") === "true", "un clic en el título de la minimizada no la mostró");
+  });
+  await verificar("pantalla completa: la ventana se arrastra por su título y no se sale de la pantalla", async ()=>{
+    const cab = page.locator(`${VENTANA.panel} [data-ventana-titulo]`);
+    const r = await cab.boundingBox();
+    await page.mouse.move(r.x + 20, r.y + r.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(r.x - 300, r.y + 200, { steps: 6 });
+    await page.mouse.up();
+    const d = await page.locator(VENTANA.panel).boundingBox();
+    exigir(Math.abs(d.x - (r.x - 320 - 12)) < 60 || d.x < r.x - 200, `no se movió: ${JSON.stringify(d)}`);
+    exigir(await page.getAttribute(ALTERNAR("panel"), "aria-expanded") === "true", "arrastrar la minimizó o la cambió");
+    await page.mouse.move(d.x + 30, d.y + 15);
+    await page.mouse.down();
+    await page.mouse.move(-500, -500, { steps: 4 });
+    await page.mouse.up();
+    const e = await page.locator(VENTANA.panel).boundingBox();
+    exigir(e.x >= -1 && e.y >= -1, `se salió: ${JSON.stringify(e)}`);
+    // Se la devuelve a la derecha, para que no tape la barra.
+    await page.mouse.move(e.x + 30, e.y + 15);
+    await page.mouse.down();
+    await page.mouse.move(1000, 320, { steps: 4 });
+    await page.mouse.up();
+  });
+  await verificar("pantalla completa: la barra de búsqueda y filtros funciona como ventana (la lista de resultados se ve entera)", async ()=>{
+    await page.click(ALTERNAR("barra"));
+    exigir(!(await page.locator("#inventario-tecnologico-mapa-buscar").isHidden()), "no se ve el buscador");
+    await page.fill("#inventario-tecnologico-mapa-buscar", "Santa");
+    await page.waitForSelector("#inventario-tecnologico-mapa-resultados:not([hidden])");
+    const alto = await page.evaluate(()=>{ const l = document.getElementById("inventario-tecnologico-mapa-resultados"); const r = l.getBoundingClientRect(); return document.elementFromPoint(r.left + 20, r.bottom - 6)?.closest("#inventario-tecnologico-mapa-resultados") !== null; });
+    exigir(alto, "la lista queda tapada o recortada");
+    await page.keyboard.press("Escape");
+    await page.fill("#inventario-tecnologico-mapa-buscar", "");
+    await page.click(ALTERNAR("barra")); // de nuevo minimizada, para no tapar el mapa
+    exigir(await page.getAttribute(ALTERNAR("barra"), "aria-expanded") === "false", "no se minimizó");
+  });
+  await verificar("pantalla completa: los formularios (modales) se ven encima del mapa", async ()=>{
+    await irAUbicacionDesdePanel(page, 1);
+    await page.waitForSelector(`${SEL.panel} [data-accion="editar-ubicacion"], ${SEL.panel} [data-accion="nuevo-equipo"]`);
+    const accion = await page.locator(`${SEL.panel} [data-accion="editar-ubicacion"]`).count() ? "editar-ubicacion" : "nuevo-equipo";
+    await page.click(`${SEL.panel} [data-accion="${accion}"]`);
+    await page.waitForSelector("#inventario-tecnologico-modal-host .inventario-tecnologico-modal");
+    const visible = await page.evaluate(()=>{ const m = document.querySelector("#inventario-tecnologico-modal-host .inventario-tecnologico-modal"); const r = m.getBoundingClientRect(); const el = document.elementFromPoint(r.left + r.width / 2, r.top + 20); return !!(el && el.closest("#inventario-tecnologico-modal-host")); });
+    exigir(visible, "el modal queda debajo del mapa");
+    await page.keyboard.press("Escape");
+    await esperarSinModal(page);
+    exigir(await cuenta(page, COMPLETA) === 1, "cerrar el modal sacó de la pantalla completa");
+  });
+  await verificar("pantalla completa: Esc primero cierra lo seleccionado y después sale; todo vuelve a su lugar", async ()=>{
+    await page.keyboard.press("Escape");
+    exigir(await cuenta(page, COMPLETA) === 1, "salió con algo seleccionado");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(()=>!document.querySelector(".inventario-tecnologico-mapa-completa"), null, { timeout: 4000 });
+    exigir(await cuenta(page, ".inventario-tecnologico-mapa-ventana-cab") === 0 && await cuenta(page, VENTANA.panel) === 0, "quedaron títulos o contenedores de ventana");
+    exigir(await page.evaluate(()=>document.getElementById("inventario-tecnologico-mapa-panel").parentElement.classList.contains("inventario-tecnologico-mapa-layout")), "el panel no volvió a su lugar");
+    exigir(!(await page.locator("#inventario-tecnologico-mapa-buscar").isHidden()), "el buscador quedó oculto");
+    exigir(await page.getAttribute(BOTON_COMPLETA, "aria-pressed") === "false", "botón");
+    exigir(!(await page.evaluate(()=>document.body.classList.contains("inventario-tecnologico-con-mapa-completo"))), "la página sigue bloqueada");
+    await page.waitForFunction(()=>document.getElementById("inventario-tecnologico-mapa-canvas").getBoundingClientRect().width < innerWidth - 100, null, { timeout: 4000 });
+    // El panel sigue funcionando con sus clics (sus listeners viajaron con él).
+    await page.click(SEL.marcador("Torre Cerro Azul"));
+    await page.click(SEL.equipo(11));
+    await page.waitForSelector(`${SEL.panel} [data-equipo-id="11"].inventario-tecnologico-mapa-equipo-sel`);
+  });
+  await verificar("pantalla completa: al volver a entrar, las ventanas arrancan minimizadas otra vez (y el botón también sale)", async ()=>{
+    await page.click(BOTON_COMPLETA);
+    await page.waitForSelector(COMPLETA);
+    exigir(await page.getAttribute(ALTERNAR("panel"), "aria-expanded") === "false" && await page.getAttribute(ALTERNAR("barra"), "aria-expanded") === "false", "no arrancaron minimizadas");
+    exigir(await texto(page, `${VENTANA.panel} [data-ventana-titulo]`) !== "", "sin título");
+    await page.click(BOTON_COMPLETA);
+    await page.waitForFunction(()=>!document.querySelector(".inventario-tecnologico-mapa-completa"), null, { timeout: 4000 });
+  });
+  await verificar("sin errores de JavaScript (pantalla completa y grosor)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+
+  const cel = await abrirApp(browser, base, fixture(), { viewport: { width: 390, height: 844 } });
+  await irAlMapa(cel.page);
+  await verificar("celular (390 px): pantalla completa con las ventanas dentro de la pantalla y el panel como hoja de abajo", async ()=>{
+    await cel.page.click(BOTON_COMPLETA);
+    await cel.page.waitForSelector(COMPLETA);
+    const dentro = async sel=>{ const b = await cel.page.locator(sel).boundingBox(); return b && b.x >= -0.5 && b.x + b.width <= 390.5 && b.y >= -0.5 && b.y + b.height <= 844.5; };
+    exigir(await dentro(VENTANA.barra) && await dentro(VENTANA.panel), "las ventanas minimizadas se salen");
+    await cel.page.click(ALTERNAR("panel"));
+    exigir(await dentro(VENTANA.panel), "el panel abierto se sale");
+    const p = await cel.page.locator(VENTANA.panel).boundingBox();
+    exigir(p.y + p.height > 844 - 80, "no está abajo: " + JSON.stringify(p));
+    exigir(await cel.page.evaluate(()=>document.documentElement.scrollWidth) <= 390, "scroll horizontal");
+    await cel.page.screenshot({ path: path.join(CAPTURAS, "37-pantalla-completa-celular.png") });
+    await cel.page.click(BOTON_COMPLETA);
+    await cel.page.waitForFunction(()=>!document.querySelector(".inventario-tecnologico-mapa-completa"), null, { timeout: 4000 });
+  });
+  await verificar("sin errores de JavaScript (pantalla completa en el celular)", async ()=>{ exigir(cel.errores.length === 0, cel.errores.join(" | ")); });
+  await cel.context.close();
+}
+
 // ------------------------------------------------------------------ inventario: modal «Nuevo activo»
 // Tipo con búsqueda y orden, campos según el tipo (con transición), «+» en
 // un submodal que no borra lo escrito, y que al guardar no viajen los campos
@@ -2109,8 +2441,10 @@ const base = `http://127.0.0.1:${srv.address().port}`;
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 try{
   // SOLO=plano (u otro nombre) corre un solo escenario, para depurar.
-  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, activo: escenarioActivo };
-  for(const [nombre, fn] of Object.entries(escenarios)) if(!process.env.SOLO || process.env.SOLO === nombre) await fn(browser, base);
+  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo };
+  // SOLO=plano o SOLO=plano,torre (varios, separados por comas).
+  const solo = process.env.SOLO ? process.env.SOLO.split(",").map(x=>x.trim()).filter(Boolean) : null;
+  for(const [nombre, fn] of Object.entries(escenarios)) if(!solo || solo.includes(nombre)) await fn(browser, base);
 }finally{
   await browser.close();
   srv.close();

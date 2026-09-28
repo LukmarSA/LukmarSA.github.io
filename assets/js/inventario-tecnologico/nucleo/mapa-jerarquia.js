@@ -17,6 +17,9 @@
 //     ubicación. 1 remoto → el enlace es backbone (punto a punto); varios → P2MP.
 //   * Más de UMBRAL_AGRUPAR_CLIENTES remotos → las líneas de ese servidor se
 //     agrupan en un indicador ("AP · 23 clientes") hasta que se lo expande.
+//   * Red de la finca (007): red_id. Con la 011 es la red PROPIA: sin ella el
+//     equipo hereda la de su servidor principal (redesEfectivas); lo que se
+//     muestra, colorea y filtra es la red efectiva (redEfectivaDe).
 //   * Simulación: "caído" = se corta el enlace de subida del equipo (el equipo
 //     sigue encendido). Cada equipo sin camino a una raíz pasa solo a su
 //     respaldo de mejor prioridad (1 = primera opción) que tenga servicio; si
@@ -351,9 +354,109 @@ export function tramosDeCamino(red, camino, sim = null){
   return tramos;
 }
 
+// ---------------------------------------------------------------------------
+// Red heredada (migración 011): red_id es la red PROPIA del equipo; sin ella
+// hereda la de su servidor principal, y así hacia arriba hasta la raíz. Un
+// equipo con otra red propia forma, con lo que cuelga de él, una red aparte.
+// Devuelve Map id → { redId, desdeId }: desdeId = el equipo que tiene la red
+// propia (él mismo o un antecesor); los dos null si nadie en el camino tiene.
+// ---------------------------------------------------------------------------
+const redPropia = e=>tieneValor(e.red_id) && e.red_id !== "" ? Number(e.red_id) : null;
+export function redesEfectivas(equipos = []){
+  const porId = new Map(equipos.map(e=>[Number(e.id), e]));
+  const memo = new Map();
+  const SIN = { redId: null, desdeId: null };
+  for(const e of equipos){
+    const camino = [];
+    const vistos = new Set();
+    let x = e, res = null;
+    while(x){
+      const id = Number(x.id);
+      if(memo.has(id)){ res = memo.get(id); break; }
+      if(vistos.has(id)) break; // un ciclo (la base no los deja): sin red
+      vistos.add(id);
+      const propia = redPropia(x);
+      if(propia !== null){ res = { redId: propia, desdeId: id }; memo.set(id, res); break; }
+      camino.push(id);
+      x = tieneValor(x.servidor_id) ? porId.get(Number(x.servidor_id)) : null;
+    }
+    for(const id of camino) memo.set(id, res || SIN);
+  }
+  return memo;
+}
+
+// Deja en cada fila red_efectiva y red_desde (con la 011), o las quita (sin
+// ella, cada equipo tiene solo su red). No se envían nunca a la base.
+export function anotarRedesEfectivas(equipos = [], herencia = false){
+  if(!herencia){
+    for(const e of equipos){ delete e.red_efectiva; delete e.red_desde; }
+    return;
+  }
+  const ef = redesEfectivas(equipos);
+  for(const e of equipos){
+    const r = ef.get(Number(e.id)) || { redId: null, desdeId: null };
+    e.red_efectiva = r.redId;
+    e.red_desde = r.desdeId;
+  }
+}
+
+// Red con la que se muestra, colorea y filtra un equipo: la efectiva si se
+// anotó (011), si no la propia.
+export function redEfectivaDe(e){
+  if(!e) return null;
+  if(e.red_efectiva !== undefined) return e.red_efectiva;
+  return redPropia(e);
+}
+// Id del equipo del que hereda su red, o null si la red es propia (o no tiene).
+export function redHeredadaDe(e){
+  return e && e.red_efectiva !== undefined && e.red_efectiva !== null && tieneValor(e.red_desde) && Number(e.red_desde) !== Number(e.id)
+    ? Number(e.red_desde) : null;
+}
+
+// Equipos que cuelgan de equipoId (servidor principal, a cualquier
+// profundidad) y siguen su red: los que no tienen red propia, sin entrar en
+// las redes aparte. red = analizarRed(…).
+export function herederosDeRed(red, equipoId){
+  const out = [];
+  const pila = [...(red.clientes.get(equipoId) || [])];
+  const vistos = new Set([equipoId]);
+  while(pila.length){
+    const c = pila.pop();
+    if(vistos.has(c.id)) continue;
+    vistos.add(c.id);
+    if(redPropia(c) !== null) continue;
+    out.push(c);
+    pila.push(...(red.clientes.get(c.id) || []));
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Grosor de las líneas de conexión (v9): un factor para todas (0,5× a 3×, de
+// a 0,25). Se aplica al ancho y a los trazos punteados, para que conserven su
+// forma. Lo recuerda cada navegador (ui/mapa/leaflet.js).
+// ---------------------------------------------------------------------------
+export const GROSOR_LINEAS = { min: 0.5, max: 3, paso: 0.25, porDefecto: 1 };
+export function normalizarGrosor(k){
+  const n = Number(k);
+  if(!Number.isFinite(n) || n <= 0) return GROSOR_LINEAS.porDefecto;
+  const redondeado = Math.round(n / GROSOR_LINEAS.paso) * GROSOR_LINEAS.paso;
+  return Math.min(GROSOR_LINEAS.max, Math.max(GROSOR_LINEAS.min, redondeado));
+}
+export function conGrosor(estilo, k = 1){
+  const f = normalizarGrosor(k);
+  if(!estilo || f === 1) return estilo;
+  const escalar = x=>Math.round(x * f * 100) / 100;
+  const out = { ...estilo, weight: escalar(estilo.weight) };
+  if(estilo.dashArray) out.dashArray = String(estilo.dashArray).trim().split(/[\s,]+/).map(x=>escalar(Number(x))).join(" ");
+  return out;
+}
+// «1×», «1,5×», «0,75×».
+export function textoGrosor(k){ return `${String(normalizarGrosor(k)).replace(".", ",")}×`; }
+
 // Filtro (c): tipo = rol calculado; estado = el de la simulación (solo si está activa).
-// Filtro por red (007): "sin" = equipos sin red.
-export function claveRed(e){ return e && tieneValor(e.red_id) ? String(e.red_id) : "sin"; }
+// Filtro por red (007): "sin" = equipos sin red (con la 011, sin red efectiva).
+export function claveRed(e){ const r = redEfectivaDe(e); return r !== null ? String(r) : "sin"; }
 export function equipoVisible(red, equipoId, { rolesOcultos = [], estadosOcultos = [], redesOcultas = [] } = {}, sim = null){
   if(rolesOcultos.includes(red.rol.get(equipoId))) return false;
   if(redesOcultas.length && redesOcultas.includes(claveRed(red.equipoPorId.get(equipoId)))) return false;

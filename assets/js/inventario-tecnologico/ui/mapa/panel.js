@@ -4,7 +4,7 @@
 import { esc, fmtFecha, fmtTag } from "../../nucleo/helpers.js";
 import { fmtAzimut, fmtCoordenadas, fmtDistancia, urlGoogleMaps } from "../../nucleo/geo.js";
 import { infoTipoUbicacion, ordenarUbicaciones } from "../../nucleo/mapa-logica.js";
-import { caminoARaiz, describirConexion, infoEstado, infoMedio, infoRol, medioEnlace, tramosDeCamino } from "../../nucleo/mapa-jerarquia.js";
+import { caminoARaiz, describirConexion, infoEstado, infoMedio, infoRol, medioEnlace, redEfectivaDe, redHeredadaDe, tramosDeCamino } from "../../nucleo/mapa-jerarquia.js";
 import { atajosQueLoApagan } from "../../nucleo/mapa-nombres.js";
 import { colorTipo, iconoTipoTam, tintarClaro } from "../../nucleo/opciones-configurables.js";
 import { urlFoto } from "../../negocio/operaciones.js";
@@ -59,10 +59,18 @@ function nombreEnUbicacion(ctx, e, u){
   return i > 0 ? e.nombre.slice(0, i) + e.nombre.slice(i + s.length) : e.nombre;
 }
 
-// Red de la finca (007) de un equipo, como chip con su color.
+// Red de la finca (007) de un equipo, como chip con su color. Con la 011, la
+// heredada del servidor va con borde punteado y dice de quién la hereda; la
+// propia (la que empieza una red o una red aparte), con borde lleno.
 function chipRed(ctx, e){
-  const r = ctx.red007 && e.red_id !== null && e.red_id !== undefined ? ctx.redPorId.get(e.red_id) : null;
-  return r ? `<span class="${P}mapa-red-chip" style="--red-color:${esc(r.color)}" title="Red ${esc(r.nombre)}">${esc(r.nombre)}</span>` : "";
+  const id = ctx.red007 ? redEfectivaDe(e) : null;
+  const r = id !== null ? ctx.redPorId.get(id) : null;
+  if(!r) return "";
+  const desde = redHeredadaDe(e);
+  const origen = desde !== null ? ctx.red.equipoPorId.get(desde) : null;
+  return desde !== null
+    ? `<span class="${P}mapa-red-chip ${P}mapa-red-chip-heredada" style="--red-color:${esc(r.color)}" title="Red ${esc(r.nombre)}, heredada${origen ? ` de «${esc(origen.nombre)}»` : " de su servidor"}">${esc(r.nombre)}</span>`
+    : `<span class="${P}mapa-red-chip" style="--red-color:${esc(r.color)}" title="Red ${esc(r.nombre)}">${esc(r.nombre)}</span>`;
 }
 
 function pillEstado(estado){

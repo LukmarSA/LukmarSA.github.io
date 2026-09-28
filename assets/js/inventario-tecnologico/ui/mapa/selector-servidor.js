@@ -244,7 +244,7 @@ export function montarSelectorServidor(select, {
       const marcas = [
         o.misma ? `<span class="${P}serv-marca ${P}serv-marca-misma">misma ubicación</span>` : "",
         o.origen === "activo" ? `<span class="${P}serv-marca ${P}serv-marca-nuevo">se registra al guardar</span>` : "",
-        o.redNombre ? `<span class="${P}mapa-red-chip" style="--red-color:${esc(o.redColor || "#57697C")}">${esc(o.redNombre)}</span>` : "",
+        o.redNombre ? `<span class="${P}mapa-red-chip${o.redHeredada ? ` ${P}mapa-red-chip-heredada` : ""}" style="--red-color:${esc(o.redColor || "#57697C")}"${o.redHeredada ? ` title="Red ${esc(o.redNombre)}, heredada de su servidor"` : ""}>${esc(o.redNombre)}</span>` : "",
       ].join("");
       html += `<li role="option" id="${id}-op-${i}" class="${clases}" data-indice="${i}" data-clave="${esc(o.clave)}" aria-selected="${elegido}" title="${esc(`${o.nombre} — ${metaDe(o)}`)}">`
         + `<span class="${P}serv-op-icono ${P}serv-icono-${o.origen}">${o.origen === "activo" ? ICONO_ACTIVO : ICONO_EQUIPO}</span>`

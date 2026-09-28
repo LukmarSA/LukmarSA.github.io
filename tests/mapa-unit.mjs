@@ -957,6 +957,137 @@ prueba("selector: sugiere cable cuando el servidor está en otra ubicación y un
   assert.equal(SS.haceRadio(null), null);
 });
 
+// ---------------------------------------------------------------- v9: la red se hereda del servidor (011)
+const REDES_H = [{ id:1, nombre:"Red Oficina", color:"#007EB2" }, { id:2, nombre:"CCTV", color:"#FBFF00" }, { id:3, nombre:"Invitados", color:"#2E8B57" }];
+// Router(1, Red Oficina) ← PTP(2) ← Estación(3, en otra torre) ← Switch(4, CCTV) ← Cámara(5) y Cámara(6, Invitados) ← NVR sin tipo(7)
+const EQ_H = ()=>[
+  eqN(1, 3, "router", null, { red_id:1 }),
+  eqN(2, 3, "ptp", 1),
+  eqN(3, 1, "estacion", 2),
+  eqN(4, 1, "switch", 3, { red_id:2 }),
+  eqN(5, 1, "camara", 4),
+  eqN(6, 1, "camara", 4, { red_id:3, referencia:"Norte" }),
+  eqN(7, 1, null, 6, { nombre:"NVR viejo" }),
+];
+prueba("011: red efectiva = la propia o la del servidor, hasta la raíz; una red propia distinta empieza una red aparte", ()=>{
+  const ef = J.redesEfectivas(EQ_H());
+  const r = id=>ef.get(id);
+  assert.deepEqual(r(1), { redId:1, desdeId:1 });
+  assert.deepEqual(r(2), { redId:1, desdeId:1 });
+  assert.deepEqual(r(3), { redId:1, desdeId:1 });
+  assert.deepEqual(r(4), { redId:2, desdeId:4 }, "el switch con CCTV: red aparte");
+  assert.deepEqual(r(5), { redId:2, desdeId:4 }, "su cámara la hereda de él");
+  assert.deepEqual(r(6), { redId:3, desdeId:6 });
+  assert.deepEqual(r(7), { redId:3, desdeId:6 }, "un equipo sin tipo también hereda");
+  // Sin red en el camino, un servidor que no existe o un ciclo (que la base no deja): sin red.
+  const raros = J.redesEfectivas([eqN(1, 1, "ptp"), eqN(2, 1, "ap", 1), eqN(3, 1, "ap", 99), eqN(4, 1, "ap", 5), eqN(5, 1, "ap", 4)]);
+  for(const id of [1, 2, 3, 4, 5]) assert.deepEqual(raros.get(id), { redId:null, desdeId:null }, `id ${id}`);
+  assert.deepEqual(J.redesEfectivas([{ id:1, red_id:"2", servidor_id:null }]).get(1), { redId:2, desdeId:1 }, "el id de la red llega como texto desde un select");
+});
+prueba("011: anotar deja red_efectiva y de quién la hereda; sin la 011 cada equipo muestra solo su red", ()=>{
+  const eqs = EQ_H();
+  J.anotarRedesEfectivas(eqs, true);
+  const e = id=>eqs.find(x=>x.id === id);
+  assert.equal(J.redEfectivaDe(e(5)), 2);
+  assert.equal(J.redHeredadaDe(e(5)), 4);
+  assert.equal(J.redHeredadaDe(e(4)), null, "la del switch es propia");
+  assert.equal(J.redHeredadaDe(e(1)), null);
+  assert.equal(J.claveRed(e(3)), "1");
+  assert.equal(e(4).red_id, 2, "red_id sigue siendo la propia");
+  J.anotarRedesEfectivas(eqs, false);
+  assert.equal(J.redEfectivaDe(e(5)), null);
+  assert.equal(J.claveRed(e(3)), "sin");
+  assert.equal(J.claveRed(e(4)), "2");
+  assert.ok(!("red_efectiva" in e(5)) && !("red_desde" in e(5)));
+  assert.equal(J.redEfectivaDe(null), null);
+});
+prueba("011: filtro por red y cuentas con la red efectiva (ocultar Red Oficina no oculta la red aparte CCTV)", ()=>{
+  const eqs = EQ_H();
+  J.anotarRedesEfectivas(eqs, true);
+  const red = J.analizarRed({ equipos: eqs, ubicaciones: UB_RED.map(u=>({ ...u, lat:-2.3 - u.id * 0.01, lng:-79.7 })) });
+  const visibles = eqs.filter(e=>J.equipoVisible(red, e.id, { redesOcultas: ["1"] })).map(e=>e.id);
+  assert.deepEqual(visibles, [4, 5, 6, 7]);
+  const cuenta = new Map();
+  for(const e of eqs){ const k = J.claveRed(e); cuenta.set(k, (cuenta.get(k) || 0) + 1); }
+  assert.deepEqual(Object.fromEntries(cuenta), { "1":3, "2":2, "3":2 });
+});
+prueba("011: herederos de la red de un equipo = lo que cuelga de él sin red propia (sin entrar en las redes aparte)", ()=>{
+  const eqs = EQ_H();
+  const red = J.analizarRed({ equipos: eqs, ubicaciones: UB_RED.map(u=>({ ...u, lat:-2.3 - u.id * 0.01, lng:-79.7 })) });
+  assert.deepEqual(J.herederosDeRed(red, 1).map(e=>e.id).sort(), [2, 3]);
+  assert.deepEqual(J.herederosDeRed(red, 4).map(e=>e.id).sort(), [5]);
+  assert.deepEqual(J.herederosDeRed(red, 6).map(e=>e.id), [7]);
+  assert.deepEqual(J.herederosDeRed(red, 7), []);
+});
+const ctxH = (equipos, herencia = true)=>({ equipos, ubicaciones: UB_RED, tipos: TIPOS_RED, redes: REDES_H, conRed: true, herencia });
+prueba("011: el nombre lleva la red heredada; la del servidor, solo si es distinta (en el borde de una red aparte)", ()=>{
+  const n = N.nombresAutomaticos(ctxH(EQ_H()));
+  assert.equal(n.get(1), "Router (Red Oficina) en Oficina");
+  assert.equal(n.get(2), "Punto a Punto (Red Oficina) en Oficina conectado a Router");
+  assert.equal(n.get(3), "Estación (Red Oficina) en Torre K enlazada a Punto a Punto en Oficina");
+  assert.equal(n.get(4), "Switch (CCTV) en Torre K conectado a Estación (Red Oficina)");
+  assert.equal(n.get(5), "Cámara (CCTV) en Torre K conectada a Switch");
+  assert.equal(n.get(6), "Cámara (Invitados · Norte) en Torre K conectada a Switch (CCTV)");
+  assert.equal(n.get(7), "NVR viejo", "sin tipo: su nombre de siempre");
+});
+prueba("011: sin la 011 (herencia = false) cada equipo lleva solo su red propia, como con la 010", ()=>{
+  const n = N.nombresAutomaticos(ctxH(EQ_H(), false));
+  assert.equal(n.get(2), "Punto a Punto en Oficina conectado a Router (Red Oficina)");
+  assert.equal(n.get(5), "Cámara en Torre K conectada a Switch (CCTV)");
+  const sinRed = N.nombresAutomaticos({ ...ctxH(EQ_H()), conRed: false });
+  assert.equal(sinRed.get(5), "Cámara en Torre K conectada a Switch", "sin la 010 no hay red que heredar");
+});
+prueba("011: cambiar la red de la raíz cambia el nombre de lo que la hereda, no el de la red aparte", ()=>{
+  const eqs = EQ_H().map(e=>e.id === 1 ? { ...e, red_id:3 } : e);
+  const n = N.nombresAutomaticos(ctxH(eqs));
+  assert.equal(n.get(3), "Estación (Invitados) en Torre K enlazada a Punto a Punto en Oficina");
+  assert.equal(n.get(4), "Switch (CCTV) en Torre K conectado a Estación (Invitados)");
+  assert.equal(n.get(5), "Cámara (CCTV) en Torre K conectada a Switch");
+  assert.equal(n.get(6), "Cámara (Invitados · Norte) en Torre K conectada a Switch (CCTV)");
+});
+prueba("011: nombre para guardar de un equipo editado: sin red propia hereda la del servidor elegido", ()=>{
+  const eqs = N.aplicarNombres(EQ_H(), ctxH([]));
+  assert.equal(N.nombreParaGuardar({ ubicacion_id:1, tipo_equipo:"camara", red_id:"", servidor_id:4 }, ctxH(eqs), null), "Cámara (CCTV) en Torre K conectada a Switch (2)");
+  assert.equal(N.nombreParaGuardar({ ubicacion_id:1, tipo_equipo:"camara", red_id:"", servidor_id:3, referencia:"Sur" }, ctxH(eqs), null), "Cámara (Red Oficina · Sur) en Torre K conectada a Estación");
+  assert.equal(N.nombreParaGuardar({ ubicacion_id:1, tipo_equipo:"camara", red_id:"1", servidor_id:4, referencia:"Sur" }, ctxH(eqs), null), "Cámara (Red Oficina · Sur) en Torre K conectada a Switch (CCTV)");
+  // El switch editado (id 4) sin red propia: pasa a heredar Red Oficina de la estación.
+  assert.equal(N.nombreParaGuardar({ ubicacion_id:1, tipo_equipo:"switch", red_id:null, servidor_id:3 }, ctxH(eqs), 4), "Switch (Red Oficina) en Torre K conectado a Estación");
+});
+prueba("011: el selector de servidor muestra y filtra por la red efectiva y marca la heredada", ()=>{
+  const eqs = EQ_H();
+  J.anotarRedesEfectivas(eqs, true);
+  const ops = SS.opcionesServidor({ candidatos: eqs.filter(e=>e.id !== 5), ubicacionId: 1, ubicacionPorId: new Map(UB_RED.map(u=>[u.id, { ...u, lat:-2.3 - u.id * 0.01, lng:-79.7 }])), tiposEquipo: TIPOS_RED, redes: REDES_H });
+  const op = id=>ops.find(o=>o.clave === String(id));
+  assert.equal(op(3).redNombre, "Red Oficina"); assert.equal(op(3).redHeredada, true);
+  assert.equal(op(4).redNombre, "CCTV"); assert.equal(op(4).redHeredada, false);
+  assert.equal(op(7).redNombre, "Invitados"); assert.equal(op(7).redHeredada, true);
+  const f = SS.facetasServidor(ops, {});
+  assert.deepEqual(f.red.map(v=>[v.etiqueta, v.n]), [["CCTV", 1], ["Invitados", 2], ["Red Oficina", 3]]);
+  assert.deepEqual(SS.filtrarServidores(ops, { texto: "invitados" }).map(o=>o.clave).sort(), ["6", "7"]);
+});
+
+// ---------------------------------------------------------------- v9: grosor de las líneas
+prueba("grosor: factor entre 0,5× y 3× de a 0,25 (lo raro vuelve a 1×)", ()=>{
+  assert.equal(J.normalizarGrosor(2), 2);
+  assert.equal(J.normalizarGrosor("1.6"), 1.5);
+  assert.equal(J.normalizarGrosor(0.1), 0.5);
+  assert.equal(J.normalizarGrosor(9), 3);
+  for(const raro of [null, undefined, "", "abc", -1, 0, NaN]) assert.equal(J.normalizarGrosor(raro), 1, String(raro));
+  assert.equal(J.textoGrosor(1.5), "1,5×");
+  assert.equal(J.textoGrosor(1), "1×");
+  assert.equal(J.textoGrosor(0.75), "0,75×");
+});
+prueba("grosor: escala el ancho y los punteados (conservan su forma); con 1× no copia nada", ()=>{
+  const base = { color:"#000", weight:2.2, opacity:0.8, dashArray:"3 8" };
+  const doble = J.conGrosor(base, 2);
+  assert.deepEqual(doble, { color:"#000", weight:4.4, opacity:0.8, dashArray:"6 16" });
+  assert.equal(base.weight, 2.2, "no toca el original");
+  assert.equal(J.conGrosor(base, 1), base);
+  assert.deepEqual(J.conGrosor({ weight:5 }, 0.5), { weight:2.5 });
+  assert.equal(J.conGrosor({ weight:3, dashArray:"12, 7" }, 1.5).dashArray, "18 10.5");
+  assert.equal(J.conGrosor(null, 2), null);
+});
+
 prueba("errores de la 008/009 traducidos", ()=>{
   assert.match(L.traducirErrorMapa({ code:"23514", message:'violates check constraint "equipos_radioenlace_medio_valido"' }), /cable, fibra/);
   assert.match(L.traducirErrorMapa({ code:"23505", message:'duplicate key value violates unique constraint "piscinas_nombre_unico"' }), /Ya hay una piscina/);

@@ -27,13 +27,14 @@ import { state } from "../nucleo/estado.js";
 import { fmtCoordenadas, fmtDistancia } from "../nucleo/geo.js";
 import { esc, fmtTag } from "../nucleo/helpers.js";
 import { buscarEnMapa, infoTipoUbicacion, resumenMapa, traducirErrorMapa, ubicacionesVisibles } from "../nucleo/mapa-logica.js";
-import { ESTADOS_SIMULACION, ROLES, UMBRAL_AGRUPAR_CLIENTES, caminoARaiz, claveRed, contarRoles, equipoVisible, estadoPorUbicacion, planDeAgrupados, planDeLineas, resumenRed } from "../nucleo/mapa-jerarquia.js";
+import { ESTADOS_SIMULACION, GROSOR_LINEAS, ROLES, UMBRAL_AGRUPAR_CLIENTES, caminoARaiz, claveRed, conGrosor, contarRoles, equipoVisible, estadoPorUbicacion, normalizarGrosor, planDeAgrupados, planDeLineas, redEfectivaDe, resumenRed, textoGrosor } from "../nucleo/mapa-jerarquia.js";
 import { esAdmin, puede } from "../nucleo/permisos.js";
 import { editarPiscina, eliminarEquipo, eliminarRespaldo, eliminarUbicacion, establecerUbicacionActiva, guardarAjustePlano, quitarActivoDeUbicacion } from "../negocio/operaciones-mapa.js";
 import { urlFoto } from "../negocio/operaciones.js";
 import { abrirDetalle } from "./detalle/vista.js";
 import { abrirAsignacionEnLote, abrirAsignarActivos, abrirEditarAtajo, abrirFormEquipo, abrirFormPiscina, abrirFormRespaldo, abrirFormUbicacion, abrirGuardarAtajo, abrirMoverActivo, abrirRedesYTipos } from "./mapa/formularios.js";
-import { CAPAS_BASE, CAPAS_SUPERPUESTAS, CENTRO_POR_DEFECTO, ESTILOS_CON_HALO, ESTILOS_LINEA, HALO, OPACIDAD_ATENUADA, capaBaseInicial, cargarLeaflet, crearCapasBase, iconoAgrupado, iconoUbicacion, recordarCapaBase, recordarSuperpuesta, superpuestaInicial } from "./mapa/leaflet.js";
+import { CAPAS_BASE, CAPAS_SUPERPUESTAS, CENTRO_POR_DEFECTO, ESTILOS_CON_HALO, ESTILOS_LINEA, HALO, OPACIDAD_ATENUADA, capaBaseInicial, cargarLeaflet, crearCapasBase, grosorInicial, iconoAgrupado, iconoUbicacion, recordarCapaBase, recordarGrosor, recordarSuperpuesta, superpuestaInicial } from "./mapa/leaflet.js";
+import { crearControlPantallaCompleta, crearPantallaCompleta } from "./mapa/pantalla-completa.js";
 import { htmlPanelCargando, htmlPanelError, htmlPanelResumen, htmlPanelUbicacion } from "./mapa/panel.js";
 import { crearCapaPlano, crearControlPlano, crearPanesPlano, htmlLeyendaPlano, iniciarAjustePlano, opacidadInicial, recordarOpacidad } from "./mapa/plano.js";
 import { ZOOM_ROTULOS, crearControlPiscinas, crearPanesPiscinas, htmlPopupPiscina, iniciarEdicionPiscina, pintarPiscinas } from "./mapa/piscinas.js";
@@ -46,6 +47,7 @@ let vista = null;     // { L, mapa, capaLineas, capaMarcadores, capaAgrupados, m
 let generacion = 0;   // invalida cargas en curso si se sale de la pestaña antes de que terminen
 let alClicFueraBuscador = null;
 let ubicacionEnPanel = null; // para conservar el scroll del panel solo si sigue mostrando la misma ubicación
+let grosorLineas = GROSOR_LINEAS.porDefecto; // factor del grosor de las líneas (v9), recordado en el navegador
 
 const LINEAS = [
   { id: "backbone", etiqueta: "Backbone", ayuda: "Enlaces punto a punto: servidor con un solo cliente." },
@@ -97,6 +99,7 @@ export function destruirVistaMapa(){
   if(vista.ajustePlano){ try{ vista.ajustePlano.terminar(); }catch(e){ /* el mapa ya se está desarmando */ } }
   if(vista.edicionPiscina){ try{ vista.edicionPiscina.terminar(); }catch(e){ /* el mapa ya se está desarmando */ } }
   document.removeEventListener("keydown", vista.alTeclear, true);
+  if(vista.pantalla){ try{ vista.pantalla.destruir(); }catch(e){ /* la vista ya se está desarmando */ } }
   // Leaflet programa un setTimeout de 250 ms al animar un zoom
   // (_onZoomTransitionEnd); si el mapa se destruye antes, ese callback revienta
   // con "Cannot read properties of undefined (reading '_leaflet_pos')". Se
@@ -144,6 +147,12 @@ function htmlEsqueleto(){
           <div class="${P}mapa-filtro-grupo" role="group" aria-label="Líneas">
             <span class="${P}mapa-filtro-titulo">Líneas</span>
             <div class="${P}mapa-chips" id="${P}mapa-chips-lineas"></div>
+            <div class="${P}mapa-grosor" title="Grosor de todas las líneas de conexión (se recuerda en este navegador)">
+              <label for="${P}mapa-grosor">Grosor</label>
+              <input type="range" id="${P}mapa-grosor" min="${GROSOR_LINEAS.min}" max="${GROSOR_LINEAS.max}" step="${GROSOR_LINEAS.paso}" value="${GROSOR_LINEAS.porDefecto}">
+              <output id="${P}mapa-grosor-valor" for="${P}mapa-grosor">${textoGrosor(GROSOR_LINEAS.porDefecto)}</output>
+              <button type="button" class="${P}btn ${P}btn-sm ${P}btn-ghost" id="${P}mapa-grosor-normal" hidden title="Volver al grosor normal">Normal</button>
+            </div>
           </div>
           <div class="${P}mapa-filtro-grupo" role="group" aria-label="Equipos por tipo">
             <span class="${P}mapa-filtro-titulo">Equipos</span>
@@ -225,7 +234,11 @@ function crearMapa(L, main){
     const encendida = e.type === "overlayadd";
     if(e.layer === vista.capaPlano){ recordarSuperpuesta("plano", encendida); alternarPlano(encendida); }
     else if(e.layer === vista.capaPiscinas){ recordarSuperpuesta("piscinas", encendida); alternarPiscinas(encendida); }
+    // En pantalla completa, el panel se acomoda debajo de los controles de esa esquina.
+    if(vista.pantalla) vista.pantalla.controlesCambio();
   });
+  // v9: pantalla completa (botón debajo del zoom).
+  crearControlPantallaCompleta(L, ()=>{ if(vista && vista.pantalla) vista.pantalla.alternar(); }).addTo(mapa);
   L.control.scale({ metric: true, imperial: false }).addTo(mapa);
   const capaLineas = L.layerGroup().addTo(mapa);
   const capaMarcadores = L.layerGroup().addTo(mapa);
@@ -236,7 +249,8 @@ function crearMapa(L, main){
   vista = { L, mapa, capaLineas, capaMarcadores, capaAgrupados, marcadores: new Map(), main, colocando: null, encuadrado: false, alTeclear: null,
     capas, capaPlano, controlCapas, controlPlano: null, ajustePlano: null,
     capaPiscinas, piscinasEnControl: false, piscinasVisibles: false, piscinasSoloRevisar: false, piscinasDibujadas: null,
-    controlPiscinas: null, edicionPiscina: null, edicionPiscinaId: null };
+    controlPiscinas: null, edicionPiscina: null, edicionPiscinaId: null, pantalla: null };
+  vista.pantalla = crearPantallaCompleta({ raiz: main.querySelector(`.${P}mapa-vista`), mapa });
   // Los nombres de las piscinas se ven solo de cerca.
   const rotulos = ()=>{ if(vista && vista.mapa === mapa) canvas.classList.toggle(`${P}mapa-sin-rotulos`, mapa.getZoom() < ZOOM_ROTULOS); };
   mapa.on("zoomend", rotulos);
@@ -258,7 +272,10 @@ function crearMapa(L, main){
     if(vista.colocando){ e.preventDefault(); cancelarColocacion(); return; }
     const s = estadoMapa().seleccion;
     if(s.equipoId){ seleccionarUbicacion(s.ubicacionId); return; }
-    if(s.ubicacionId) deseleccionar();
+    if(s.ubicacionId){ deseleccionar(); return; }
+    // Nada más que cerrar: sale de la pantalla completa (con el Esc bloqueado
+    // por la pantalla completa del navegador, la tecla llega hasta aquí).
+    if(vista.pantalla && vista.pantalla.activa()){ e.preventDefault(); vista.pantalla.salir(); }
   };
   document.addEventListener("keydown", vista.alTeclear, true);
   requestAnimationFrame(()=>{ if(vista && vista.mapa === mapa) mapa.invalidateSize(); });
@@ -405,6 +422,7 @@ function pintarFiltros(c){
     const activos = f.tiposOcultos.length + f.rolesOcultos.length + (c.sim ? f.estadosOcultos.length + 1 : 0) + (f.verArchivadas ? 1 : 0)
       + (f.lineas.backbone ? 0 : 1) + (f.lineas.p2mp ? 0 : 1) + (f.lineas.cable === false ? 1 : 0) + (f.lineas.respaldos ? 1 : 0) + f.redesOcultas.length;
     cuentaFiltros.textContent = activos ? `${activos} activo${activos === 1 ? "" : "s"}${c.sim ? " · simulación" : ""}` : "";
+    if(vista && vista.pantalla) vista.pantalla.filtrosCambio();
   }
 
   const botonSim = document.getElementById(`${P}mapa-simulacion`);
@@ -512,13 +530,16 @@ function pintarLineas(c){
   // Colorear por red: solo las líneas normales (no la simulación ni el camino resaltado).
   const colorPorRed = c.m.filtros.colorPorRed && hayRedFinca();
   const colorRed = new Map(c.m.redes.map(r=>[r.id, r.color]));
+  // La línea va con la red del cliente (con la 011, la efectiva: una red
+  // aparte sale con su color desde el enlace de su primer equipo).
   const colorDe = d=>{
     const e = c.red.equipoPorId.get(d.clienteId), s = c.red.equipoPorId.get(d.servidorId);
-    const id = e && e.red_id !== null && e.red_id !== undefined ? e.red_id : (s ? s.red_id : null);
+    const id = redEfectivaDe(e) ?? redEfectivaDe(s);
     return id !== null && id !== undefined ? colorRed.get(id) || null : null;
   };
   for(const d of plan){
-    let estilo = ESTILOS_LINEA[d.estilo];
+    // v9: el grosor elegido (ancho y punteado) vale para todas las líneas.
+    let estilo = conGrosor(ESTILOS_LINEA[d.estilo], grosorLineas);
     if(colorPorRed && ["backbone", "p2mp", "cable", "fibra"].includes(d.estilo)){ const color = colorDe(d); if(color) estilo = { ...estilo, color }; }
     const puntos = [[d.desde.lat, d.desde.lng], [d.hasta.lat, d.hasta.lng]];
     if(ESTILOS_CON_HALO.has(d.estilo) && !d.atenuada) L.polyline(puntos, { ...HALO, weight: estilo.weight + 4 }).addTo(vista.capaLineas);
@@ -600,6 +621,7 @@ function pintarPanel(c){
   panel.scrollTop = (u ? u.id : null) === ubicacionEnPanel ? scroll : 0;
   ubicacionEnPanel = u ? u.id : null;
   restaurarFoco(panel, foco);
+  if(vista && vista.pantalla) vista.pantalla.panelCambio();
   const idAhora = m.seleccion.equipoId !== null && m.seleccion.equipoId !== undefined ? m.seleccion.equipoId : null;
   const destino = m.seleccion.activoId
     ? panel.querySelector(`[data-activo-id="${m.seleccion.activoId}"]`)
@@ -1085,6 +1107,31 @@ function montarBarra(main){
     detalles.open = !angosta.matches;
     const alCambiar = e=>{ if(!e.matches && detalles.isConnected) detalles.open = true; };
     if(angosta.addEventListener) angosta.addEventListener("change", alCambiar);
+  }
+
+  // v9: grosor de las líneas de conexión (un factor para todas, recordado en
+  // este navegador). Mientras se arrastra se repintan solo las líneas.
+  const grosor = main.querySelector(`#${P}mapa-grosor`);
+  const grosorValor = main.querySelector(`#${P}mapa-grosor-valor`);
+  const grosorNormal = main.querySelector(`#${P}mapa-grosor-normal`);
+  if(grosor){
+    let cuadro = null;
+    const aplicarGrosor = (k, { guardar = false } = {})=>{
+      grosorLineas = normalizarGrosor(k);
+      grosor.value = String(grosorLineas);
+      grosor.setAttribute("aria-valuetext", textoGrosor(grosorLineas));
+      grosorValor.textContent = textoGrosor(grosorLineas);
+      grosorNormal.hidden = grosorLineas === GROSOR_LINEAS.porDefecto;
+      if(guardar) recordarGrosor(grosorLineas);
+      if(cuadro === null) cuadro = requestAnimationFrame(()=>{
+        cuadro = null;
+        if(vista && estadoMapa().cargado && document.getElementById(`${P}mapa-panel`)) pintarLineas(calcular());
+      });
+    };
+    aplicarGrosor(grosorInicial());
+    grosor.addEventListener("input", ()=>aplicarGrosor(grosor.value));
+    grosor.addEventListener("change", ()=>aplicarGrosor(grosor.value, { guardar: true }));
+    grosorNormal.addEventListener("click", ()=>{ aplicarGrosor(GROSOR_LINEAS.porDefecto, { guardar: true }); grosor.focus(); });
   }
 
   // Toggles: todos editan estadoMapa().filtros y repintan.

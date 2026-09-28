@@ -3,12 +3,12 @@
 // (abrirModal/cerrarModal) y, al guardar, avisan con mostrarToast y devuelven
 // el control con alGuardar.
 import { cargarActivos } from "../../nucleo/datos.js";
-import { cargarAtajos, cargarEquiposRadioenlace, cargarPiscinas, cargarRedes, cargarRespaldos, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, datosNombres, estadoMapa, hayMedio, hayNombresConRed, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
+import { cargarAtajos, cargarEquiposRadioenlace, cargarPiscinas, cargarRedes, cargarRespaldos, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, datosNombres, estadoMapa, hayHerenciaRed, hayMedio, hayNombresConRed, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
 import { GENEROS, nombreParaGuardar, nombresAutomaticos } from "../../nucleo/mapa-nombres.js";
 import { azimutGrados, distanciaKm, fmtAzimut, fmtCoordenadas, fmtDistancia, parsearCoordenadas } from "../../nucleo/geo.js";
 import { esc, fmtFecha, fmtTag } from "../../nucleo/helpers.js";
 import { coincideActivo, hoyLocalISO, infoTipoUbicacion, ordenarUbicaciones, validarFechaMovimiento } from "../../nucleo/mapa-logica.js";
-import { MEDIOS, candidatosRespaldo, candidatosServidor, describirConexion, esMedio, siguientePrioridad } from "../../nucleo/mapa-jerarquia.js";
+import { MEDIOS, candidatosRespaldo, candidatosServidor, describirConexion, esMedio, herederosDeRed, redEfectivaDe, redHeredadaDe, redesEfectivas, siguientePrioridad } from "../../nucleo/mapa-jerarquia.js";
 import { opcionesVigentes } from "../../nucleo/opciones-configurables.js";
 import { esAdmin } from "../../nucleo/permisos.js";
 import { cuadradoAlrededor, sectorDeNombre } from "../../nucleo/piscinas.js";
@@ -295,6 +295,8 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
   const conRed = hayRedFinca();
   const tipos = conRed ? opcionesVigentes(cargarTiposEquipo(), actual ? actual.tipo_equipo : null, "valor") : [];
   const redes = conRed ? cargarRedes().filter(r=>r.activa !== false || (actual && r.id === actual.red_id)) : [];
+  // 011: la red se hereda del servidor; aquí se elige solo la PROPIA (vacío = heredar).
+  const herencia = conRed && hayHerenciaRed();
   const camposNombre = conRed ? `
         <div class="${P}field">
           <label for="${P}equipo-tipo">Tipo de equipo</label>
@@ -317,11 +319,12 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
   const campoRed = conRed ? `
         <div class="${P}field">
           <label for="${P}equipo-red">Red</label>
-          <select id="${P}equipo-red">
+          <select id="${P}equipo-red"${herencia ? ` aria-describedby="${P}equipo-red-ayuda"` : ""}>
             <option value="">— Sin red —</option>
             ${redes.map(r=>`<option value="${r.id}" ${actual && actual.red_id === r.id ? "selected" : ""}>${esc(r.nombre)}${r.activa === false ? " (inactiva)" : ""}</option>`).join("")}
           </select>
           ${redes.length ? "" : `<div class="${P}hint">Todavía no hay redes: se crean en «Redes y tipos», en la barra del mapa.</div>`}
+          ${herencia ? `<div class="${P}hint ${P}mapa-red-ayuda" id="${P}equipo-red-ayuda"></div>` : ""}
         </div>` : "";
   // 008: medio del enlace con el servidor (vacío = automático).
   const conMedio = hayMedio();
@@ -471,7 +474,46 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
       calculoServ.textContent = texto;
     };
     pintarCalculoServ();
-    selServ.addEventListener("change", ()=>{ aplicarSugerenciaMedio(); pintarCalculoServ(); pintarNombre(); });
+
+    // Red (011): «Heredada del servidor: X» (vacío) o una red propia, que
+    // hace de este equipo y lo que cuelga de él una red aparte. La misma red
+    // que heredaría no se ofrece como propia (la base la dejaría vacía).
+    const ayudaRed = $(`#${P}equipo-red-ayuda`);
+    let redPropia = actual && actual.red_id !== null && actual.red_id !== undefined ? Number(actual.red_id) : null;
+    const redDeLista = id=>cargarRedes().find(r=>r.id === id) || null;
+    const heredable = ()=>{
+      const op = selector.elegida();
+      if(!op || op.origen !== "equipo") return { op, red: null, desde: null };
+      const s = red.equipoPorId.get(op.id);
+      const rid = redEfectivaDe(s);
+      const desdeId = s ? (redHeredadaDe(s) ?? (rid !== null ? s.id : null)) : null;
+      return { op, red: rid !== null ? redDeLista(rid) : null, desde: desdeId !== null ? red.equipoPorId.get(desdeId) || null : null };
+    };
+    function pintarRed(){
+      if(!herencia || !selRedEquipo) return;
+      const { op, red: rH, desde } = heredable();
+      if(redPropia !== null && rH && redPropia === rH.id) redPropia = null;
+      const vacia = op ? (rH ? `Heredada del servidor: ${rH.nombre}` : "Heredada del servidor (todavía sin red)") : "— Sin red —";
+      selRedEquipo.innerHTML = `<option value="">${esc(vacia)}</option>`
+        + redes.filter(r=>!rH || r.id !== rH.id).map(r=>`<option value="${r.id}">${esc(r.nombre)}${r.activa === false ? " (inactiva)" : ""}</option>`).join("");
+      selRedEquipo.value = redPropia !== null ? String(redPropia) : "";
+      if(!ayudaRed) return;
+      const n = id ? herederosDeRed(red, id).length : 0;
+      const cuelgan = n ? `${n === 1 ? "el equipo que cuelga" : `los ${n} equipos que cuelgan`} de él` : "";
+      const propia = redPropia !== null ? redDeLista(redPropia) : null;
+      if(propia){
+        const aparte = rH ? `Red aparte de «${rH.nombre}», la de su servidor. ` : "";
+        ayudaRed.textContent = aparte + (n ? `«${propia.nombre}» vale también para ${cuelgan} (los que tienen otra red propia la conservan).` : `Los equipos que cuelguen de él heredarán «${propia.nombre}».`);
+      }else if(op && rH){
+        ayudaRed.textContent = `La hereda de «${desde ? desde.nombre : op.nombre}»${n ? ` y la pasa a ${cuelgan}` : ""}. Si eliges otra, este equipo y lo que cuelga de él forman una red aparte.`;
+      }else if(op){
+        ayudaRed.textContent = "Su servidor todavía no tiene red: cuando la tenga, este equipo la hereda. También puedes darle una propia.";
+      }else{
+        ayudaRed.textContent = n ? `Sin red. Si le pones una, la heredan ${cuelgan} (salvo los que tienen otra propia).` : "Sin red. Si le pones una, la heredan los equipos que cuelguen de él.";
+      }
+    }
+    pintarRed();
+    selServ.addEventListener("change", ()=>{ aplicarSugerenciaMedio(); pintarCalculoServ(); pintarRed(); pintarNombre(); });
 
     // Nombre automático (007; con la red desde la 010), en vivo.
     const inputRef = $(`#${P}equipo-referencia`);
@@ -505,7 +547,10 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
     }
     if(selTipo) selTipo.addEventListener("change", ()=>{ aplicarSugerenciaMedio(); pintarCalculoServ(); pintarNombre(); });
     if(inputRef) inputRef.addEventListener("input", pintarNombre);
-    if(selRedEquipo) selRedEquipo.addEventListener("change", pintarNombre);
+    if(selRedEquipo) selRedEquipo.addEventListener("change", ()=>{
+      if(herencia){ redPropia = selRedEquipo.value ? Number(selRedEquipo.value) : null; pintarRed(); }
+      pintarNombre();
+    });
     if(selMedio) selMedio.addEventListener("change", ()=>{ medioPuestoPorSugerencia = false; pintarCalculoServ(); pintarNombre(); });
     pintarNombre();
 
@@ -547,6 +592,7 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
         selector.refrescar();
         selector.elegir(String(registrado));
         pintarCalculoServ();
+        pintarRed();
         pintarNombre();
       }
       const campos = {
@@ -986,11 +1032,17 @@ export function abrirEditarAtajo(id, { caidosActuales = [], alGuardar } = {}){
 export function abrirRedesYTipos({ alCambiar } = {}){
   const equipos = cargarEquiposRadioenlace();
   const cuenta = pred=>equipos.filter(pred).length;
+  // Con la 011 cuentan también los que la heredan; se aclara cuántos la tienen propia.
+  const cuentaRed = r=>{
+    const total = cuenta(e=>redEfectivaDe(e) === r.id);
+    const propios = cuenta(e=>e.red_id === r.id);
+    return plural(total, "equipo", "equipos") + (hayHerenciaRed() && total > propios ? ` (${propios} con la red propia)` : "");
+  };
   const filaRed = r=>`<li class="${P}catalogo-fila" data-red-id="${r.id}">
       <input type="color" value="${esc(r.color)}" aria-label="Color de ${esc(r.nombre)}" data-campo="color">
       <input type="text" value="${esc(r.nombre)}" maxlength="60" aria-label="Nombre de la red" data-campo="nombre">
       <label class="${P}catalogo-check"><input type="checkbox" data-campo="activa"${r.activa !== false ? " checked" : ""}> Activa</label>
-      <span class="${P}mapa-muted ${P}catalogo-cuenta">${plural(cuenta(e=>e.red_id === r.id), "equipo", "equipos")}</span>
+      <span class="${P}mapa-muted ${P}catalogo-cuenta">${cuentaRed(r)}</span>
       <button type="button" class="${P}btn ${P}btn-sm" data-cat="guardar-red">Guardar</button>
       <button type="button" class="${P}btn ${P}btn-sm ${P}btn-ghost" data-cat="eliminar-red" title="Eliminar la red (sus equipos quedan sin red)">Eliminar</button>
     </li>`;
@@ -1094,6 +1146,10 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
   const redPorId = new Map(redes.map(r=>[r.id, r]));
   const elegidos = new Set(seleccion.filter(id=>equipos.some(e=>e.id === id)));
   const conEquipos = ordenarUbicaciones(ubicaciones.filter(u=>equipos.some(e=>e.ubicacion_id === u.id)), tiposUbic);
+  // 011: la red se hereda del servidor. «Quitar» deja que la herede, y
+  // ponerle una red a un equipo la pasa a lo que cuelga de él.
+  const herencia = hayHerenciaRed();
+  const porIdEq = new Map(equipos.map(e=>[e.id, e]));
   const html = `<div class="${P}modal ${P}modal-wide">
     ${cabecera("Tipo y red en lote")}
     <div class="${P}modal-body">
@@ -1121,8 +1177,9 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
         </div>
         <div class="${P}field">
           <label for="${P}lote-red">Red</label>
-          <select id="${P}lote-red"><option value="${NO_CAMBIAR}">— No cambiar —</option><option value="">— Quitar la red —</option>${redes.filter(r=>r.activa !== false).map(r=>`<option value="${r.id}">${esc(r.nombre)}</option>`).join("")}</select>
+          <select id="${P}lote-red"><option value="${NO_CAMBIAR}">— No cambiar —</option><option value="">${herencia ? "— Quitar la propia (hereda la del servidor) —" : "— Quitar la red —"}</option>${redes.filter(r=>r.activa !== false).map(r=>`<option value="${r.id}">${esc(r.nombre)}</option>`).join("")}</select>
           ${redes.length ? "" : `<div class="${P}hint">Todavía no hay redes: se crean en «Redes y tipos».</div>`}
+          ${herencia && redes.length ? `<div class="${P}hint">Basta con ponérsela a la raíz o al primer equipo de una red: los que cuelgan de él la heredan.</div>` : ""}
         </div>
       </div>
       <div class="${P}lote-vista" id="${P}lote-vista" aria-live="polite"></div>
@@ -1144,21 +1201,24 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
       const u = selUbic.value ? Number(selUbic.value) : null;
       return equipos.filter(e=>(u === null || e.ubicacion_id === u)
         && (!sinTipo.checked || !e.tipo_equipo)
-        && (!sinRed.checked || e.red_id === null || e.red_id === undefined)
+        && (!sinRed.checked || redEfectivaDe(e) === null)
         && (!q || clave([e.nombre, e.modelo, (ubicPorId.get(e.ubicacion_id) || {}).nombre].join(" ")).includes(q)));
     };
     const pintarFilas = ()=>{
       const lista = visibles();
       cuerpo.innerHTML = lista.length ? lista.map(e=>{
         const t = e.tipo_equipo ? tipoPorValor.get(e.tipo_equipo) : null;
-        const r = e.red_id !== null && e.red_id !== undefined ? redPorId.get(e.red_id) : null;
+        const rid = redEfectivaDe(e);
+        const r = rid !== null ? redPorId.get(rid) : null;
+        const desde = redHeredadaDe(e);
+        const origen = desde !== null ? porIdEq.get(desde) : null;
         const u = ubicPorId.get(e.ubicacion_id);
         return `<tr class="${elegidos.has(e.id) ? `${P}lote-elegido` : ""}" data-id="${e.id}">
           <td class="${P}lote-col-check"><input type="checkbox" data-lote-id="${e.id}"${elegidos.has(e.id) ? " checked" : ""} aria-label="Elegir «${esc(e.nombre)}»"></td>
           <td>${esc(e.nombre)}${e.modelo ? `<div class="${P}mapa-muted">${esc(e.modelo)}</div>` : ""}</td>
           <td>${esc(u ? u.nombre : "—")}</td>
           <td>${t ? esc(t.etiqueta) : `<span class="${P}mapa-muted">sin tipo</span>`}</td>
-          <td>${r ? `<span class="${P}mapa-red-chip" style="--red-color:${esc(r.color)}">${esc(r.nombre)}</span>` : `<span class="${P}mapa-muted">sin red</span>`}</td>
+          <td>${r ? `<span class="${P}mapa-red-chip${desde !== null ? ` ${P}mapa-red-chip-heredada` : ""}" style="--red-color:${esc(r.color)}"${desde !== null ? ` title="Heredada${origen ? ` de «${esc(origen.nombre)}»` : ""}"` : ""}>${esc(r.nombre)}</span>${desde !== null ? `<div class="${P}mapa-muted">heredada</div>` : ""}` : `<span class="${P}mapa-muted">sin red</span>`}</td>
         </tr>`;
       }).join("") : `<tr><td colspan="5" class="${P}mapa-vacio">Ningún equipo coincide con el filtro.</td></tr>`;
       const marcados = lista.filter(e=>elegidos.has(e.id)).length;
@@ -1179,7 +1239,15 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
       aplicar.textContent = n ? `Aplicar a ${plural(n, "equipo", "equipos")}` : "Aplicar";
       if(!n){ vista.innerHTML = `<span class="${P}mapa-muted">Marca uno o más equipos.</span>`; return; }
       const partes = [`<strong>${plural(n, "equipo elegido", "equipos elegidos")}</strong>`];
-      if("red_id" in c) partes.push(c.red_id === null ? "quedarán sin red" : `pasarán a la red «${esc(redPorId.get(c.red_id).nombre)}»`);
+      if("red_id" in c) partes.push(c.red_id === null ? (herencia ? "heredarán la red de su servidor" : "quedarán sin red") : `pasarán a la red «${esc(redPorId.get(c.red_id).nombre)}»`);
+      // Con la 011, lo que cuelga de ellos (y no tiene red propia) también cambia de red.
+      let porHerencia = "";
+      if("red_id" in c && herencia){
+        const antes = redesEfectivas(equipos);
+        const despues = redesEfectivas(equipos.map(e=>elegidos.has(e.id) ? { ...e, red_id: c.red_id } : e));
+        const arrastrados = equipos.filter(e=>!elegidos.has(e.id) && (antes.get(e.id) || {}).redId !== (despues.get(e.id) || {}).redId);
+        if(arrastrados.length) porHerencia = `<div class="${P}mapa-muted">Por herencia también cambian de red ${plural(arrastrados.length, "equipo que cuelga", "equipos que cuelgan")} de ellos.</div>`;
+      }
       let lista = "";
       if("tipo_equipo" in c) partes.push(`serán «${esc(tipoPorValor.get(c.tipo_equipo).etiqueta)}»`);
       // Con la 010 la red también está en el nombre.
@@ -1191,7 +1259,7 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
         const cambian = equipos.filter(e=>nuevos.get(e.id) !== e.nombre);
         lista = cambian.length ? `<div class="${P}mapa-muted">Nombres que cambian:</div><ul class="${P}lote-nombres">${cambian.slice(0, 8).map(e=>`<li><span class="${P}lote-antes">${esc(e.nombre)}</span> → <strong>${esc(nuevos.get(e.id))}</strong></li>`).join("")}${cambian.length > 8 ? `<li class="${P}mapa-muted">y ${cambian.length - 8} más</li>` : ""}</ul>` : `<div class="${P}mapa-muted">Ningún nombre cambia.</div>`;
       }
-      vista.innerHTML = `<div>${partes.join(" · ")}${hayCambio ? "" : ` · <span class="${P}mapa-muted">elige el tipo, la red o los dos</span>`}</div>${lista}`;
+      vista.innerHTML = `<div>${partes.join(" · ")}${hayCambio ? "" : ` · <span class="${P}mapa-muted">elige el tipo, la red o los dos</span>`}</div>${porHerencia}${lista}`;
     };
     const repintar = ()=>{ pintarFilas(); pintarVista(); };
     buscar.addEventListener("input", pintarFilas);

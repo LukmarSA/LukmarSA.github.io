@@ -1365,3 +1365,71 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
 @media (prefers-reduced-motion:reduce){
   .inventario-tecnologico-serv-faceta > summary::after{transition:none;}
 }
+
+/* ---------- v9: red heredada del servidor (011) ---------- */
+/* La red propia (la que empieza una red o una red aparte) va con borde lleno;
+   la heredada, con borde punteado y el texto un poco más suave. */
+.inventario-tecnologico-mapa-red-chip.inventario-tecnologico-mapa-red-chip-heredada{border-style:dashed;background:transparent;color:var(--ink-muted);font-weight:600;}
+.inventario-tecnologico-mapa-red-chip-heredada::before{opacity:.8;}
+.inventario-tecnologico-field .inventario-tecnologico-mapa-red-ayuda{color:var(--ink-muted);}
+
+/* ---------- v9: grosor de las líneas de conexión ---------- */
+.inventario-tecnologico-mapa-grosor{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-muted);white-space:nowrap;}
+.inventario-tecnologico-mapa-grosor label{font-weight:600;}
+.inventario-tecnologico-mapa-grosor input[type=range]{width:110px;accent-color:var(--accent);margin:0;}
+.inventario-tecnologico-mapa-grosor output{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink);min-width:36px;}
+.inventario-tecnologico-mapa-grosor .inventario-tecnologico-btn-sm{padding:2px 8px;font-size:11.5px;}
+.inventario-tecnologico-mapa-grosor [hidden]{display:none;}
+
+/* ---------- v9: el mapa en pantalla completa, con ventanas minimizables ----------
+   La vista cubre la ventana (por encima de la barra de la app, por debajo de
+   los modales y los avisos, que viven en <body>). La barra de búsqueda y
+   filtros y el panel de detalle flotan sobre el mapa. */
+body.inventario-tecnologico-con-mapa-completo{overflow:hidden;}
+.inventario-tecnologico-mapa-vista.inventario-tecnologico-mapa-completa{position:fixed;inset:0;z-index:90;height:auto;min-height:0;gap:0;background:#DCE5EC;}
+.inventario-tecnologico-mapa-completa .inventario-tecnologico-mapa-layout{position:absolute;inset:0;display:block;}
+.inventario-tecnologico-mapa-completa .inventario-tecnologico-mapa-lienzo-wrap{position:absolute;inset:0;height:auto;min-height:0;}
+.inventario-tecnologico-mapa-completa .inventario-tecnologico-mapa-canvas{border:none;border-radius:0;}
+.inventario-tecnologico-mapa-completa .inventario-tecnologico-mapa-ventana{position:absolute;z-index:20;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);}
+.inventario-tecnologico-mapa-completa .inventario-tecnologico-mapa-barra.inventario-tecnologico-mapa-ventana{top:10px;left:58px;width:min(780px, calc(100% - 130px));padding:0 12px 10px;z-index:21;}
+.inventario-tecnologico-mapa-completa .inventario-tecnologico-mapa-panel-ventana{top:var(--mapa-derecha-libre, 60px);right:10px;width:min(400px, calc(100% - 20px));max-height:calc(100% - var(--mapa-derecha-libre, 60px) - 30px);display:flex;flex-direction:column;overflow:hidden;}
+.inventario-tecnologico-mapa-completa .inventario-tecnologico-mapa-panel-ventana > .inventario-tecnologico-mapa-panel{flex:1;min-height:0;overflow-y:auto;border:none;border-radius:0 0 var(--radius) var(--radius);}
+.inventario-tecnologico-mapa-completa .inventario-tecnologico-mapa-ventana-al-frente{z-index:22;}
+/* Título de cada ventana: se arrastra por él; el botón la minimiza o la muestra. */
+.inventario-tecnologico-mapa-ventana-cab{
+  display:flex;align-items:center;gap:8px;padding:6px 7px 6px 12px;cursor:grab;user-select:none;touch-action:none;
+  font-size:13px;font-weight:700;color:var(--accent-ink);background:linear-gradient(180deg, #F2F8FC, var(--surface));
+  border-bottom:1px solid var(--border);border-radius:var(--radius) var(--radius) 0 0;
+}
+.inventario-tecnologico-mapa-ventana-cab:active{cursor:grabbing;}
+.inventario-tecnologico-mapa-barra > .inventario-tecnologico-mapa-ventana-cab{flex:1 1 100%;margin:0 -12px 2px;}
+.inventario-tecnologico-mapa-ventana-icono{display:inline-flex;flex:none;color:var(--accent);}
+.inventario-tecnologico-mapa-ventana-titulo{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-mapa-ventana-btn{
+  flex:none;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;
+  border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);color:var(--ink-muted);cursor:pointer;
+}
+.inventario-tecnologico-mapa-ventana-btn:hover{color:var(--accent-ink);border-color:var(--accent);}
+.inventario-tecnologico-mapa-ventana-btn:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+/* Minimizada: solo el título, como una pastilla. */
+.inventario-tecnologico-mapa-completa .inventario-tecnologico-ventana-minimizada{width:auto !important;max-width:min(360px, calc(100% - 20px));padding:0 !important;overflow:hidden;}
+.inventario-tecnologico-mapa-completa .inventario-tecnologico-ventana-minimizada > :not(.inventario-tecnologico-mapa-ventana-cab){display:none !important;}
+.inventario-tecnologico-mapa-completa .inventario-tecnologico-ventana-minimizada > .inventario-tecnologico-mapa-ventana-cab{margin:0;border-bottom:none;border-radius:var(--radius);cursor:pointer;}
+/* El panel cambió (otra ubicación) mientras estaba minimizado. */
+.inventario-tecnologico-ventana-aviso > .inventario-tecnologico-mapa-ventana-cab{animation:inventario-tecnologico-ventana-aviso 1.3s ease-out 2;}
+@keyframes inventario-tecnologico-ventana-aviso{0%{background:#FFF1E4;box-shadow:inset 0 0 0 2px #EC741D;}100%{background:#F2F8FC;box-shadow:inset 0 0 0 2px rgba(236,116,29,0);}}
+/* Botón de pantalla completa (debajo del zoom de Leaflet). */
+.inventario-tecnologico-mapa-completa-control .inventario-tecnologico-mapa-completa-boton{
+  width:34px;height:34px;display:flex;align-items:center;justify-content:center;padding:0;border:none;border-radius:4px;background:#fff;color:#333;cursor:pointer;
+}
+.inventario-tecnologico-mapa-completa-control .inventario-tecnologico-mapa-completa-boton:hover{background:#F4F4F4;color:var(--accent-ink);}
+.inventario-tecnologico-mapa-completa-control .inventario-tecnologico-mapa-completa-boton[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent-ink);}
+.inventario-tecnologico-mapa-completa-control .inventario-tecnologico-mapa-completa-boton:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
+@media (max-width:600px){
+  .inventario-tecnologico-mapa-completa .inventario-tecnologico-mapa-barra.inventario-tecnologico-mapa-ventana{left:52px;width:calc(100% - 62px);}
+  .inventario-tecnologico-mapa-completa .inventario-tecnologico-mapa-panel-ventana:not(.inventario-tecnologico-ventana-movida){left:8px;right:8px;width:auto;top:auto;bottom:24px;max-height:55%;}
+  .inventario-tecnologico-mapa-completa .inventario-tecnologico-mapa-panel-ventana.inventario-tecnologico-ventana-minimizada:not(.inventario-tecnologico-ventana-movida){left:auto;}
+}
+@media (prefers-reduced-motion:reduce){
+  .inventario-tecnologico-ventana-aviso > .inventario-tecnologico-mapa-ventana-cab{animation:none;}
+}

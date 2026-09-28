@@ -25,12 +25,15 @@
 // (polígonos) para la capa "Piscinas" (m.piscinas009.disponible). Migración
 // 010: la red entra en el nombre automático; se detecta llamando a
 // version_nombres_equipos() (m.nombres010.disponible). Sin ella la app arma
-// los nombres sin la red, igual que la base.
+// los nombres sin la red, igual que la base. Migración 011 (versión 3): la
+// red se hereda del servidor (m.herencia011.disponible); cada equipo en
+// memoria queda con red_efectiva y red_desde (de quién la hereda), que es lo
+// que se muestra, colorea y filtra. red_id sigue siendo la red propia.
 import { sb } from "./config.js";
 import { cargarActivos } from "./datos.js";
 import { state } from "./estado.js";
 import { indexarMapa } from "./mapa-logica.js";
-import { analizarRed, simularFallas } from "./mapa-jerarquia.js";
+import { analizarRed, anotarRedesEfectivas, simularFallas } from "./mapa-jerarquia.js";
 import { aplicarNombres, caidosEfectivos } from "./mapa-nombres.js";
 import { normalizarPlano } from "./plano-mapa.js";
 
@@ -63,6 +66,7 @@ export function crearEstadoMapa(){
     piscinas: [],                                  // piscinas de la camaronera (009)
     piscinas009: { disponible: false, error: null },
     nombres010: { disponible: false },             // la red va en el nombre automático (010)
+    herencia011: { disponible: false },            // la red se hereda del servidor (011)
     foco: null,           // { ubicacionId, activoId } pendiente de aplicar al abrir el mapa (p. ej. "Ver en mapa")
     plano: null,          // capa "Plano" (migración 006): normalizarPlano(fila) + error (null si se leyó bien)
   };
@@ -106,7 +110,9 @@ export async function refrescarDatosMapa(){
   m.piscinas009 = { disponible: !pi.error, error: pi.error || null };
   m.piscinas = pi.error ? [] : (pi.data || []);
   m.nombres010 = { disponible: !vn.error && Number(vn.data) >= 2 };
-  aplicarNombres(m.equipos, { ubicaciones: m.ubicaciones, tipos: m.tiposEquipo, redes: m.redes, conRed: m.nombres010.disponible });
+  m.herencia011 = { disponible: !vn.error && Number(vn.data) >= 3 };
+  anotarRedesEfectivas(m.equipos, m.herencia011.disponible);
+  aplicarNombres(m.equipos, { ubicaciones: m.ubicaciones, tipos: m.tiposEquipo, redes: m.redes, conRed: m.nombres010.disponible, herencia: m.herencia011.disponible });
   m.equipos.sort((a, b)=>String(a.nombre).localeCompare(String(b.nombre), "es"));
   m.cargado = true;
   m.error = null;
@@ -174,11 +180,14 @@ export function cargarPiscinas(){ return estadoMapa().piscinas || []; }
 // true si la migración 010 está corrida (la red entra en el nombre automático).
 export function hayNombresConRed(){ return !!(estadoMapa().nombres010 || {}).disponible; }
 
+// true si la migración 011 está corrida (la red se hereda del servidor).
+export function hayHerenciaRed(){ return hayNombresConRed() && !!(estadoMapa().herencia011 || {}).disponible; }
+
 // Lo que necesitan nombreParaGuardar / nombresAutomaticos (mapa-nombres.js)
 // para armar los nombres igual que la base.
 export function datosNombres(equipos = estadoMapa().equipos){
   const m = estadoMapa();
-  return { equipos, ubicaciones: m.ubicaciones, tipos: m.tiposEquipo, redes: m.redes, conRed: hayNombresConRed() };
+  return { equipos, ubicaciones: m.ubicaciones, tipos: m.tiposEquipo, redes: m.redes, conRed: hayNombresConRed(), herencia: hayHerenciaRed() };
 }
 
 // Índices calculados sobre lo ya cargado + los activos del listado. Es barato

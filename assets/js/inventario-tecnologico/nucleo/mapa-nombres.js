@@ -16,6 +16,8 @@
 //     "Estación (Red Oficina) en …", "Cámara (Norte) en …" si no tiene red.
 //     En el nombre del servidor, su red va solo si es distinta de la del
 //     equipo (pedido de la persona: "solo si es distinta").
+//   * Con la 011 la red se hereda: un equipo sin red propia lleva la de su
+//     servidor (y así hacia arriba), en su nombre y en el del servidor.
 //   * El género del tipo hace concordar el participio (Estación → enlazada).
 //   * Si dos equipos de la misma ubicación quedan con el mismo nombre, el de
 //     id más alto se numera: "… (2)", "… (3)".
@@ -26,11 +28,12 @@
 //
 // La migración 008 hace lo mismo en SQL (recalcular_nombres_equipos) para
 // que el nombre GUARDADO siga al día; las dos versiones tienen que coincidir
-// (tests/mapa-unit.mjs y db/pruebas/mapa_pruebas_reglas_rls.sql, secciones S
-// y U). La red entra en el nombre solo con la 010 (conRed: la app lo sabe por
-// version_nombres_equipos()); sin ella, la base arma los nombres sin la red y
-// la app hace lo mismo, así nunca se contradicen.
-import { esMedio } from "./mapa-jerarquia.js";
+// (tests/mapa-unit.mjs y db/pruebas/mapa_pruebas_reglas_rls.sql, secciones S,
+// U y V). La red entra en el nombre solo con la 010 (conRed: la app lo sabe por
+// version_nombres_equipos()) y se hereda solo con la 011 (herencia); sin ellas,
+// la base arma los nombres sin la red (o sin herencia) y la app hace lo mismo,
+// así nunca se contradicen.
+import { esMedio, redesEfectivas } from "./mapa-jerarquia.js";
 
 export const GENEROS = [
   { id: "m", etiqueta: "Masculino (el switch, el router)" },
@@ -52,19 +55,33 @@ export function textoParentesis(partes){
 }
 
 // Índices mínimos que necesitan los nombres. conRed = la base ya tiene la
-// migración 010 (la red entra en el nombre).
-export function contextoNombres({ equipos = [], ubicaciones = [], tipos = [], redes = [], conRed = false } = {}){
+// migración 010 (la red entra en el nombre); herencia = tiene la 011 (sin red
+// propia, la del servidor).
+export function contextoNombres({ equipos = [], ubicaciones = [], tipos = [], redes = [], conRed = false, herencia = false } = {}){
+  const conHerencia = !!conRed && !!herencia;
   return {
     equipoPorId: new Map(equipos.map(e=>[e.id, e])),
     ubicacionPorId: new Map(ubicaciones.map(u=>[u.id, u])),
     tipoPorValor: new Map(tipos.map(t=>[t.valor, t])),
     redPorId: new Map(redes.map(r=>[Number(r.id), r])),
     conRed: !!conRed,
+    herencia: conHerencia,
+    // Red efectiva de cada equipo de la lista (sale de su red_id PROPIA, no
+    // de lo anotado en memoria: así sirve también para copias con cambios).
+    efectivas: conHerencia ? redesEfectivas(equipos) : null,
   };
 }
 
+// La red de una fila: la propia o, con la 011, la heredada de su servidor
+// (una fila editada todavía no está en la lista: se mira su servidor).
 function redDe(fila, ctx){
-  return ctx.conRed && tieneValor(fila.red_id) && fila.red_id !== "" ? ctx.redPorId.get(Number(fila.red_id)) || null : null;
+  if(!ctx.conRed) return null;
+  let id = tieneValor(fila.red_id) && fila.red_id !== "" ? Number(fila.red_id) : null;
+  if(id === null && ctx.herencia && tieneValor(fila.servidor_id)){
+    const r = ctx.efectivas.get(Number(fila.servidor_id));
+    id = r ? r.redId : null;
+  }
+  return id !== null ? ctx.redPorId.get(id) || null : null;
 }
 
 // Nombre armado para una fila de equipo (sin numerar). null si no tiene un
@@ -97,8 +114,8 @@ function numerado(base, n){ return n <= 1 ? base : `${base} (${n})`; }
 // Nombre que se muestra de cada equipo (Map id → nombre). Los equipos con tipo
 // se numeran por ubicación si se repiten (en orden de id); los que no tienen
 // tipo muestran su nombre guardado y cuentan como "ocupados".
-export function nombresAutomaticos({ equipos = [], ubicaciones = [], tipos = [], redes = [], conRed = false } = {}){
-  const ctx = contextoNombres({ equipos, ubicaciones, tipos, redes, conRed });
+export function nombresAutomaticos({ equipos = [], ubicaciones = [], tipos = [], redes = [], conRed = false, herencia = false } = {}){
+  const ctx = contextoNombres({ equipos, ubicaciones, tipos, redes, conRed, herencia });
   const out = new Map();
   const ocupados = new Map(); // ubicacion_id → Set(claves)
   const ocupar = (u, n)=>{ if(!ocupados.has(u)) ocupados.set(u, new Set()); ocupados.get(u).add(clave(n)); };
@@ -125,8 +142,8 @@ export function nombresAutomaticos({ equipos = [], ubicaciones = [], tipos = [],
 // muestra ni con el guardado: la base tiene un índice único por ubicación).
 // equipos = todos los equipos cargados (con nombre = el que se muestra y
 // nombre_guardado = el de la base). idActual = el que se edita (null si es nuevo).
-export function nombreParaGuardar(fila, { equipos = [], ubicaciones = [], tipos = [], redes = [], conRed = false } = {}, idActual = null){
-  const ctx = contextoNombres({ equipos, ubicaciones, tipos, redes, conRed });
+export function nombreParaGuardar(fila, { equipos = [], ubicaciones = [], tipos = [], redes = [], conRed = false, herencia = false } = {}, idActual = null){
+  const ctx = contextoNombres({ equipos, ubicaciones, tipos, redes, conRed, herencia });
   const base = nombreBase(fila, ctx);
   if(base === null) return null;
   const usados = new Set();
@@ -142,9 +159,9 @@ export function nombreParaGuardar(fila, { equipos = [], ubicaciones = [], tipos 
 
 // Deja en cada fila en memoria: nombre_guardado = lo de la base y nombre = el
 // que se muestra (así el resto de la app no cambia). Devuelve las mismas filas.
-export function aplicarNombres(equipos, { ubicaciones = [], tipos = [], redes = [], conRed = false } = {}){
+export function aplicarNombres(equipos, { ubicaciones = [], tipos = [], redes = [], conRed = false, herencia = false } = {}){
   for(const e of equipos) if(!("nombre_guardado" in e)) e.nombre_guardado = e.nombre;
-  const nombres = nombresAutomaticos({ equipos, ubicaciones, tipos, redes, conRed });
+  const nombres = nombresAutomaticos({ equipos, ubicaciones, tipos, redes, conRed, herencia });
   for(const e of equipos) e.nombre = nombres.get(e.id) ?? e.nombre_guardado;
   return equipos;
 }

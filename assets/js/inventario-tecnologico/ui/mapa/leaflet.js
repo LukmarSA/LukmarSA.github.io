@@ -8,6 +8,7 @@
 // Versión fijada con SRI: los hashes son los del paquete npm leaflet@1.9.4,
 // el mismo archivo que sirve unpkg. Para actualizar Leaflet hay que cambiar
 // versión y hashes juntos (Leaflet 2.x cambió la API: no es un reemplazo directo).
+import { GROSOR_LINEAS, normalizarGrosor } from "../../nucleo/mapa-jerarquia.js";
 
 export const LEAFLET_VERSION = "1.9.4";
 export const LEAFLET_JS = {
@@ -114,6 +115,15 @@ export function superpuestaInicial(id){
 
 export function recordarSuperpuesta(id, visible){
   try{ localStorage.setItem(CLAVE_SUPERPUESTA(id), visible ? "1" : "0"); }catch(e){ /* sin almacenamiento: no pasa nada */ }
+}
+
+// Grosor de las líneas (v9): el factor que eligió cada quien en su navegador.
+const CLAVE_GROSOR = "inventario-tecnologico-mapa-grosor-lineas";
+export function grosorInicial(){
+  try{ const v = localStorage.getItem(CLAVE_GROSOR); return v === null ? GROSOR_LINEAS.porDefecto : normalizarGrosor(v); }catch(e){ return GROSOR_LINEAS.porDefecto; }
+}
+export function recordarGrosor(k){
+  try{ localStorage.setItem(CLAVE_GROSOR, String(normalizarGrosor(k))); }catch(e){ /* sin almacenamiento: no pasa nada */ }
 }
 
 export function crearCapasBase(L){

@@ -9,6 +9,7 @@
 // medio. La interfaz está en ui/mapa/selector-servidor.js.
 import { distanciaKm } from "./geo.js";
 import { normalizarBusqueda } from "./formulario-activo.js";
+import { redEfectivaDe, redHeredadaDe } from "./mapa-jerarquia.js";
 
 // Tipos que hacen radioenlaces (su rol calculado tiene sentido). El resto
 // (router, switch, cámara, NVR…) se conecta por cable o fibra.
@@ -72,11 +73,13 @@ export function opcionesServidor({
   const opciones = [];
   for(const e of candidatos){
     const t = e.tipo_equipo ? tipoPorValor.get(e.tipo_equipo) : null;
-    const r = tieneValor(e.red_id) ? redPorId.get(Number(e.red_id)) : null;
+    // La red con la que se lo ve (con la 011, la heredada si no tiene propia).
+    const rid = redEfectivaDe(e);
+    const r = rid !== null ? redPorId.get(rid) : null;
     opciones.push({
       clave: String(e.id), origen: "equipo", id: e.id, activoId: tieneValor(e.activo_id) ? Number(e.activo_id) : null,
       nombre: e.nombre, tipo: e.tipo_equipo || null, tipoEtiqueta: t ? t.etiqueta : null,
-      redId: r ? Number(r.id) : null, redNombre: r ? r.nombre : null, redColor: r ? r.color : null,
+      redId: r ? Number(r.id) : null, redNombre: r ? r.nombre : null, redColor: r ? r.color : null, redHeredada: !!r && redHeredadaDe(e) !== null,
       modelo: e.modelo || null, referencia: e.referencia || null, tag: null,
       ...lugar(ubicacionPorId.get(e.ubicacion_id)),
     });
@@ -94,7 +97,7 @@ export function opcionesServidor({
       opciones.push({
         clave: `a:${a.id}`, origen: "activo", id: null, activoId: a.id,
         nombre: nombreNuevo ? nombreNuevo({ tipo, ubicacion: u, activo: a }) : `${t.etiqueta} en ${u.nombre}`,
-        tipo, tipoEtiqueta: t.etiqueta, redId: null, redNombre: null, redColor: null,
+        tipo, tipoEtiqueta: t.etiqueta, redId: null, redNombre: null, redColor: null, redHeredada: false,
         modelo: [a.marca, a.modelo].filter(Boolean).join(" ") || null, referencia: null, tag: tagActivo(a) || null,
         ...lugar(u),
       });
