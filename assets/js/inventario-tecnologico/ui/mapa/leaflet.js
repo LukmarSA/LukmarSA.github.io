@@ -56,8 +56,9 @@ export function cargarLeaflet(){
 // Capas base. Para que el mapa ABRA en satélite: CAPA_BASE_POR_DEFECTO = "satelite".
 // (El botón de capas arriba a la derecha permite cambiar en cualquier momento,
 // y el navegador recuerda la última elegida.)
-// "Plano" (migración 006) es el satélite con el plano de la camaronera encima
-// (ui/mapa/plano.js): la entrada solo dice sobre qué fondo va.
+// El plano de lotes (ui/mapa/plano.js) ya no es una capa base: es una capa
+// superpuesta (casilla en el mismo botón) que va encima del mapa de
+// carreteras o del satélite, con su transparencia.
 // ---------------------------------------------------------------------------
 export const CAPAS_BASE = {
   mapa: {
@@ -70,21 +71,29 @@ export const CAPAS_BASE = {
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     opciones: { maxZoom: 19, attribution: "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community" },
   },
-  plano: {
-    etiqueta: "Plano",
-    fondo: "satelite",
-  },
 };
 export const CAPA_BASE_POR_DEFECTO = "mapa";
 export const CENTRO_POR_DEFECTO = { lat: -2.1894, lng: -79.8891, zoom: 12 }; // Guayaquil, si aún no hay ubicaciones
 
+// Capas superpuestas (casillas del botón de capas).
+export const CAPAS_SUPERPUESTAS = {
+  plano: { etiqueta: "Plano de lotes" },
+  piscinas: { etiqueta: "Piscinas" },
+};
+
 const CLAVE_CAPA = "inventario-tecnologico-mapa-capa";
+const CLAVE_SUPERPUESTA = id=>`inventario-tecnologico-mapa-ver-${id}`;
+
+// Hasta la v6 el plano era la capa base "plano" (satélite + plano): quien la
+// tenía elegida sigue viéndolo igual, ahora como satélite + capa superpuesta.
+function capaGuardada(){
+  try{ return localStorage.getItem(CLAVE_CAPA); }catch(e){ return null; }
+}
 
 export function capaBaseInicial(){
-  try{
-    const guardada = localStorage.getItem(CLAVE_CAPA);
-    if(guardada && CAPAS_BASE[guardada]) return guardada;
-  }catch(e){ /* almacenamiento bloqueado: se usa la de por defecto */ }
+  const guardada = capaGuardada();
+  if(guardada === "plano") return "satelite";
+  if(guardada && CAPAS_BASE[guardada]) return guardada;
   return CAPA_BASE_POR_DEFECTO;
 }
 
@@ -92,19 +101,24 @@ export function recordarCapaBase(id){
   try{ localStorage.setItem(CLAVE_CAPA, id); }catch(e){ /* sin almacenamiento: no pasa nada */ }
 }
 
-// capaPlano: la capa de la imagen (ui/mapa/plano.js). Sin ella, "Plano" es
-// solo el satélite (así no se rompe nada si la imagen no está).
-export function crearCapasBase(L, { capaPlano = null } = {}){
+// ¿La capa superpuesta estaba encendida la última vez? (el plano también si
+// la base guardada era la antigua "plano").
+export function superpuestaInicial(id){
+  try{
+    const v = localStorage.getItem(CLAVE_SUPERPUESTA(id));
+    if(v === "1") return true;
+    if(v === "0") return false;
+  }catch(e){ /* almacenamiento bloqueado */ }
+  return id === "plano" && capaGuardada() === "plano";
+}
+
+export function recordarSuperpuesta(id, visible){
+  try{ localStorage.setItem(CLAVE_SUPERPUESTA(id), visible ? "1" : "0"); }catch(e){ /* sin almacenamiento: no pasa nada */ }
+}
+
+export function crearCapasBase(L){
   const capas = {};
-  for(const [id, c] of Object.entries(CAPAS_BASE)){
-    if(c.fondo){
-      const f = CAPAS_BASE[c.fondo];
-      const fondo = L.tileLayer(f.url, f.opciones);
-      capas[id] = capaPlano ? L.layerGroup([fondo, capaPlano]) : fondo;
-    } else {
-      capas[id] = L.tileLayer(c.url, c.opciones);
-    }
-  }
+  for(const [id, c] of Object.entries(CAPAS_BASE)) capas[id] = L.tileLayer(c.url, c.opciones);
   return capas;
 }
 
@@ -175,6 +189,10 @@ const linea = (estilo, opciones)=>({ lineCap: "round", bubblingMouseEvents: fals
 export const ESTILOS_LINEA = {
   backbone:       linea("backbone",       { color: "#004DAB", weight: 5,   opacity: 0.9 }),
   p2mp:           linea("p2mp",           { color: "#007EB2", weight: 2.2, opacity: 0.85 }),
+  // Cable o fibra entre dos ubicaciones (migración 008): línea continua, sin
+  // clase de radio.
+  cable:          linea("cable",          { color: "#3D4B59", weight: 3,   opacity: 0.9 }),
+  fibra:          linea("fibra",          { color: "#00A19A", weight: 3.5, opacity: 0.95 }),
   cadena:         linea("cadena",         { color: "#EC741D", weight: 6,   opacity: 1 }),
   cadenaRespaldo: linea("cadenaRespaldo", { color: "#1E8A5A", weight: 6,   opacity: 1, dashArray: "12 7" }),
   cadenaRota:     linea("cadenaRota",     { color: "#B3432D", weight: 5,   opacity: 1, dashArray: "8 9" }),
@@ -184,6 +202,6 @@ export const ESTILOS_LINEA = {
   recuperado:     linea("recuperado",     { color: "#1E8A5A", weight: 4,   opacity: 1, dashArray: "12 7" }),
 };
 // Borde blanco debajo de las líneas que tienen que resaltar sobre el mapa.
-export const ESTILOS_CON_HALO = new Set(["cadena", "cadenaRespaldo", "cadenaRota", "recuperado", "backbone"]);
+export const ESTILOS_CON_HALO = new Set(["cadena", "cadenaRespaldo", "cadenaRota", "recuperado", "backbone", "cable", "fibra"]);
 export const HALO = { color: "#FFFFFF", opacity: 0.9, lineCap: "round", interactive: false };
 export const OPACIDAD_ATENUADA = 0.18;

@@ -7,7 +7,10 @@
 // internet él a su vez, para no alargar el nombre.
 //   * Servidor en otra ubicación (radioenlace): "… enlazado/a a {tipo} en {ubicación}".
 //   * Servidor en la misma ubicación (cable):   "… conectado/a a {tipo}" (sin repetir la ubicación).
+//   * Cable o fibra a otra ubicación (008):     "… conectado/a a {tipo} en {ubicación}".
 //   * Sin servidor (raíz):                      "{tipo} en {ubicación}".
+//   El participio sale del medio (inalámbrico → enlazado; cable o fibra →
+//   conectado) y la ubicación del servidor se nombra si es otra.
 //   * La referencia (opcional) va entre paréntesis: "Cámara (Norte) en Torre K…".
 //   * El género del tipo hace concordar el participio (Estación → enlazada).
 //   * Si dos equipos de la misma ubicación quedan con el mismo nombre, el de
@@ -16,6 +19,11 @@
 // escribió a mano.
 //
 // Lógica pura, como mapa-jerarquia.js: todo llega por parámetro.
+//
+// La migración 008 hace lo mismo en SQL (recalcular_nombres_equipos) para
+// que el nombre GUARDADO siga al día; las dos versiones tienen que coincidir
+// (tests/mapa-unit.mjs y db/pruebas/mapa_pruebas_reglas_rls.sql, sección S).
+import { esMedio } from "./mapa-jerarquia.js";
 
 export const GENEROS = [
   { id: "m", etiqueta: "Masculino (el switch, el router)" },
@@ -46,20 +54,21 @@ export function contextoNombres({ equipos = [], ubicaciones = [], tipos = [] } =
 
 // Nombre armado para una fila de equipo (sin numerar). null si no tiene un
 // tipo conocido: ahí manda el nombre escrito a mano.
-// fila = { ubicacion_id, tipo_equipo, referencia, servidor_id }.
+// fila = { ubicacion_id, tipo_equipo, referencia, servidor_id, medio }.
 export function nombreBase(fila, ctx){
   const t = fila && fila.tipo_equipo ? ctx.tipoPorValor.get(fila.tipo_equipo) : null;
   if(!t) return null;
-  const u = ctx.ubicacionPorId.get(fila.ubicacion_id);
+  const u = ctx.ubicacionPorId.get(Number(fila.ubicacion_id));
   let nombre = `${t.etiqueta}${textoReferencia(fila.referencia)} en ${u ? u.nombre : "?"}`;
   const s = tieneValor(fila.servidor_id) ? ctx.equipoPorId.get(Number(fila.servidor_id)) : null;
   if(s){
-    const cable = s.ubicacion_id === fila.ubicacion_id;
+    const mismaUbicacion = Number(s.ubicacion_id) === Number(fila.ubicacion_id);
+    const medio = esMedio(fila.medio) ? fila.medio : (mismaUbicacion ? "cable" : "inalambrico");
     const ts = s.tipo_equipo ? ctx.tipoPorValor.get(s.tipo_equipo) : null;
     // Servidor sin tipo (anterior a la 007): se lo nombra por su nombre guardado.
     const quien = ts ? `${ts.etiqueta}${textoReferencia(s.referencia)}` : (s.nombre_guardado ?? s.nombre);
     const us = ctx.ubicacionPorId.get(s.ubicacion_id);
-    nombre += ` ${participio(t.genero, cable)} a ${quien}${cable ? "" : ` en ${us ? us.nombre : "?"}`}`;
+    nombre += ` ${participio(t.genero, medio !== "inalambrico")} a ${quien}${mismaUbicacion ? "" : ` en ${us ? us.nombre : "?"}`}`;
   }
   return nombre;
 }

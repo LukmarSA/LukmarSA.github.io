@@ -19,22 +19,24 @@
 // dentro de <main>. Como Leaflet engancha listeners a window, renderMain()
 // llama a destruirVistaMapa() al salir de la pestaña.
 import { cargarActivos } from "../nucleo/datos.js";
-import { cargarPlanoMapa, estadoMapa, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa, simulacionMapa } from "../nucleo/datos-mapa.js";
+import { cargarPiscinas, cargarPlanoMapa, estadoMapa, hayMedio, hayPiscinas, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa, simulacionMapa } from "../nucleo/datos-mapa.js";
+import { cajaPiscinas } from "../nucleo/piscinas.js";
 import { caidosEfectivos } from "../nucleo/mapa-nombres.js";
 import { cajaEsquinas } from "../nucleo/plano-mapa.js";
 import { state } from "../nucleo/estado.js";
 import { fmtCoordenadas, fmtDistancia } from "../nucleo/geo.js";
 import { esc, fmtTag } from "../nucleo/helpers.js";
 import { buscarEnMapa, infoTipoUbicacion, resumenMapa, traducirErrorMapa, ubicacionesVisibles } from "../nucleo/mapa-logica.js";
-import { ESTADOS_SIMULACION, ROLES, UMBRAL_AGRUPAR_CLIENTES, caminoARaiz, contarRoles, equipoVisible, estadoPorUbicacion, planDeAgrupados, planDeLineas, resumenRed } from "../nucleo/mapa-jerarquia.js";
+import { ESTADOS_SIMULACION, ROLES, UMBRAL_AGRUPAR_CLIENTES, caminoARaiz, claveRed, contarRoles, equipoVisible, estadoPorUbicacion, planDeAgrupados, planDeLineas, resumenRed } from "../nucleo/mapa-jerarquia.js";
 import { esAdmin, puede } from "../nucleo/permisos.js";
-import { eliminarEquipo, eliminarRespaldo, eliminarUbicacion, establecerUbicacionActiva, guardarAjustePlano, quitarActivoDeUbicacion } from "../negocio/operaciones-mapa.js";
+import { editarPiscina, eliminarEquipo, eliminarRespaldo, eliminarUbicacion, establecerUbicacionActiva, guardarAjustePlano, quitarActivoDeUbicacion } from "../negocio/operaciones-mapa.js";
 import { urlFoto } from "../negocio/operaciones.js";
 import { abrirDetalle } from "./detalle/vista.js";
-import { abrirAsignarActivos, abrirEditarAtajo, abrirFormEquipo, abrirFormRespaldo, abrirFormUbicacion, abrirGuardarAtajo, abrirMoverActivo, abrirRedesYTipos } from "./mapa/formularios.js";
-import { CAPAS_BASE, CENTRO_POR_DEFECTO, ESTILOS_CON_HALO, ESTILOS_LINEA, HALO, OPACIDAD_ATENUADA, capaBaseInicial, cargarLeaflet, crearCapasBase, iconoAgrupado, iconoUbicacion, recordarCapaBase } from "./mapa/leaflet.js";
+import { abrirAsignacionEnLote, abrirAsignarActivos, abrirEditarAtajo, abrirFormEquipo, abrirFormPiscina, abrirFormRespaldo, abrirFormUbicacion, abrirGuardarAtajo, abrirMoverActivo, abrirRedesYTipos } from "./mapa/formularios.js";
+import { CAPAS_BASE, CAPAS_SUPERPUESTAS, CENTRO_POR_DEFECTO, ESTILOS_CON_HALO, ESTILOS_LINEA, HALO, OPACIDAD_ATENUADA, capaBaseInicial, cargarLeaflet, crearCapasBase, iconoAgrupado, iconoUbicacion, recordarCapaBase, recordarSuperpuesta, superpuestaInicial } from "./mapa/leaflet.js";
 import { htmlPanelCargando, htmlPanelError, htmlPanelResumen, htmlPanelUbicacion } from "./mapa/panel.js";
 import { crearCapaPlano, crearControlPlano, crearPanesPlano, htmlLeyendaPlano, iniciarAjustePlano, opacidadInicial, recordarOpacidad } from "./mapa/plano.js";
+import { ZOOM_ROTULOS, crearControlPiscinas, crearPanesPiscinas, htmlPopupPiscina, iniciarEdicionPiscina, pintarPiscinas } from "./mapa/piscinas.js";
 import { abrirCarruselFotos, cerrarModal, confirmarAccion, mostrarToast, renderMain } from "./render-raiz.js";
 import { expandir, plegarFantasma } from "./transiciones.js";
 
@@ -48,6 +50,7 @@ let ubicacionEnPanel = null; // para conservar el scroll del panel solo si sigue
 const LINEAS = [
   { id: "backbone", etiqueta: "Backbone", ayuda: "Enlaces punto a punto: servidor con un solo cliente." },
   { id: "p2mp", etiqueta: "P2MP", ayuda: "Distribución punto-multipunto: servidor con varios clientes." },
+  { id: "cable", etiqueta: "Cable/fibra", ayuda: "Cable o fibra entre dos ubicaciones (migración 008)." },
   { id: "respaldos", etiqueta: "Respaldos", ayuda: "Enlaces de respaldo registrados (normalmente ocultos)." },
 ];
 
@@ -92,6 +95,7 @@ export function destruirVistaMapa(){
   if(alClicFueraBuscador){ document.removeEventListener("click", alClicFueraBuscador); alClicFueraBuscador = null; }
   if(!vista) return;
   if(vista.ajustePlano){ try{ vista.ajustePlano.terminar(); }catch(e){ /* el mapa ya se está desarmando */ } }
+  if(vista.edicionPiscina){ try{ vista.edicionPiscina.terminar(); }catch(e){ /* el mapa ya se está desarmando */ } }
   document.removeEventListener("keydown", vista.alTeclear, true);
   // Leaflet programa un setTimeout de 250 ms al animar un zoom
   // (_onZoomTransitionEnd); si el mapa se destruye antes, ese callback revienta
@@ -126,7 +130,8 @@ function htmlEsqueleto(){
         </div>
         <span class="${P}fb-spacer"></span>
         <button type="button" class="${P}btn ${P}btn-sm" id="${P}mapa-recargar" title="Volver a leer ubicaciones, equipos y respaldos desde la base">Recargar</button>
-        ${esAdmin() ? `<button type="button" class="${P}btn ${P}btn-sm" id="${P}mapa-redes-tipos" hidden title="Redes de la finca y tipos de equipo (nombre automático)">Redes y tipos</button>` : ""}
+        ${esAdmin() ? `<button type="button" class="${P}btn ${P}btn-sm" id="${P}mapa-redes-tipos" hidden aria-label="Redes y tipos" title="Redes de la finca y tipos de equipo (nombre automático)">Redes y tipos</button>` : ""}
+        ${esAdmin() ? `<button type="button" class="${P}btn ${P}btn-sm" id="${P}mapa-lote" hidden aria-label="Tipo y red en lote" title="Elegir el tipo y la red de varios equipos a la vez">Tipo y red en lote</button>` : ""}
         ${esAdmin() ? `<button type="button" class="${P}btn ${P}btn-sm ${P}btn-primary" id="${P}mapa-nueva-ubicacion">+ Ubicación</button>` : ""}
         <details class="${P}mapa-filtros-det" id="${P}mapa-filtros-det" open>
         <summary class="${P}mapa-filtros-resumen">Filtros y capas <span class="${P}mapa-chip-n" id="${P}mapa-filtros-cuenta"></span></summary>
@@ -143,6 +148,11 @@ function htmlEsqueleto(){
           <div class="${P}mapa-filtro-grupo" role="group" aria-label="Equipos por tipo">
             <span class="${P}mapa-filtro-titulo">Equipos</span>
             <div class="${P}mapa-chips" id="${P}mapa-chips-roles"></div>
+          </div>
+          <div class="${P}mapa-filtro-grupo" role="group" aria-label="Redes" id="${P}mapa-grupo-redes" hidden>
+            <span class="${P}mapa-filtro-titulo">Redes</span>
+            <div class="${P}mapa-chips" id="${P}mapa-chips-redes"></div>
+            <button type="button" class="${P}mapa-chip ${P}mapa-chip-color-red" id="${P}mapa-color-red" data-color-red="1" aria-pressed="false" title="Pintar cada línea con el color de la red de su equipo">Colorear líneas por red</button>
           </div>
           <div class="${P}mapa-filtro-grupo ${P}mapa-filtro-simulacion" role="group" aria-label="Simulación de fallas">
             <button type="button" class="${P}mapa-chip ${P}mapa-chip-sim" id="${P}mapa-simulacion" aria-pressed="false" title="Activar o apagar la simulación de fallas (no se guarda nada)">Simulación de fallas</button>
@@ -165,11 +175,18 @@ function htmlEsqueleto(){
             <ul>
               <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-backbone"></span>Backbone (punto a punto)</li>
               <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-p2mp"></span>Distribución P2MP</li>
+              <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-cable"></span>Cable entre ubicaciones</li>
+              <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-fibra"></span>Fibra entre ubicaciones</li>
               <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-respaldo"></span>Respaldo registrado</li>
               <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-cadena"></span>Camino a la raíz</li>
               <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-recuperado"></span>Recuperado vía respaldo</li>
               <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-cortado"></span>Enlace cortado (simulado)</li>
               <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-sinConexion"></span>Sin conectividad</li>
+            </ul>
+            <ul class="${P}mapa-leyenda-redes" id="${P}mapa-leyenda-redes" aria-label="Colores de las redes" hidden></ul>
+            <ul class="${P}mapa-leyenda-piscinas" id="${P}mapa-leyenda-piscinas" aria-label="Piscinas" hidden>
+              <li><span class="${P}mapa-leyenda-piscina"></span>Piscina (clic: nombre y hectáreas)</li>
+              <li><span class="${P}mapa-leyenda-piscina ${P}mapa-leyenda-piscina-revisar"></span>Piscina por revisar</li>
             </ul>
             <ul class="${P}mapa-leyenda-plano" id="${P}mapa-leyenda-plano" aria-label="Plano de la camaronera" hidden>
               <li class="${P}mapa-leyenda-subtitulo">Plano</li>
@@ -186,15 +203,28 @@ function crearMapa(L, main){
   const canvas = main.querySelector(`#${P}mapa-canvas`);
   const mapa = L.map(canvas, { zoomControl: true, worldCopyJump: true }).setView([CENTRO_POR_DEFECTO.lat, CENTRO_POR_DEFECTO.lng], CENTRO_POR_DEFECTO.zoom);
   crearPanesPlano(mapa);
+  crearPanesPiscinas(mapa);
   const capaPlano = crearCapaPlano(L, cargarPlanoMapa(), { opacidad: opacidadInicial() });
-  const capas = crearCapasBase(L, { capaPlano });
+  const capaPiscinas = L.layerGroup();
+  const capas = crearCapasBase(L);
   const inicial = capaBaseInicial();
   capas[inicial].addTo(mapa);
-  L.control.layers(Object.fromEntries(Object.entries(capas).map(([id, capa])=>[CAPAS_BASE[id].etiqueta, capa])), null, { position: "topright" }).addTo(mapa);
+  // Capas base (radio: una a la vez) y superpuestas (casillas): el plano de
+  // lotes va encima del mapa de carreteras o del satélite. La de piscinas
+  // (migración 009) se suma al control cuando hay datos (pintarPiscinas).
+  const controlCapas = L.control.layers(
+    Object.fromEntries(Object.entries(capas).map(([id, capa])=>[CAPAS_BASE[id].etiqueta, capa])),
+    { [CAPAS_SUPERPUESTAS.plano.etiqueta]: capaPlano },
+    { position: "topright" }).addTo(mapa);
   mapa.on("baselayerchange", e=>{
     const id = Object.keys(capas).find(k=>capas[k] === e.layer);
     if(id) recordarCapaBase(id);
-    alternarPlano(id === "plano");
+  });
+  mapa.on("overlayadd overlayremove", e=>{
+    if(!vista) return;
+    const encendida = e.type === "overlayadd";
+    if(e.layer === vista.capaPlano){ recordarSuperpuesta("plano", encendida); alternarPlano(encendida); }
+    else if(e.layer === vista.capaPiscinas){ recordarSuperpuesta("piscinas", encendida); alternarPiscinas(encendida); }
   });
   L.control.scale({ metric: true, imperial: false }).addTo(mapa);
   const capaLineas = L.layerGroup().addTo(mapa);
@@ -204,15 +234,26 @@ function crearMapa(L, main){
   mapa.on("contextmenu", alClicDerechoMapa);
 
   vista = { L, mapa, capaLineas, capaMarcadores, capaAgrupados, marcadores: new Map(), main, colocando: null, encuadrado: false, alTeclear: null,
-    capas, capaPlano, controlPlano: null, ajustePlano: null };
-  alternarPlano(inicial === "plano");
+    capas, capaPlano, controlCapas, controlPlano: null, ajustePlano: null,
+    capaPiscinas, piscinasEnControl: false, piscinasVisibles: false, piscinasSoloRevisar: false, piscinasDibujadas: null,
+    controlPiscinas: null, edicionPiscina: null, edicionPiscinaId: null };
+  // Los nombres de las piscinas se ven solo de cerca.
+  const rotulos = ()=>{ if(vista && vista.mapa === mapa) canvas.classList.toggle(`${P}mapa-sin-rotulos`, mapa.getZoom() < ZOOM_ROTULOS); };
+  mapa.on("zoomend", rotulos);
+  rotulos();
+  mapa.on("popupopen", e=>{
+    const el = e.popup.getElement();
+    if(el && el.querySelector(`.${P}mapa-piscina-popup`)) el.addEventListener("click", alClicPopupPiscina);
+  });
+  if(superpuestaInicial("plano")){ capaPlano.addTo(mapa); alternarPlano(true); }
 
   // Captura: corre antes que el Esc de los modales (render-raiz.js), así
   // puede ignorar la tecla si hay un modal abierto.
   vista.alTeclear = e=>{
     if(e.key !== "Escape" || state.vista !== "mapa" || !vista) return;
     if(hayModalAbierto()) return;
-    if(vista.ajustePlano) return; // el Esc lo maneja "Ajustar plano" (cancela el ajuste)
+    if(vista.ajustePlano || vista.edicionPiscina) return; // el Esc lo manejan "Ajustar plano" y el editor de piscinas
+    if(vista.mapa.getContainer().querySelector(".leaflet-popup")){ e.preventDefault(); vista.mapa.closePopup(); return; } // primero se cierra la ventanita de una piscina
     if(e.target && e.target.id === `${P}mapa-buscar`) return; // el buscador maneja su propio Esc
     if(vista.colocando){ e.preventDefault(); cancelarColocacion(); return; }
     const s = estadoMapa().seleccion;
@@ -288,12 +329,15 @@ function refrescar(){
   const c = calcular();
   const botonRedes = document.getElementById(`${P}mapa-redes-tipos`);
   if(botonRedes) botonRedes.hidden = !hayRedFinca();
+  const botonLote = document.getElementById(`${P}mapa-lote`);
+  if(botonLote) botonLote.hidden = !hayRedFinca() || !estadoMapa().equipos.length;
   pintarFiltros(c);
   pintarAvisoSimulacion(c);
   if(vista){
     pintarMarcadores(c);
     pintarLineas(c);
     pintarAgrupados(c);
+    prepararPiscinas();
   }
   pintarPanel(c);
 }
@@ -321,8 +365,9 @@ function pintarFiltros(c){
   if(va) va.checked = f.verArchivadas;
 
   const rr = resumenRed(c.red);
-  const nLineas = { backbone: rr.backbone, p2mp: rr.p2mp, respaldos: rr.respaldos };
-  document.getElementById(`${P}mapa-chips-lineas`).innerHTML = LINEAS.map(l=>chip({
+  const nLineas = { backbone: rr.backbone, p2mp: rr.p2mp, cable: rr.cable, respaldos: rr.respaldos };
+  // "Cable/fibra" solo aparece con la 008 o si ya hay alguno.
+  document.getElementById(`${P}mapa-chips-lineas`).innerHTML = LINEAS.filter(l=>l.id !== "cable" || hayMedio() || rr.cable).map(l=>chip({
     data: "linea", valor: l.id, pressed: !!f.lineas[l.id], etiqueta: l.etiqueta, n: nLineas[l.id],
     titulo: `${f.lineas[l.id] ? "Ocultar" : "Mostrar"}: ${l.ayuda}`, extra: `<span class="${P}mapa-chip-linea ${P}mapa-chip-linea-${l.id}"></span>`,
   })).join("");
@@ -333,10 +378,32 @@ function pintarFiltros(c){
     titulo: `${f.rolesOcultos.includes(r.id) ? "Mostrar" : "Ocultar"}: ${r.ayuda}`,
   })).join("");
 
+  // Redes de la finca (007): un chip por red (y "Sin red"), más colorear las líneas.
+  const grupoRedes = document.getElementById(`${P}mapa-grupo-redes`);
+  if(grupoRedes){
+    const hayRedes = hayRedFinca() && m.redes.length > 0;
+    grupoRedes.hidden = !hayRedes;
+    if(hayRedes){
+      const n = new Map();
+      for(const e of m.equipos){ const k = claveRed(e); n.set(k, (n.get(k) || 0) + 1); }
+      const opciones = [...m.redes.map(r=>({ valor: String(r.id), etiqueta: r.nombre, color: r.color })), ...(n.get("sin") ? [{ valor: "sin", etiqueta: "Sin red", color: "#8B9AAA" }] : [])];
+      document.getElementById(`${P}mapa-chips-redes`).innerHTML = opciones.map(o=>{
+        const visible = !f.redesOcultas.includes(o.valor);
+        return chip({ data: "red", valor: o.valor, pressed: visible, color: o.color, etiqueta: o.etiqueta, n: n.get(o.valor) || 0, titulo: `${visible ? "Ocultar" : "Mostrar"} los equipos de «${o.etiqueta}»` });
+      }).join("");
+      document.getElementById(`${P}mapa-color-red`).setAttribute("aria-pressed", String(!!f.colorPorRed));
+    }
+    const leyendaRedes = document.getElementById(`${P}mapa-leyenda-redes`);
+    if(leyendaRedes){
+      leyendaRedes.hidden = !(hayRedes && f.colorPorRed);
+      leyendaRedes.innerHTML = hayRedes && f.colorPorRed ? `<li class="${P}mapa-leyenda-subtitulo">Líneas por red</li>` + m.redes.map(r=>`<li><span class="${P}mapa-leyenda-linea" style="border-top:4px solid ${esc(r.color)}"></span>${esc(r.nombre)}</li>`).join("") : "";
+    }
+  }
+
   const cuentaFiltros = document.getElementById(`${P}mapa-filtros-cuenta`);
   if(cuentaFiltros){
     const activos = f.tiposOcultos.length + f.rolesOcultos.length + (c.sim ? f.estadosOcultos.length + 1 : 0) + (f.verArchivadas ? 1 : 0)
-      + (f.lineas.backbone ? 0 : 1) + (f.lineas.p2mp ? 0 : 1) + (f.lineas.respaldos ? 1 : 0);
+      + (f.lineas.backbone ? 0 : 1) + (f.lineas.p2mp ? 0 : 1) + (f.lineas.cable === false ? 1 : 0) + (f.lineas.respaldos ? 1 : 0) + f.redesOcultas.length;
     cuentaFiltros.textContent = activos ? `${activos} activo${activos === 1 ? "" : "s"}${c.sim ? " · simulación" : ""}` : "";
   }
 
@@ -425,7 +492,8 @@ function pintarMarcadores(c){
 function textoLinea(red, d){
   const cliente = red.equipoPorId.get(d.clienteId), servidor = red.equipoPorId.get(d.servidorId);
   const partes = [`${cliente ? cliente.nombre : "?"} ← ${servidor ? servidor.nombre : "?"}`, fmtDistancia(d.distanciaKm)].filter(Boolean);
-  const extra = { cortado: "enlace cortado (simulado)", sinConexion: "sin servicio en la simulación", recuperado: "recuperado vía respaldo", respaldo: `respaldo (prioridad ${d.prioridad})`, cadenaRota: "camino cortado" }[d.estilo];
+  const extra = { cortado: "enlace cortado (simulado)", sinConexion: "sin servicio en la simulación", recuperado: "recuperado vía respaldo", respaldo: `respaldo (prioridad ${d.prioridad})`, cadenaRota: "camino cortado" }[d.estilo]
+    || (d.clase === "cable" ? "por cable" : d.clase === "fibra" ? "por fibra óptica" : "");
   return partes.join(" · ") + (extra ? ` — ${extra}` : "");
 }
 
@@ -441,8 +509,17 @@ function pintarLineas(c){
   // Orden de dibujo: lo atenuado abajo, lo resaltado arriba.
   const peso = d=>(d.atenuada ? 0 : 1) + (d.enCadena ? 2 : 0) + (d.estilo === "recuperado" ? 1 : 0);
   plan.sort((a, b)=>peso(a) - peso(b));
+  // Colorear por red: solo las líneas normales (no la simulación ni el camino resaltado).
+  const colorPorRed = c.m.filtros.colorPorRed && hayRedFinca();
+  const colorRed = new Map(c.m.redes.map(r=>[r.id, r.color]));
+  const colorDe = d=>{
+    const e = c.red.equipoPorId.get(d.clienteId), s = c.red.equipoPorId.get(d.servidorId);
+    const id = e && e.red_id !== null && e.red_id !== undefined ? e.red_id : (s ? s.red_id : null);
+    return id !== null && id !== undefined ? colorRed.get(id) || null : null;
+  };
   for(const d of plan){
-    const estilo = ESTILOS_LINEA[d.estilo];
+    let estilo = ESTILOS_LINEA[d.estilo];
+    if(colorPorRed && ["backbone", "p2mp", "cable", "fibra"].includes(d.estilo)){ const color = colorDe(d); if(color) estilo = { ...estilo, color }; }
     const puntos = [[d.desde.lat, d.desde.lng], [d.hasta.lat, d.hasta.lng]];
     if(ESTILOS_CON_HALO.has(d.estilo) && !d.atenuada) L.polyline(puntos, { ...HALO, weight: estilo.weight + 4 }).addTo(vista.capaLineas);
     const linea = L.polyline(puntos, d.atenuada ? { ...estilo, opacity: estilo.opacity * OPACIDAD_ATENUADA } : estilo).addTo(vista.capaLineas);
@@ -697,7 +774,7 @@ function alClicMarcador(id){
 }
 
 function alClicMapa(e){
-  if(!vista || vista.ajustePlano) return;
+  if(!vista || vista.ajustePlano || vista.edicionPiscina) return;
   if(vista.colocando){
     const { alColocar } = vista.colocando;
     salirDeColocacion();
@@ -709,7 +786,7 @@ function alClicMapa(e){
 }
 
 function alClicDerechoMapa(e){
-  if(!vista || vista.colocando || vista.ajustePlano || !esAdmin()) return;
+  if(!vista || vista.colocando || vista.ajustePlano || vista.edicionPiscina || !esAdmin()) return;
   abrirNuevaUbicacion({ lat: e.latlng.lat, lng: e.latlng.lng });
 }
 
@@ -743,6 +820,7 @@ function encuadrarPlano(){
 
 function entrarAjustePlano(){
   if(!vista || vista.ajustePlano || !esAdmin()) return;
+  if(vista.edicionPiscina) vista.edicionPiscina.terminar(); // no se mezclan los dos modos
   if(vista.colocando){ mostrarToast("Primero termina de colocar la ubicación (o cancela con Esc).", "info"); return; }
   const plano = cargarPlanoMapa();
   const contenedor = vista.main.querySelector(`.${P}mapa-lienzo-wrap`);
@@ -771,9 +849,125 @@ function entrarAjustePlano(){
   });
 }
 
+// ---------------------------------------------------------------------------
+// Capa "Piscinas" (migración 009): se suma al selector de capas cuando la
+// tabla existe; al encenderla aparece su control (cuántas hay, ver todas,
+// solo por revisar, + nueva) y cada piscina abre una ventanita al hacer clic.
+// El administrador edita la forma (vértices) y los datos.
+// ---------------------------------------------------------------------------
+function prepararPiscinas(){
+  if(!vista || !hayPiscinas()) return;
+  if(!vista.piscinasEnControl){
+    vista.controlCapas.addOverlay(vista.capaPiscinas, CAPAS_SUPERPUESTAS.piscinas.etiqueta);
+    vista.piscinasEnControl = true;
+    if(superpuestaInicial("piscinas")){ vista.capaPiscinas.addTo(vista.mapa); alternarPiscinas(true); return; }
+  }
+  // Solo se redibujan si cambiaron los datos (refrescar() corre en cada selección).
+  if(vista.piscinasVisibles && vista.piscinasDibujadas !== cargarPiscinas()) pintarPiscinasVista();
+}
+
+function pintarPiscinasVista(){
+  if(!vista) return;
+  const piscinas = cargarPiscinas();
+  vista.piscinasDibujadas = piscinas;
+  pintarPiscinas({ L: vista.L, capa: vista.capaPiscinas, piscinas, soloRevisar: vista.piscinasSoloRevisar, ocultar: vista.edicionPiscinaId, alClic: abrirPopupPiscina });
+  if(vista.controlPiscinas) vista.controlPiscinas.actualizar({ total: piscinas.filter(p=>p.activa !== false).length, revisar: piscinas.filter(p=>p.activa !== false && p.revisar).length, soloRevisar: vista.piscinasSoloRevisar });
+}
+
+function alternarPiscinas(visible){
+  if(!vista) return;
+  vista.piscinasVisibles = visible;
+  if(!visible && vista.edicionPiscina) vista.edicionPiscina.terminar();
+  if(visible && !vista.controlPiscinas){
+    vista.controlPiscinas = crearControlPiscinas(vista.L, {
+      puedeEditar: esAdmin(),
+      alEncuadrar: encuadrarPiscinas,
+      alSoloRevisar: v=>{ vista.piscinasSoloRevisar = v; pintarPiscinasVista(); if(v) encuadrarPiscinas(); },
+      alNueva: nuevaPiscina,
+    }).addTo(vista.mapa);
+  } else if(!visible && vista.controlPiscinas){
+    vista.controlPiscinas.remove();
+    vista.controlPiscinas = null;
+  }
+  if(visible) pintarPiscinasVista(); else { vista.capaPiscinas.clearLayers(); vista.piscinasDibujadas = null; vista.mapa.closePopup(); }
+  const leyenda = vista.main.querySelector(`#${P}mapa-leyenda-piscinas`);
+  if(leyenda) leyenda.hidden = !visible;
+}
+
+function encuadrarPiscinas(){
+  if(!vista) return;
+  const lista = cargarPiscinas().filter(p=>p.activa !== false && (!vista.piscinasSoloRevisar || p.revisar));
+  const caja = cajaPiscinas(lista);
+  if(caja) vista.mapa.fitBounds(caja, { padding: [30, 30], maxZoom: 18 });
+}
+
+function abrirPopupPiscina(id, latlng){
+  if(!vista || vista.edicionPiscina) return;
+  const p = cargarPiscinas().find(x=>x.id === id);
+  if(!p) return;
+  vista.L.popup({ className: `${P}mapa-piscina-popup-leaflet`, maxWidth: 280, autoPanPadding: [20, 20] })
+    .setLatLng(latlng).setContent(htmlPopupPiscina(p, { esAdmin: esAdmin() })).openOn(vista.mapa);
+}
+
+function alClicPopupPiscina(e){
+  const b = e.target.closest("[data-piscina-accion]");
+  if(!b || !vista) return;
+  const id = Number(b.dataset.id);
+  vista.mapa.closePopup();
+  if(b.dataset.piscinaAccion === "forma") editarFormaPiscina(id);
+  else if(b.dataset.piscinaAccion === "datos") abrirFormPiscina({ id }, { alGuardar: ()=>refrescarTrasPiscina(), alEliminar: ()=>refrescarTrasPiscina() });
+}
+
+function refrescarTrasPiscina(){
+  if(!document.getElementById(`${P}mapa-panel`)) return;
+  refrescar();
+  if(vista && vista.piscinasVisibles) pintarPiscinasVista();
+}
+
+function nuevaPiscina(){
+  if(!vista || !esAdmin()) return;
+  const c = vista.mapa.getCenter();
+  abrirFormPiscina({ centro: [c.lat, c.lng] }, { alGuardar: (id, { nueva } = {})=>{ refrescarTrasPiscina(); if(nueva) editarFormaPiscina(id); } });
+}
+
+function editarFormaPiscina(id){
+  if(!vista || vista.edicionPiscina || !esAdmin()) return;
+  const piscina = cargarPiscinas().find(p=>p.id === id);
+  if(!piscina) return;
+  if(vista.ajustePlano) vista.ajustePlano.terminar();
+  if(vista.colocando) cancelarColocacion();
+  if(!vista.piscinasVisibles){ vista.capaPiscinas.addTo(vista.mapa); alternarPiscinas(true); }
+  vista.edicionPiscinaId = id;
+  pintarPiscinasVista();
+  if(vista.controlPiscinas) vista.controlPiscinas.getContainer().hidden = true;
+  // De cerca, para que los puntos se puedan tomar (arriba queda lugar para la barra).
+  vista.mapa.fitBounds(vista.L.latLngBounds(piscina.puntos), { paddingTopLeft: [40, 120], paddingBottomRight: [40, 40], maxZoom: 18, animate: false });
+  const contenedor = vista.main.querySelector(`.${P}mapa-lienzo-wrap`);
+  vista.edicionPiscina = iniciarEdicionPiscina({
+    L: vista.L, mapa: vista.mapa, piscina, contenedor,
+    alGuardar: async puntos=>{
+      try{
+        await editarPiscina(id, { puntos, fuente: "manual" });
+        mostrarToast(`Forma de ${piscina.nombre} guardada.${piscina.revisar ? " Si ya quedó bien, desmarca «Por revisar» en «Editar datos»." : ""}`, "success");
+      }catch(err){
+        mostrarToast(err.message || String(err), "error");
+        throw err;
+      }
+    },
+    alTerminar: ()=>{
+      if(!vista) return;
+      vista.edicionPiscina = null;
+      vista.edicionPiscinaId = null;
+      if(vista.controlPiscinas) vista.controlPiscinas.getContainer().hidden = false;
+      pintarPiscinasVista();
+    },
+  });
+}
+
 function entrarEnColocacion(alColocar, alCancelar){
   if(!vista) return;
   if(vista.ajustePlano) vista.ajustePlano.terminar(); // no se mezclan los dos modos
+  if(vista.edicionPiscina) vista.edicionPiscina.terminar();
   vista.colocando = { alColocar, alCancelar };
   vista.main.querySelector(`.${P}mapa-vista`).classList.add(`${P}mapa-colocando`);
   const aviso = document.getElementById(`${P}mapa-aviso`);
@@ -902,7 +1096,12 @@ function montarBarra(main){
     const l = e.target.closest("[data-linea]");
     const r = e.target.closest("[data-rol]");
     const s = e.target.closest("[data-estado]");
-    if(t){
+    const rd = e.target.closest("[data-red]");
+    if(rd){
+      f.redesOcultas = alternarEnLista(f.redesOcultas, rd.dataset.red);
+    } else if(e.target.closest("[data-color-red]")){
+      f.colorPorRed = !f.colorPorRed;
+    } else if(t){
       f.tiposOcultos = alternarEnLista(f.tiposOcultos, t.dataset.tipo);
       const u = m.seleccion.ubicacionId ? m.ubicaciones.find(x=>x.id === m.seleccion.ubicacionId) : null;
       if(u && f.tiposOcultos.includes(u.tipo)) m.seleccion = { ubicacionId: null, equipoId: null, activoId: null };
@@ -934,7 +1133,15 @@ function montarBarra(main){
   });
   main.querySelector(`#${P}mapa-recargar`).addEventListener("click", e=>recargar(e.currentTarget));
   const redesTipos = main.querySelector(`#${P}mapa-redes-tipos`);
-  if(redesTipos) redesTipos.addEventListener("click", ()=>abrirRedesYTipos({ alCambiar: ()=>{ if(document.getElementById(`${P}mapa-panel`)) refrescar(); } }));
+  const trasCatalogo = ()=>{ if(document.getElementById(`${P}mapa-panel`)) refrescar(); };
+  if(redesTipos) redesTipos.addEventListener("click", ()=>abrirRedesYTipos({ alCambiar: trasCatalogo }));
+  const lote = main.querySelector(`#${P}mapa-lote`);
+  if(lote) lote.addEventListener("click", ()=>{
+    // Si hay una ubicación abierta, arranca con sus equipos marcados.
+    const s = estadoMapa().seleccion;
+    const seleccion = s.ubicacionId ? estadoMapa().equipos.filter(e=>e.ubicacion_id === s.ubicacionId).map(e=>e.id) : [];
+    abrirAsignacionEnLote({ alGuardar: trasCatalogo, seleccion });
+  });
   const nueva = main.querySelector(`#${P}mapa-nueva-ubicacion`);
   if(nueva) nueva.addEventListener("click", ()=>{
     if(!vista){ mostrarToast("El mapa no está disponible (Leaflet no cargó).", "error"); return; }

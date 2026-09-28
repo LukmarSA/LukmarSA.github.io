@@ -1,5 +1,5 @@
 -- =====================================================================
--- Pruebas de las reglas del mapa (migraciones 002 a 004, 006 y 007) contra la base
+-- Pruebas de las reglas del mapa (migraciones 002 a 004, 006 a 009) contra la base
 -- REAL, sin dejar rastro. Sirven antes y después de correr la 005.
 -- =====================================================================
 -- Todo corre dentro de un único bloque DO que termina con RAISE EXCEPTION:
@@ -53,6 +53,21 @@ DECLARE
   v_atajo  bigint;
   v_atajo2 bigint;
   v_arr    bigint[];
+  v_us1    bigint;
+  v_us2    bigint;
+  s_1      bigint;
+  s_2      bigint;
+  s_3      bigint;
+  s_4      bigint;
+  s_5      bigint;
+  s_6      bigint;
+  s_7      bigint;
+  s_8      bigint;
+  s_9      bigint;
+  v_t1     text;
+  v_t2     text;
+  v_pis    bigint;
+  v_ts     timestamptz;
 BEGIN
   IF to_regprocedure('public.equipo_radio_de_activo(integer)') IS NULL THEN
     RAISE EXCEPTION 'Falta la migración 004 (public.equipo_radio_de_activo no existe): aplícala antes de correr estas pruebas.';
@@ -63,6 +78,11 @@ BEGIN
     RAISE EXCEPTION 'Hace falta al menos un perfil administrador y uno visitante para correr las pruebas.';
   END IF;
   SELECT min(id), max(id) INTO v_x, v_y FROM public.activos;
+  -- Los dos activos de referencia arrancan sin ubicación y sin equipo de
+  -- radio: en la base real ya pueden tener historial (y las pruebas de fechas
+  -- chocarían con él). Como todo se revierte al final, no quedan tocados.
+  UPDATE public.equipos_radioenlace SET activo_id = NULL WHERE activo_id IN (v_x, v_y);
+  DELETE FROM public.historial_ubicacion WHERE activo_id IN (v_x, v_y);
 
   -- Permisos fijos para la prueba (se revierten con todo lo demás): el
   -- visitante ve el listado, pero no el mapa ni puede asignar ubicaciones; el
@@ -796,6 +816,193 @@ BEGIN
       CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS privs(priv)
      WHERE NOT has_table_privilege(rol, tabla, priv);
     r := r || jsonb_build_object('t', 'R18 tipos_equipo_red, redes y atajos_simulacion tienen GRANT completo para anon y authenticated', 'ok', v_txt IS NULL, 'det', coalesce('faltan: ' || v_txt, 'completo'));
+  END IF;
+
+  -- ================= S. Migración 008: medio del enlace y nombres guardados al día =================
+  PERFORM set_config('role', 'postgres', true);
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'equipos_radioenlace' AND column_name = 'medio') THEN
+    r := r || jsonb_build_object('t', 'S0 migración 008 aplicada (equipos_radioenlace.medio existe)', 'ok', false, 'det', 'falta correr db/migraciones/008_medio_y_nombres.sql');
+  ELSE
+    SELECT count(*) INTO v_n FROM pg_trigger WHERE tgname IN ('trg_equipos_radioenlace_nombres_al_dia', 'trg_ubicaciones_nombres_equipos_al_dia', 'trg_tipos_equipo_red_nombres_al_dia') AND NOT tgisinternal;
+    r := r || jsonb_build_object('t', 'S0 migración 008: columna medio y los 3 triggers de nombres', 'ok', v_n = 3, 'det', format('triggers %s', v_n));
+    r := r || jsonb_build_object('t', 'S1 el recálculo de nombres solo lo llaman los triggers (sin EXECUTE para anon ni authenticated)',
+      'ok', NOT has_function_privilege('anon', 'public.recalcular_nombres_equipos()', 'EXECUTE') AND NOT has_function_privilege('authenticated', 'public.recalcular_nombres_equipos()', 'EXECUTE'), 'det', '');
+
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('role', 'authenticated', true);
+    BEGIN
+      INSERT INTO public.ubicaciones (nombre, tipo, lat, lng) VALUES ('[TX] Torre S', 'torre', -2.21, -79.91) RETURNING id INTO v_us1;
+      INSERT INTO public.ubicaciones (nombre, tipo, lat, lng) VALUES ('[TX] Poste S', 'torre', -2.2105, -79.9105) RETURNING id INTO v_us2;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo) VALUES (v_us1, '[TX] s1', 'ptp') RETURNING id INTO s_1;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, servidor_id) VALUES (v_us1, '[TX] s2', 'switch', s_1) RETURNING id INTO s_2;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, servidor_id, medio) VALUES (v_us2, '[TX] s3', 'camara', s_2, 'cable') RETURNING id INTO s_3;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, servidor_id, referencia) VALUES (v_us2, '[TX] s4', 'camara', s_2, 'Norte') RETURNING id INTO s_4;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, servidor_id, medio) VALUES (v_us1, '[TX] s5', 'ap', s_2, 'inalambrico') RETURNING id INTO s_5;
+      SELECT string_agg(nombre, ' | ' ORDER BY id) INTO v_txt FROM public.equipos_radioenlace WHERE id IN (s_1, s_2, s_3, s_4, s_5);
+      r := r || jsonb_build_object('t', 'S2 la base arma el nombre automático (cable a otra ubicación, radio automático, radio en la misma)',
+        'ok', v_txt = 'Punto a Punto en [TX] Torre S | Switch en [TX] Torre S conectado a Punto a Punto | Cámara en [TX] Poste S conectada a Switch en [TX] Torre S | Cámara (Norte) en [TX] Poste S enlazada a Switch en [TX] Torre S | AP en [TX] Torre S enlazado a Switch', 'det', v_txt);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'S2 la base arma el nombre automático (cable a otra ubicación, radio automático, radio en la misma)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.equipos_radioenlace SET medio = 'satelital' WHERE id = s_3;
+      r := r || jsonb_build_object('t', 'S3 un medio que no es cable, fibra ni inalámbrico se rechaza', 'ok', false, 'det', 'se actualizó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'S3 un medio que no es cable, fibra ni inalámbrico se rechaza', 'ok', SQLSTATE = '23514' AND SQLERRM LIKE '%medio_valido%', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.ubicaciones SET nombre = '[TX] Torre S2' WHERE id = v_us1;
+      SELECT nombre INTO v_t1 FROM public.equipos_radioenlace WHERE id = s_2;
+      SELECT nombre INTO v_t2 FROM public.equipos_radioenlace WHERE id = s_3;
+      r := r || jsonb_build_object('t', 'S4 renombrar una ubicación pone al día los nombres (los de ahí y los de sus clientes en otra)',
+        'ok', v_t1 = 'Switch en [TX] Torre S2 conectado a Punto a Punto' AND v_t2 = 'Cámara en [TX] Poste S conectada a Switch en [TX] Torre S2', 'det', v_t1 || ' / ' || v_t2);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'S4 renombrar una ubicación pone al día los nombres (los de ahí y los de sus clientes en otra)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.tipos_equipo_red SET etiqueta = 'Cámara IP', genero = 'm' WHERE valor = 'camara';
+      SELECT nombre INTO v_t1 FROM public.equipos_radioenlace WHERE id = s_3;
+      UPDATE public.tipos_equipo_red SET etiqueta = 'Cámara', genero = 'f' WHERE valor = 'camara';
+      SELECT nombre INTO v_t2 FROM public.equipos_radioenlace WHERE id = s_3;
+      r := r || jsonb_build_object('t', 'S5 cambiar la etiqueta o el género de un tipo pone al día los nombres',
+        'ok', v_t1 = 'Cámara IP en [TX] Poste S conectado a Switch en [TX] Torre S2' AND v_t2 = 'Cámara en [TX] Poste S conectada a Switch en [TX] Torre S2', 'det', v_t1 || ' / ' || v_t2);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'S5 cambiar la etiqueta o el género de un tipo pone al día los nombres', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, servidor_id, medio) VALUES (v_us2, '[TX] s6', 'camara', s_2, 'cable') RETURNING id INTO s_6;
+      SELECT nombre INTO v_t1 FROM public.equipos_radioenlace WHERE id = s_6;
+      DELETE FROM public.equipos_radioenlace WHERE id = s_3;
+      SELECT nombre INTO v_t2 FROM public.equipos_radioenlace WHERE id = s_6;
+      r := r || jsonb_build_object('t', 'S6 dos iguales en la misma ubicación: el de id más alto va con (2); al borrar el primero, se corre la numeración',
+        'ok', v_t1 = 'Cámara en [TX] Poste S conectada a Switch en [TX] Torre S2 (2)' AND v_t2 = 'Cámara en [TX] Poste S conectada a Switch en [TX] Torre S2', 'det', v_t1 || ' / ' || v_t2);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'S6 dos iguales en la misma ubicación: el de id más alto va con (2); al borrar el primero, se corre la numeración', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre) VALUES (v_us2, 'Estación en [TX] Poste S') RETURNING id INTO s_7;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo) VALUES (v_us2, '[TX] s8', 'estacion') RETURNING id INTO s_8;
+      SELECT nombre INTO v_t1 FROM public.equipos_radioenlace WHERE id = s_7;
+      SELECT nombre INTO v_t2 FROM public.equipos_radioenlace WHERE id = s_8;
+      r := r || jsonb_build_object('t', 'S7 el nombre a mano de un equipo sin tipo se respeta y cuenta como ocupado',
+        'ok', v_t1 = 'Estación en [TX] Poste S' AND v_t2 = 'Estación en [TX] Poste S (2)', 'det', v_t1 || ' / ' || v_t2);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'S7 el nombre a mano de un equipo sin tipo se respeta y cuenta como ocupado', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, servidor_id) VALUES (v_us1, '[TX] s9', 'estacion', s_7) RETURNING id INTO s_9;
+      SELECT nombre INTO v_t1 FROM public.equipos_radioenlace WHERE id = s_9;
+      UPDATE public.equipos_radioenlace SET nombre = '[TX] Radio viejo' WHERE id = s_7;
+      SELECT nombre INTO v_t2 FROM public.equipos_radioenlace WHERE id = s_9;
+      r := r || jsonb_build_object('t', 'S8 un servidor sin tipo se nombra por su nombre guardado; si se lo renombra, su cliente lo sigue',
+        'ok', v_t1 = 'Estación en [TX] Torre S2 enlazada a Estación en [TX] Poste S en [TX] Poste S' AND v_t2 = 'Estación en [TX] Torre S2 enlazada a [TX] Radio viejo en [TX] Poste S', 'det', v_t1 || ' / ' || v_t2);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'S8 un servidor sin tipo se nombra por su nombre guardado; si se lo renombra, su cliente lo sigue', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    -- Ciclo: dos equipos con los nombres cruzados (sin el trigger un momento) → el recálculo los devuelve.
+    PERFORM set_config('role', 'postgres', true);
+    BEGIN
+      SELECT nombre INTO v_t1 FROM public.equipos_radioenlace WHERE id = s_4;
+      SELECT nombre INTO v_t2 FROM public.equipos_radioenlace WHERE id = s_6;
+      ALTER TABLE public.equipos_radioenlace DISABLE TRIGGER trg_equipos_radioenlace_nombres_al_dia;
+      UPDATE public.equipos_radioenlace SET nombre = '[TX] temporal' WHERE id = s_4;
+      UPDATE public.equipos_radioenlace SET nombre = v_t1 WHERE id = s_6;
+      UPDATE public.equipos_radioenlace SET nombre = v_t2 WHERE id = s_4;
+      ALTER TABLE public.equipos_radioenlace ENABLE TRIGGER trg_equipos_radioenlace_nombres_al_dia;
+      v_n := public.recalcular_nombres_equipos();
+      SELECT count(*) INTO v_m FROM public.equipos_radioenlace WHERE (id = s_4 AND nombre = v_t1) OR (id = s_6 AND nombre = v_t2);
+      r := r || jsonb_build_object('t', 'S9 nombres cruzados entre dos equipos (un ciclo): el recálculo los devuelve sin chocar con el índice único', 'ok', v_n = 2 AND v_m = 2, 'det', format('cambió %s, en su lugar %s', v_n, v_m));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'S9 nombres cruzados entre dos equipos (un ciclo): el recálculo los devuelve sin chocar con el índice único', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    SELECT count(*) INTO v_n FROM public.equipos_radioenlace WHERE tipo_equipo IS NOT NULL AND nombre <> (SELECT x FROM (SELECT public.f_nombre_base_equipo(id) AS x) b) AND nombre NOT LIKE '% (_)';
+    r := r || jsonb_build_object('t', 'S10 todos los equipos con tipo tienen guardado su nombre automático', 'ok', v_n = 0, 'det', format('distintos %s', v_n));
+  END IF;
+
+  -- ================= T. Migración 009: piscinas =================
+  PERFORM set_config('role', 'postgres', true);
+  IF to_regclass('public.piscinas') IS NULL THEN
+    r := r || jsonb_build_object('t', 'T0 migración 009 aplicada (piscinas existe)', 'ok', false, 'det', 'falta correr db/migraciones/009_piscinas.sql');
+  ELSE
+    SELECT count(*), count(*) FILTER (WHERE revisar), count(DISTINCT lower(btrim(nombre))) INTO v_n, v_m, v_resp FROM public.piscinas;
+    r := r || jsonb_build_object('t', 'T0 migración 009: tabla con las piscinas del plano (nombres únicos)', 'ok', v_n > 0 AND v_resp = v_n, 'det', format('piscinas %s, por revisar %s', v_n, v_m));
+    SELECT count(*) INTO v_n FROM public.piscinas p
+     WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements(p.puntos) q WHERE (q ->> 0)::float8 NOT BETWEEN -2.40 AND -2.28 OR (q ->> 1)::float8 NOT BETWEEN -79.76 AND -79.68)
+       AND p.fuente <> 'manual';
+    SELECT count(*) INTO v_m FROM public.piscinas WHERE fuente <> 'manual';
+    r := r || jsonb_build_object('t', 'T1 las piscinas del plano caen todas en la camaronera (Taura)', 'ok', v_n = v_m, 'det', format('%s de %s', v_n, v_m));
+
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('role', 'authenticated', true);
+    BEGIN
+      INSERT INTO public.piscinas (nombre, sector, hectareas, puntos) VALUES ('[TX] P1', 'TX', 2.5, '[[-2.33,-79.72],[-2.33,-79.719],[-2.331,-79.719],[-2.331,-79.72]]') RETURNING id, actualizado_en INTO v_pis, v_ts;
+      r := r || jsonb_build_object('t', 'T2 el administrador crea una piscina (fuente «manual» por defecto)', 'ok', v_pis IS NOT NULL AND (SELECT fuente FROM public.piscinas WHERE id = v_pis) = 'manual', 'det', format('id %s', v_pis));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'T2 el administrador crea una piscina (fuente «manual» por defecto)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.piscinas (nombre, puntos) VALUES ('  [tx] p1 ', '[[-2.33,-79.72],[-2.33,-79.719],[-2.331,-79.719]]');
+      r := r || jsonb_build_object('t', 'T3 nombre repetido (mayúsculas/espacios) rechazado', 'ok', false, 'det', 'se insertó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'T3 nombre repetido (mayúsculas/espacios) rechazado', 'ok', SQLSTATE = '23505', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    v_n := 0;
+    BEGIN
+      INSERT INTO public.piscinas (nombre, puntos) VALUES ('[TX] Dos puntos', '[[-2.33,-79.72],[-2.33,-79.719]]');
+    EXCEPTION WHEN others THEN IF SQLSTATE = '23514' AND SQLERRM LIKE '%piscinas_geom_valida%' THEN v_n := v_n + 1; END IF;
+    END;
+    BEGIN
+      INSERT INTO public.piscinas (nombre, puntos) VALUES ('[TX] Fuera', '[[-2.33,-79.72],[-2.33,-79.719],[95,-79.7]]');
+    EXCEPTION WHEN others THEN IF SQLSTATE = '23514' AND SQLERRM LIKE '%piscinas_geom_valida%' THEN v_n := v_n + 1; END IF;
+    END;
+    BEGIN
+      INSERT INTO public.piscinas (nombre, puntos) VALUES ('[TX] Texto', '{"a": 1}');
+    EXCEPTION WHEN others THEN IF SQLSTATE = '23514' AND SQLERRM LIKE '%piscinas_geom_valida%' THEN v_n := v_n + 1; END IF;
+    END;
+    BEGIN
+      INSERT INTO public.piscinas (nombre, puntos) VALUES ('[TX] No numérico', '[[-2.33,-79.72],[-2.33,"x"],[-2.331,-79.719]]');
+    EXCEPTION WHEN others THEN IF SQLSTATE = '23514' AND SQLERRM LIKE '%piscinas_geom_valida%' THEN v_n := v_n + 1; END IF;
+    END;
+    r := r || jsonb_build_object('t', 'T4 formas inválidas rechazadas (menos de 3 puntos, fuera de rango, no es lista, no numérico)', 'ok', v_n = 4, 'det', format('rechazadas %s de 4', v_n));
+    BEGIN
+      UPDATE public.piscinas SET hectareas = 0 WHERE id = v_pis;
+      r := r || jsonb_build_object('t', 'T5 hectáreas en cero rechazadas', 'ok', false, 'det', 'se actualizó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'T5 hectáreas en cero rechazadas', 'ok', SQLSTATE = '23514', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.piscinas SET puntos = '[[-2.33,-79.72],[-2.33,-79.718],[-2.331,-79.718],[-2.331,-79.72]]', revisar = true WHERE id = v_pis;
+      SELECT count(*) INTO v_n FROM public.piscinas WHERE id = v_pis AND actualizado_por = v_admin AND jsonb_array_length(puntos) = 4 AND revisar;
+      r := r || jsonb_build_object('t', 'T6 editar la forma guarda quién la tocó', 'ok', v_n = 1, 'det', format('filas %s', v_n));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'T6 editar la forma guarda quién la tocó', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    -- v_visit es registrador con ver_mapa (sección P): lee, pero no escribe.
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_visit, 'role', 'authenticated')::text, true);
+    SELECT count(*) INTO v_n FROM public.piscinas;
+    UPDATE public.piscinas SET nombre = '[TX] Cambiada' WHERE id = v_pis;
+    GET DIAGNOSTICS v_resp = ROW_COUNT;
+    DELETE FROM public.piscinas WHERE id = v_pis;
+    GET DIAGNOSTICS v_m = ROW_COUNT;
+    r := r || jsonb_build_object('t', 'T7 con ver_mapa se leen las piscinas, pero solo el administrador edita o borra (0 filas)', 'ok', v_n > 0 AND v_resp = 0 AND v_m = 0, 'det', format('leídas %s, editadas %s, borradas %s', v_n, v_resp, v_m));
+    BEGIN
+      INSERT INTO public.piscinas (nombre, puntos) VALUES ('[TX] No admin', '[[-2.33,-79.72],[-2.33,-79.719],[-2.331,-79.719]]');
+      r := r || jsonb_build_object('t', 'T8 alguien que no es administrador no puede crear piscinas (RLS)', 'ok', false, 'det', 'se insertó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'T8 alguien que no es administrador no puede crear piscinas (RLS)', 'ok', SQLSTATE = '42501', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    PERFORM set_config('request.jwt.claims', json_build_object('role', 'anon')::text, true);
+    PERFORM set_config('role', 'anon', true);
+    SELECT count(*) INTO v_n FROM public.piscinas;
+    r := r || jsonb_build_object('t', 'T9 anon (sin sesión) no ve piscinas', 'ok', v_n = 0, 'det', format('filas %s', v_n));
+    PERFORM set_config('role', 'postgres', true);
+    SELECT string_agg(rol || ':' || priv, ', ') INTO v_txt
+      FROM (VALUES ('anon'), ('authenticated')) AS roles(rol)
+      CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS privs(priv)
+     WHERE NOT has_table_privilege(rol, 'public.piscinas', priv);
+    r := r || jsonb_build_object('t', 'T10 piscinas tiene GRANT completo para anon y authenticated', 'ok', v_txt IS NULL, 'det', coalesce('faltan: ' || v_txt, 'completo'));
+    SELECT count(*) INTO v_n FROM public.auditoria WHERE accion IN ('INSERT_piscinas', 'UPDATE_piscinas') AND fecha >= now() - interval '1 minute';
+    r := r || jsonb_build_object('t', 'T11 los cambios de piscinas quedan en auditoría', 'ok', v_n >= 2, 'det', format('filas %s', v_n));
   END IF;
 
   -- ================= G. GRANT explícito (sin él, la API responde "permission denied") =================

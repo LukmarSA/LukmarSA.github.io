@@ -196,6 +196,13 @@ const ERRORES_POR_RESTRICCION = [
   ["atajos_simulacion_nombre_unico", "Ya hay un atajo con ese nombre."],
   ["atajos_simulacion_nombre_valido", "Ponle un nombre al atajo (hasta 60 caracteres)."],
   ["atajos_simulacion_con_equipos", "El atajo necesita al menos un equipo."],
+  // 008: medio del enlace
+  ["equipos_radioenlace_medio_valido", "El medio tiene que ser cable, fibra óptica o inalámbrico."],
+  // 009: piscinas
+  ["piscinas_nombre_unico", "Ya hay una piscina con ese nombre."],
+  ["piscinas_nombre_valido", "El nombre de la piscina no puede quedar vacío (hasta 40 caracteres)."],
+  ["piscinas_geom_valida", "La forma de la piscina no es válida: necesita al menos tres puntos dentro de rango."],
+  ["piscinas_hectareas_validas", "Las hectáreas tienen que ser un número mayor que cero."],
 ];
 
 export const TEXTO_FALTA_007 = "Falta la migración 007 en Supabase (tipos de equipo, redes y atajos): hay que correr db/migraciones/007_red_tipos_atajos.sql.";
@@ -210,6 +217,11 @@ export function traducirErrorMapa(error){
     if(code === "42501" && /permission denied for (table|relation)/i.test(msg)) return `La base rechazó el acceso: falta el GRANT de la migración 007 (${msg}).`;
     if(code === "23503" && /atajo apunta/i.test(msg)) return "Algún equipo del atajo ya no existe: recarga el mapa e inténtalo de nuevo.";
   }
+  if(/piscinas/.test(msg)){
+    if(code === "PGRST205" || code === "42P01" || /Could not find the table|does not exist/i.test(msg)) return "Falta la tabla de piscinas en Supabase: hay que correr db/migraciones/009_piscinas.sql.";
+    if(code === "42501" && /permission denied for (table|relation)/i.test(msg)) return `La base rechazó el acceso a la tabla de piscinas: falta el GRANT de la migración 009 (${msg}).`;
+  }
+  if(code === "PGRST204" && /'medio'/.test(msg)) return "Falta la migración 008 en Supabase (medio de los enlaces): hay que correr db/migraciones/008_medio_y_nombres.sql.";
   if(/planos_mapa/.test(msg)){
     if(code === "PGRST205" || code === "42P01" || /Could not find the table|does not exist/i.test(msg)) return "Falta la tabla del plano en Supabase: hay que correr db/migraciones/006_plano_mapa.sql. Mientras tanto la capa Plano funciona, pero el ajuste no se puede guardar.";
     if(code === "42501" && /permission denied for (table|relation)/i.test(msg)) return `La base rechazó el acceso a la tabla del plano: falta el GRANT de la migración 006 (${msg}).`;

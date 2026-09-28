@@ -15,6 +15,10 @@
 // de la 007, tipos de equipo, redes y atajos (se leen con ver_mapa, los escribe
 // el admin, nombres únicos, atajos con equipos que existen). Si el fixture no
 // trae esas tablas, se comportan como una base SIN la 007 (tabla inexistente).
+// De la 008 (fixture.m008): la columna "medio" y los nombres guardados al día
+// (la base los recalcula después de cada cambio, como el trigger). De la 009:
+// la tabla de piscinas (se lee con ver_mapa, la escribe el admin, nombre único
+// y forma válida).
 // Las reglas de la base en sí se prueban contra Supabase de verdad
 // (db/pruebas/mapa_pruebas_reglas_rls.sql), no aquí.
 (function(){
@@ -24,10 +28,12 @@
   const escrituras = window.__ESCRITURAS__ = [];
   const sesion = fixture.sesion || null;                       // { user: { id, email } }
   const hoy = fixture.hoy || new Date().toLocaleDateString("en-CA", { timeZone: "America/Guayaquil" });
-  const TABLAS_CON_ID = ["activos","historial_custodia","bajas","auditoria","ubicaciones","equipos_radioenlace","enlaces_respaldo","historial_ubicacion","planos_mapa","redes","atajos_simulacion"];
+  const TABLAS_CON_ID = ["activos","historial_custodia","bajas","auditoria","ubicaciones","equipos_radioenlace","enlaces_respaldo","historial_ubicacion","planos_mapa","redes","atajos_simulacion","piscinas"];
   const TABLAS_007 = ["tipos_equipo_red", "redes", "atajos_simulacion"];
   const COLUMNAS_007 = ["tipo_equipo", "red_id", "referencia"];
   const hay007 = !!(fixture.tablas && "tipos_equipo_red" in fixture.tablas);
+  const hay008 = !!fixture.m008;
+  const hay009 = !!(fixture.tablas && "piscinas" in fixture.tablas);
 
   const tabla = t=>(DB[t] ||= []);
   const siguienteId = t=>tabla(t).reduce((m, r)=>Math.max(m, Number(r.id) || 0), 0) + 1;
@@ -43,8 +49,8 @@
   }
   // RLS de lectura de la migración 004: la red (equipos y respaldos) solo con ver_mapa;
   // de la 006, el plano también. Y el plano solo lo escribe el administrador.
-  const LECTURA_SOLO_MAPA = ["equipos_radioenlace", "enlaces_respaldo", "planos_mapa", ...TABLAS_007];
-  const ESCRITURA_SOLO_ADMIN = ["planos_mapa", ...TABLAS_007];
+  const LECTURA_SOLO_MAPA = ["equipos_radioenlace", "enlaces_respaldo", "planos_mapa", "piscinas", ...TABLAS_007];
+  const ESCRITURA_SOLO_ADMIN = ["planos_mapa", "piscinas", ...TABLAS_007];
   function esAdmin(){
     const perfil = sesion && tabla("perfiles").find(p=>p.id === sesion.user.id);
     return !!(perfil && perfil.rol === "administrador");
@@ -86,11 +92,68 @@
       if(!vacio(f.referencia) && (!String(f.referencia).trim() || String(f.referencia).length > 60)) throw { code:"23514", message:'new row for relation "equipos_radioenlace" violates check constraint "equipos_radioenlace_referencia_valida"' };
     }
   }
+  // --- imitación de la 008: nombres guardados al día (como recalcular_nombres_equipos) ---
+  function recalcularNombres(){
+    if(!hay008) return;
+    const eqs = tabla("equipos_radioenlace");
+    const ubic = new Map(tabla("ubicaciones").map(u=>[u.id, u]));
+    const tipos = new Map(tabla("tipos_equipo_red").map(t=>[t.valor, t]));
+    const porId = new Map(eqs.map(e=>[e.id, e]));
+    const clave = t=>String(t ?? "").normalize("NFC").trim().toLowerCase().replace(/\s+/g, " ");
+    const ref = r=>{ const x = String(r ?? "").trim(); return x ? ` (${x})` : ""; };
+    const base = e=>{
+      const t = e.tipo_equipo ? tipos.get(e.tipo_equipo) : null;
+      if(!t) return null;
+      const u = ubic.get(e.ubicacion_id);
+      let n = `${t.etiqueta}${ref(e.referencia)} en ${u ? u.nombre : "?"}`;
+      const sv = vacio(e.servidor_id) ? null : porId.get(e.servidor_id);
+      if(sv){
+        const misma = sv.ubicacion_id === e.ubicacion_id;
+        const medio = ["cable", "fibra", "inalambrico"].includes(e.medio) ? e.medio : (misma ? "cable" : "inalambrico");
+        const ts = sv.tipo_equipo ? tipos.get(sv.tipo_equipo) : null;
+        const us = ubic.get(sv.ubicacion_id);
+        n += ` ${medio === "inalambrico" ? "enlazad" : "conectad"}${t.genero === "f" ? "a" : "o"} a ${ts ? `${ts.etiqueta}${ref(sv.referencia)}` : sv.nombre}${misma ? "" : ` en ${us ? us.nombre : "?"}`}`;
+      }
+      return n;
+    };
+    const ocupados = new Map();
+    const ocupar = (u, n)=>{ if(!ocupados.has(u)) ocupados.set(u, new Set()); ocupados.get(u).add(clave(n)); };
+    const conTipo = [];
+    for(const e of eqs){ const b = base(e); if(b === null) ocupar(e.ubicacion_id, e.nombre); else conTipo.push([e, b]); }
+    conTipo.sort((a, b)=>a[0].id - b[0].id);
+    const nuevos = conTipo.map(([e, b])=>{
+      const usados = ocupados.get(e.ubicacion_id) || new Set();
+      const num = k=>k <= 1 ? b : `${b} (${k})`;
+      let k = 1;
+      while(usados.has(clave(num(k)))) k++;
+      ocupar(e.ubicacion_id, num(k));
+      return [e, num(k)];
+    });
+    for(const [e, n] of nuevos) e.nombre = n;
+  }
+  function validar008(t, f){
+    if(!hay008 || t !== "equipos_radioenlace") return;
+    if(!vacio(f.medio) && !["cable", "fibra", "inalambrico"].includes(f.medio)) throw { code:"23514", message:'new row for relation "equipos_radioenlace" violates check constraint "equipos_radioenlace_medio_valido"' };
+  }
+  // --- imitación de la 009: piscinas ---
+  function validarPiscina(f, idActual){
+    if(!claveTexto(f.nombre) || String(f.nombre).length > 40) throw { code:"23514", message:'new row for relation "piscinas" violates check constraint "piscinas_nombre_valido"' };
+    if(tabla("piscinas").some(x=>x.id !== idActual && claveTexto(x.nombre) === claveTexto(f.nombre))) throw { code:"23505", message:'duplicate key value violates unique constraint "piscinas_nombre_unico"' };
+    const ok = Array.isArray(f.puntos) && f.puntos.length >= 3 && f.puntos.length <= 2000 && f.puntos.every(p=>Array.isArray(p) && p.length === 2 && p.every(v=>typeof v === "number" && Number.isFinite(v)) && Math.abs(p[0]) <= 90 && Math.abs(p[1]) <= 180);
+    if(!ok) throw { code:"23514", message:'new row for relation "piscinas" violates check constraint "piscinas_geom_valida"' };
+    if(!vacio(f.hectareas) && !(Number(f.hectareas) > 0)) throw { code:"23514", message:'new row for relation "piscinas" violates check constraint "piscinas_hectareas_validas"' };
+  }
+
   function columnas007SinMigracion(t, datos){
     if(hay007 || t !== "equipos_radioenlace") return null;
     const filas = Array.isArray(datos) ? datos : [datos];
     const c = COLUMNAS_007.find(k=>filas.some(f=>f && k in f));
     return c ? { code:"PGRST204", message:`Could not find the '${c}' column of 'equipos_radioenlace' in the schema cache` } : null;
+  }
+  function columna008SinMigracion(t, datos){
+    if(hay008 || t !== "equipos_radioenlace") return null;
+    const filas = Array.isArray(datos) ? datos : [datos];
+    return filas.some(f=>f && "medio" in f) ? { code:"PGRST204", message:"Could not find the 'medio' column of 'equipos_radioenlace' in the schema cache" } : null;
   }
 
   // "id, nombre, ubicacion:ubicaciones(id, nombre)" → { columnas:["id","nombre"], embeds:[{alias,tabla,columnas}] }
@@ -183,7 +246,9 @@
     ejecutar(){
       if(fallas[this.t]) return { data: null, error: fallas[this.t], count: null };
       if(TABLAS_007.includes(this.t) && !hay007) return { data: null, error: { code:"PGRST205", message:`Could not find the table 'public.${this.t}' in the schema cache` }, count: null };
-      const sin007 = (this.op === "insert" || this.op === "update") ? columnas007SinMigracion(this.t, this.datos) : null;
+      if(this.t === "piscinas" && !hay009) return { data: null, error: { code:"PGRST205", message:"Could not find the table 'public.piscinas' in the schema cache" }, count: null };
+      if(this.t === "equipos_radioenlace" && !hay008 && this.op === "select" && /\bmedio\b/.test(String(this.sel))) return { data: null, error: { code:"42703", message:"column equipos_radioenlace.medio does not exist" }, count: null };
+      const sin007 = (this.op === "insert" || this.op === "update") ? (columnas007SinMigracion(this.t, this.datos) || columna008SinMigracion(this.t, this.datos)) : null;
       if(sin007) return { data: null, error: sin007, count: null };
       try{
         let resultado;
@@ -200,7 +265,8 @@
             if(this.t === "ubicaciones"){ fila.fotos ||= []; if(fila.activa === undefined) fila.activa = true; }
             if(this.t === "historial_ubicacion"){ if(fila.hasta === undefined) fila.hasta = null; if(!fila.desde) fila.desde = hoy; antesDeInsertarTramo(fila); }
             if(this.t === "tipos_ubicacion" && fila.activo === undefined) fila.activo = true;
-            if(this.t === "equipos_radioenlace"){ if(fila.servidor_id === undefined) fila.servidor_id = null; validarJerarquia(fila); }
+            if(this.t === "equipos_radioenlace"){ if(fila.servidor_id === undefined) fila.servidor_id = null; if(hay008 && fila.medio === undefined) fila.medio = null; validarJerarquia(fila); validar008(this.t, fila); }
+            if(this.t === "piscinas"){ if(fila.activa === undefined) fila.activa = true; if(fila.orden === undefined) fila.orden = 0; if(fila.revisar === undefined) fila.revisar = false; if(fila.fuente === undefined) fila.fuente = "manual"; validarPiscina(fila, null); fila.actualizado_en = new Date().toISOString(); }
             if(this.t === "enlaces_respaldo"){ if(fila.prioridad === undefined) fila.prioridad = 1; validarRespaldo(fila, null); }
             if(this.t === "planos_mapa"){ if(fila.activo === undefined) fila.activo = true; fila.actualizado_en = new Date().toISOString(); validarPlano(fila); }
             if(this.t === "redes"){ if(fila.activa === undefined) fila.activa = true; if(fila.orden === undefined) fila.orden = 0; if(fila.color === undefined) fila.color = "#007EB2"; }
@@ -211,6 +277,7 @@
             if(this.t === "equipos_radioenlace") sincronizarActivoDeEquipo(fila);
             return fila;
           });
+          if(this.t === "equipos_radioenlace") recalcularNombres();
           escrituras.push({ tabla: this.t, op: "insert", filas: copia(resultado) });
         } else if(this.op === "update"){
           resultado = ESCRITURA_SOLO_ADMIN.includes(this.t) && !esAdmin() ? [] : this.filas(); // RLS: 0 filas, sin error
@@ -219,18 +286,21 @@
             if(this.t === "equipos_radioenlace" && "servidor_id" in this.datos) validarJerarquia(nueva);
             if(this.t === "enlaces_respaldo") validarRespaldo(nueva, r.id);
             if(this.t === "planos_mapa") validarPlano(nueva);
+            if(this.t === "piscinas") validarPiscina(nueva, r.id);
             validar007(this.t, nueva, this.t === "tipos_equipo_red" ? r.valor : r.id);
+            validar008(this.t, nueva);
             if(this.t === "atajos_simulacion") this.datos = { ...this.datos, equipos: nueva.equipos };
           }
           resultado.forEach(r=>{
             const servidorAntes = r.servidor_id;
             Object.assign(r, copia(this.datos));
-            if(this.t === "planos_mapa") r.actualizado_en = new Date().toISOString();
+            if(this.t === "planos_mapa" || this.t === "piscinas") r.actualizado_en = new Date().toISOString();
             if(this.t === "equipos_radioenlace"){
               sincronizarActivoDeEquipo(r);
               if(!vacio(r.servidor_id) && r.servidor_id !== servidorAntes) DB.enlaces_respaldo = tabla("enlaces_respaldo").filter(x=>!(x.equipo_id === r.id && x.servidor_alternativo_id === r.servidor_id));
             }
           });
+          if(["equipos_radioenlace", "ubicaciones", "tipos_equipo_red"].includes(this.t)) recalcularNombres();
           escrituras.push({ tabla: this.t, op: "update", filas: copia(resultado), parche: copia(this.datos) });
         } else if(this.op === "delete"){
           resultado = ESCRITURA_SOLO_ADMIN.includes(this.t) && !esAdmin() ? [] : this.filas();
@@ -246,6 +316,7 @@
             for(const e of tabla("equipos_radioenlace")) if(ids.includes(e.red_id)) e.red_id = null;
           }
           DB[this.t] = tabla(this.t).filter(r=>!resultado.includes(r));
+          if(this.t === "equipos_radioenlace") recalcularNombres();
           escrituras.push({ tabla: this.t, op: "delete", filas: copia(resultado) });
         } else if(this.op === "upsert"){
           resultado = this.datos.map(f=>{

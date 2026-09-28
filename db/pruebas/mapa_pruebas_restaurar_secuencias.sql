@@ -21,11 +21,11 @@ SELECT string_agg(
            s.secuencia, q.last_value, q.last_value, CASE WHEN q.is_called THEN 'true' ELSE 'false' END, s.tabla),
          E'\n' ORDER BY s.tabla) AS pegar_despues_de_las_pruebas
   FROM (
-    -- Las tablas de la 006/007 entran solo si la migración ya se corrió.
+    -- Las tablas de la 006/007/009 entran solo si la migración ya se corrió.
     SELECT t AS tabla, CASE WHEN to_regclass('public.' || t) IS NOT NULL THEN pg_get_serial_sequence('public.' || t, 'id') END AS secuencia
       FROM unnest(ARRAY['activos', 'bajas', 'auditoria', 'historial_custodia', 'ubicaciones',
                         'equipos_radioenlace', 'historial_ubicacion', 'enlaces_respaldo',
-                        'planos_mapa', 'redes', 'atajos_simulacion']) AS t
+                        'planos_mapa', 'redes', 'atajos_simulacion', 'piscinas']) AS t
   ) s
   -- pg_sequences.last_value es NULL si la secuencia nunca se usó (el próximo valor es 1).
   CROSS JOIN LATERAL (

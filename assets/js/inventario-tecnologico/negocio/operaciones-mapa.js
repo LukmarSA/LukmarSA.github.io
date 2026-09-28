@@ -7,11 +7,12 @@
 // equipos, respaldos y tipos: solo administrador; historial_ubicacion: acción
 // "asignar_ubicacion" de la matriz). La UI solo esconde los botones.
 import { sb } from "../nucleo/config.js";
-import { cargarAtajos, cargarRedes, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, estadoMapa, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa } from "../nucleo/datos-mapa.js";
-import { slugTipo, validarAtajo, validarRed, validarTipoEquipo } from "../nucleo/mapa-nombres.js";
+import { cargarAtajos, cargarPiscinas, cargarRedes, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, estadoMapa, hayMedio, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa } from "../nucleo/datos-mapa.js";
+import { numeroHectareas, redondearPunto, validarPiscina } from "../nucleo/piscinas.js";
+import { nombreParaGuardar, nombresAutomaticos, slugTipo, validarAtajo, validarRed, validarTipoEquipo } from "../nucleo/mapa-nombres.js";
 import { copiarEsquinas, esquinasValidas } from "../nucleo/plano-mapa.js";
 import { hoyLocalISO, traducirErrorMapa, validarEquipo, validarFechaMovimiento, validarTipoUbicacion, validarUbicacion } from "../nucleo/mapa-logica.js";
-import { validarRespaldo, validarServidor } from "../nucleo/mapa-jerarquia.js";
+import { esMedio, validarRespaldo, validarServidor } from "../nucleo/mapa-jerarquia.js";
 import { slugify } from "../nucleo/opciones-configurables.js";
 import { redimensionarImagen } from "./operaciones.js";
 
@@ -175,6 +176,8 @@ function filaEquipo(c){
   if("tipo_equipo" in c) fila.tipo_equipo = textoOpcional(c.tipo_equipo);
   if("red_id" in c) fila.red_id = (c.red_id === "" || c.red_id === null || c.red_id === undefined) ? null : Number(c.red_id);
   if("referencia" in c) fila.referencia = textoOpcional(c.referencia);
+  // 008: medio del enlace con el servidor (sin servidor no aplica).
+  if("medio" in c) fila.medio = fila.servidor_id !== null && esMedio(c.medio) ? c.medio : null;
   return fila;
 }
 
@@ -384,5 +387,98 @@ export async function editarAtajo(id, { nombre, equipos }){
 
 export async function eliminarAtajo(id){
   exigirFilas(await sb.from("atajos_simulacion").delete().eq("id", id).select("id"), "eliminó el atajo");
+  await refrescarDatosMapa();
+}
+
+// ---------------------------------------------------------------------------
+// Asignación en lote (007): tipo y/o red para varios equipos a la vez.
+// cambios = { tipo_equipo?, red_id? }: solo viaja lo que se cambia (red_id
+// null = quitar la red). Devuelve cuántos equipos cambiaron.
+//   * Con la 008 (o si el tipo no cambia): un solo UPDATE; los nombres los
+//     pone al día la base.
+//   * Sin la 008 y con cambio de tipo: un UPDATE por equipo, en orden de id,
+//     con su nombre automático (así no choca con el índice único de nombres).
+// ---------------------------------------------------------------------------
+export async function asignarEnLote(ids, cambios = {}){
+  const lista = [...new Set((ids || []).map(Number))].filter(Number.isFinite).sort((a, b)=>a - b);
+  if(!lista.length) throw new Error("Elige al menos un equipo.");
+  const parche = {};
+  if("tipo_equipo" in cambios) parche.tipo_equipo = textoOpcional(cambios.tipo_equipo);
+  if("red_id" in cambios) parche.red_id = cambios.red_id === null || cambios.red_id === "" || cambios.red_id === undefined ? null : Number(cambios.red_id);
+  if(!Object.keys(parche).length) throw new Error("Elige qué cambiar: el tipo, la red o los dos.");
+  if("tipo_equipo" in parche && !parche.tipo_equipo) throw new Error("Elige el tipo de equipo (el nombre automático lo necesita).");
+  if(parche.tipo_equipo && !cargarTiposEquipo().some(t=>t.valor === parche.tipo_equipo)) throw new Error("Ese tipo de equipo ya no existe. Recarga el mapa.");
+  if(parche.red_id !== undefined && parche.red_id !== null && !cargarRedes().some(r=>r.id === parche.red_id)) throw new Error("Esa red ya no existe. Recarga el mapa.");
+  const existentes = new Set(cargarEquiposRadioenlace().map(e=>e.id));
+  const faltan = lista.filter(id=>!existentes.has(id));
+  if(faltan.length) throw new Error("Algún equipo ya no existe. Recarga el mapa.");
+
+  if(hayMedio() || !("tipo_equipo" in parche)){
+    const filas = exigirFilas(await sb.from("equipos_radioenlace").update(parche).in("id", lista).select("id"), "aplicó el cambio");
+    await refrescarDatosMapa();
+    return filas.length;
+  }
+  // Sin la 008: copia local que se va poniendo al día equipo por equipo.
+  const ubicaciones = cargarUbicaciones(), tipos = cargarTiposEquipo();
+  const copia = cargarEquiposRadioenlace().map(e=>({ ...e }));
+  const alDia = ()=>{
+    const nombres = nombresAutomaticos({ equipos: copia.map(e=>({ ...e, nombre: e.nombre_guardado ?? e.nombre })), ubicaciones, tipos });
+    for(const e of copia) e.nombre = nombres.get(e.id) ?? e.nombre_guardado ?? e.nombre;
+  };
+  let hechos = 0;
+  try{
+    for(const id of lista){
+      const e = copia.find(x=>x.id === id);
+      const fila = { ...e, ...parche };
+      const nombre = nombreParaGuardar(fila, { equipos: copia, ubicaciones, tipos }, id) || e.nombre_guardado || e.nombre;
+      exigirFilas(await sb.from("equipos_radioenlace").update({ ...parche, nombre }).eq("id", id).select("id"), "aplicó el cambio");
+      Object.assign(e, parche, { nombre_guardado: nombre });
+      alDia();
+      hechos++;
+    }
+  }catch(err){
+    await refrescarDatosMapa().catch(()=>{});
+    if(hechos) err.message = `${err.message} Se alcanzaron a cambiar ${hechos} de ${lista.length}.`;
+    throw err;
+  }
+  await refrescarDatosMapa();
+  return hechos;
+}
+
+// ---------------------------------------------------------------------------
+// Piscinas (migración 009): solo el administrador (RLS). Solo viaja lo que
+// se cambia (el editor de vértices manda solo los puntos).
+// ---------------------------------------------------------------------------
+function filaPiscina(c){
+  const f = {};
+  if("nombre" in c) f.nombre = String(c.nombre ?? "").trim();
+  if("sector" in c) f.sector = textoOpcional(c.sector);
+  if("hectareas" in c) f.hectareas = numeroHectareas(c.hectareas);
+  if("puntos" in c) f.puntos = (c.puntos || []).map(redondearPunto);
+  if("notas" in c) f.notas = textoOpcional(c.notas);
+  if("revisar" in c) f.revisar = !!c.revisar;
+  if("fuente" in c) f.fuente = c.fuente;
+  return f;
+}
+
+export async function crearPiscina(campos){
+  const fila = filaPiscina({ fuente: "manual", ...campos });
+  exigirValido(validarPiscina(fila, cargarPiscinas()));
+  const { id } = exigir(await sb.from("piscinas").insert({ ...fila, orden: siguienteOrden(cargarPiscinas()) }).select("id").single());
+  await refrescarDatosMapa();
+  return id;
+}
+
+export async function editarPiscina(id, campos){
+  const actual = cargarPiscinas().find(p=>p.id === id);
+  if(!actual) throw new Error("Esa piscina ya no existe. Recarga el mapa.");
+  const fila = filaPiscina(campos);
+  exigirValido(validarPiscina({ ...actual, ...fila }, cargarPiscinas(), id));
+  exigirFilas(await sb.from("piscinas").update(fila).eq("id", id).select("id"), "guardó la piscina");
+  await refrescarDatosMapa();
+}
+
+export async function eliminarPiscina(id){
+  exigirFilas(await sb.from("piscinas").delete().eq("id", id).select("id"), "eliminó la piscina");
   await refrescarDatosMapa();
 }

@@ -18,6 +18,11 @@
 // corrió, m.red007.disponible queda en false y la app sigue como antes (nombre
 // a mano, sin tipo, red ni atajos). Con la 007, cada equipo en memoria queda
 // con nombre = el nombre automático y nombre_guardado = el de la base.
+//
+// Migración 008: medio de cada enlace (cable, fibra, inalámbrico) y nombres
+// guardados al día (los recalcula la base). Se detecta pidiendo la columna
+// "medio" (m.red008.disponible). Migración 009: piscinas de la camaronera
+// (polígonos) para la capa "Piscinas" (m.piscinas009.disponible).
 import { sb } from "./config.js";
 import { cargarActivos } from "./datos.js";
 import { state } from "./estado.js";
@@ -39,8 +44,10 @@ export function crearEstadoMapa(){
     filtros: {
       tiposOcultos: [],   // tipos de ubicación ocultos
       verArchivadas: false,
-      lineas: { backbone: true, p2mp: true, respaldos: false },
+      lineas: { backbone: true, p2mp: true, cable: true, respaldos: false }, // cable = cable y fibra entre sitios (008)
       rolesOcultos: [],   // raiz / backbone / distribucion / cliente
+      redesOcultas: [],   // ids de redes (texto) y "sin" = equipos sin red (007)
+      colorPorRed: false, // colorear las líneas con el color de la red del cliente
       estadosOcultos: [], // servicio / respaldo / sin_conexion / caido (solo en simulación)
     },
     expandidos: [],       // servidores agrupados (muchos clientes) con sus líneas desplegadas
@@ -49,6 +56,9 @@ export function crearEstadoMapa(){
     redes: [],            // redes de la finca (007)
     atajos: [],           // atajos_simulacion (007)
     red007: { disponible: false, error: null },
+    red008: { disponible: false },                 // columna equipos_radioenlace.medio (008)
+    piscinas: [],                                  // piscinas de la camaronera (009)
+    piscinas009: { disponible: false, error: null },
     foco: null,           // { ubicacionId, activoId } pendiente de aplicar al abrir el mapa (p. ej. "Ver en mapa")
     plano: null,          // capa "Plano" (migración 006): normalizarPlano(fila) + error (null si se leyó bien)
   };
@@ -64,7 +74,7 @@ const opcional = consulta=>Promise.resolve(consulta).then(r=>r, err=>({ data: nu
 
 export async function refrescarDatosMapa(){
   const m = estadoMapa();
-  const [t, u, e, r, h, te, rd, at] = await Promise.all([
+  const [t, u, e, r, h, te, rd, at, me, pi] = await Promise.all([
     sb.from("tipos_ubicacion").select("*").order("orden"),
     sb.from("ubicaciones").select("*").order("nombre"),
     sb.from("equipos_radioenlace").select("*").order("nombre"),
@@ -73,6 +83,8 @@ export async function refrescarDatosMapa(){
     opcional(sb.from("tipos_equipo_red").select("*").order("orden").order("etiqueta")),
     opcional(sb.from("redes").select("*").order("orden").order("nombre")),
     opcional(sb.from("atajos_simulacion").select("*").order("orden").order("nombre")),
+    opcional(sb.from("equipos_radioenlace").select("id, medio").limit(1)),
+    opcional(sb.from("piscinas").select("*").order("orden").order("nombre")),
   ]);
   const error = t.error || u.error || e.error || r.error || h.error;
   if(error){ m.error = error; throw error; }
@@ -85,6 +97,9 @@ export async function refrescarDatosMapa(){
   m.tiposEquipo = te.error ? [] : (te.data || []);
   m.redes = rd.error ? [] : (rd.data || []);
   m.atajos = at.error ? [] : (at.data || []);
+  m.red008 = { disponible: !me.error };
+  m.piscinas009 = { disponible: !pi.error, error: pi.error || null };
+  m.piscinas = pi.error ? [] : (pi.data || []);
   aplicarNombres(m.equipos, { ubicaciones: m.ubicaciones, tipos: m.tiposEquipo });
   m.equipos.sort((a, b)=>String(a.nombre).localeCompare(String(b.nombre), "es"));
   m.cargado = true;
@@ -141,6 +156,14 @@ export function cargarAtajos(){ return estadoMapa().atajos; }
 
 // true si la migración 007 está corrida (tipo, red, atajos y nombre automático).
 export function hayRedFinca(){ return !!estadoMapa().red007.disponible; }
+
+// true si la migración 008 está corrida (medio del enlace; la base mantiene los nombres).
+export function hayMedio(){ return !!(estadoMapa().red008 || {}).disponible; }
+
+// true si la migración 009 está corrida (tabla de piscinas).
+export function hayPiscinas(){ return !!(estadoMapa().piscinas009 || {}).disponible; }
+
+export function cargarPiscinas(){ return estadoMapa().piscinas || []; }
 
 // Índices calculados sobre lo ya cargado + los activos del listado. Es barato
 // (decenas de ubicaciones, ~100 activos), así que se recalcula cuando se pide

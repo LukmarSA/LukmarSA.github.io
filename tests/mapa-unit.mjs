@@ -1,6 +1,6 @@
 // Pruebas unitarias de la lógica pura del mapa (nucleo/geo.js,
 // nucleo/mapa-logica.js, nucleo/mapa-jerarquia.js, nucleo/plano-mapa.js y
-// nucleo/mapa-nombres.js). No necesitan navegador
+// nucleo/mapa-nombres.js, nucleo/piscinas.js). No necesitan navegador
 // ni Supabase.
 //   node mapa-unit.mjs        (o: npm run test:mapa)
 process.env.TZ = "America/Guayaquil"; // para probar el caso "después de las 19:00" de hoyLocalISO
@@ -12,6 +12,7 @@ import * as L from "../assets/js/inventario-tecnologico/nucleo/mapa-logica.js";
 import * as J from "../assets/js/inventario-tecnologico/nucleo/mapa-jerarquia.js";
 import * as PL from "../assets/js/inventario-tecnologico/nucleo/plano-mapa.js";
 import * as N from "../assets/js/inventario-tecnologico/nucleo/mapa-nombres.js";
+import * as PI from "../assets/js/inventario-tecnologico/nucleo/piscinas.js";
 
 let ok = 0, total = 0;
 const fallas = [];
@@ -320,7 +321,7 @@ prueba("roles automáticos: raíz, backbone (extremos PTP y equipos de torre), d
   assert.deepEqual(J.contarRoles(red), { raiz:2, backbone:7, distribucion:3, cliente:13 });
 });
 prueba("resumen de la red: raíces, backbone, P2MP, respaldos, agrupados", ()=>{
-  assert.deepEqual(J.resumenRed(red), { raices:2, backbone:3, p2mp:13, respaldos:3, agrupados:1 });
+  assert.deepEqual(J.resumenRed(red), { raices:2, backbone:3, p2mp:13, cable:0, respaldos:3, agrupados:1 });
 });
 prueba("conexión: distancia/azimut desde el equipo hacia su servidor; banda del servidor; cable sin distancia", ()=>{
   const d = J.describirConexion(red, 501, 303);
@@ -678,6 +679,143 @@ prueba("validaciones de atajo, red y tipo de equipo", ()=>{
   assert.ok(N.validarTipoEquipo({ etiqueta:"switch", genero:"m" }, TIPOS_RED).errores.etiqueta);
   assert.ok(N.validarTipoEquipo({ etiqueta:"Switch", genero:"m" }, TIPOS_RED, "switch").ok);
   assert.ok(N.validarTipoEquipo({ etiqueta:"Nuevo", genero:"x" }).errores.genero);
+});
+
+// ---------------------------------------------------------------- 008: medio del enlace
+{
+  const U = [{ id:1, nombre:"Torre K", lat:-2.30, lng:-79.70 }, { id:2, nombre:"Poste 3", lat:-2.301, lng:-79.701 }, { id:3, nombre:"Torre L", lat:-2.35, lng:-79.72 }];
+  const E = [
+    { id:1, ubicacion_id:3, nombre:"Router L", servidor_id:null },
+    { id:2, ubicacion_id:3, nombre:"PTP L", servidor_id:1 },
+    { id:3, ubicacion_id:1, nombre:"PTP K", servidor_id:2 },                        // radio automático
+    { id:4, ubicacion_id:1, nombre:"Switch K", servidor_id:3 },                     // cable automático
+    { id:5, ubicacion_id:2, nombre:"Cámara poste", servidor_id:4, medio:"cable" },  // cable entre sitios
+    { id:6, ubicacion_id:2, nombre:"Cámara poste 2", servidor_id:4, medio:"fibra" },// fibra entre sitios
+    { id:7, ubicacion_id:1, nombre:"AP K", servidor_id:4, medio:"inalambrico" },    // radio en la misma ubicación
+  ];
+  const R = [{ id:1, equipo_id:5, servidor_alternativo_id:3, prioridad:1 }];
+  const rd = J.analizarRed({ equipos:E, ubicaciones:U, respaldos:R });
+  prueba("008: medio explícito o deducido (misma ubicación = cable; otra = inalámbrico)", ()=>{
+    assert.equal(J.medioEnlace(rd, 3, 2), "inalambrico");
+    assert.equal(J.medioEnlace(rd, 4, 3), "cable");
+    assert.equal(J.medioEnlace(rd, 5, 4), "cable");
+    assert.equal(J.medioEnlace(rd, 6, 4), "fibra");
+    assert.equal(J.medioEnlace(rd, 7, 4), "inalambrico");
+    assert.ok(J.esPorCable(rd, 6, 4) && !J.esPorCable(rd, 7, 4));
+  });
+  prueba("008: el medio guardado vale solo para el servidor principal (un respaldo se deduce)", ()=>{
+    assert.equal(J.medioEnlace(rd, 5, 3), "inalambrico"); // respaldo (no es su principal) en otra ubicación: se deduce
+    const rd2 = J.analizarRed({ equipos:[...E.slice(0, 4), { id:5, ubicacion_id:2, nombre:"Cámara", servidor_id:4, medio:"fibra" }], ubicaciones:U });
+    assert.equal(J.medioDe(rd2.equipoPorId.get(5), rd2.equipoPorId.get(3)), "inalambrico");
+  });
+  prueba("008: cable/fibra entre sitios no son radioenlaces: clase propia, no cuentan para backbone/P2MP ni se agrupan", ()=>{
+    const porCliente = new Map(rd.enlaces.map(l=>[l.cliente.id, l]));
+    assert.equal(porCliente.get(3).clase, "backbone");
+    assert.equal(porCliente.get(5).clase, "cable");
+    assert.equal(porCliente.get(6).clase, "fibra");
+    assert.ok(!porCliente.has(4) && !porCliente.has(7), "misma ubicación: sin línea");
+    assert.deepEqual((rd.clientesRemotos.get(4) || []).map(e=>e.id), []);
+    assert.equal(J.resumenRed(rd).cable, 2);
+    assert.equal(rd.rol.get(5), "cliente");
+  });
+  prueba("008: planDeLineas dibuja cable y fibra con su estilo; el toggle «cable» los oculta", ()=>{
+    const plan = J.planDeLineas(rd, { lineas:{ backbone:true, p2mp:true, cable:true, respaldos:false } });
+    const estilos = new Map(plan.filter(d=>d.tipo === "principal").map(d=>[d.clienteId, d.estilo]));
+    assert.equal(estilos.get(5), "cable"); assert.equal(estilos.get(6), "fibra");
+    const sin = J.planDeLineas(rd, { lineas:{ backbone:true, p2mp:true, cable:false, respaldos:false } });
+    assert.ok(!sin.some(d=>d.clienteId === 5 || d.clienteId === 6));
+  });
+  prueba("008: tramos y conexión llevan el medio y si es la misma ubicación", ()=>{
+    const t = J.tramosDeCamino(rd, J.caminoARaiz(rd, 6));
+    assert.deepEqual(t.map(x=>x.medio), ["fibra", "cable", "inalambrico", "cable"]);
+    const d = J.describirConexion(rd, 6, 4);
+    assert.equal(d.medio, "fibra"); assert.equal(d.cable, true); assert.equal(d.mismaUbicacion, false); assert.ok(d.distanciaKm > 0.1 && d.distanciaKm < 0.2);
+    const d2 = J.describirConexion(rd, 4, 3);
+    assert.equal(d2.mismaUbicacion, true); assert.equal(d2.distanciaKm, null);
+  });
+  prueba("filtro por red: oculta los de una red y, con «sin», los que no tienen red", ()=>{
+    const E2 = E.map(e=>({ ...e, red_id: e.id <= 3 ? 1 : (e.id === 4 ? 2 : null) }));
+    const rd2 = J.analizarRed({ equipos:E2, ubicaciones:U });
+    assert.equal(J.claveRed(E2[0]), "1"); assert.equal(J.claveRed(E2[6]), "sin");
+    assert.ok(!J.equipoVisible(rd2, 1, { redesOcultas:["1"] }));
+    assert.ok(J.equipoVisible(rd2, 4, { redesOcultas:["1"] }));
+    assert.ok(!J.equipoVisible(rd2, 7, { redesOcultas:["sin"] }));
+    assert.ok(J.equipoVisible(rd2, 7, {}));
+  });
+  const T = [{ valor:"switch", etiqueta:"Switch", genero:"m" }, { valor:"camara", etiqueta:"Cámara", genero:"f" }, { valor:"ap", etiqueta:"AP", genero:"m" }, { valor:"ptp", etiqueta:"Punto a Punto", genero:"m" }];
+  const EN = [
+    { id:3, ubicacion_id:1, nombre:"PTP K", servidor_id:null, tipo_equipo:"ptp" },
+    { id:4, ubicacion_id:1, nombre:"x", servidor_id:3, tipo_equipo:"switch" },
+    { id:5, ubicacion_id:2, nombre:"x", servidor_id:4, tipo_equipo:"camara", medio:"cable" },
+    { id:6, ubicacion_id:2, nombre:"x", servidor_id:4, tipo_equipo:"camara", medio:"fibra", referencia:"Norte" },
+    { id:7, ubicacion_id:1, nombre:"x", servidor_id:4, tipo_equipo:"ap", medio:"inalambrico" },
+    { id:8, ubicacion_id:2, nombre:"x", servidor_id:4, tipo_equipo:"camara" },
+  ];
+  prueba("008: nombres con medio (cable/fibra a otra ubicación: «conectada a … en …»; radio en la misma: «enlazado a …»)", ()=>{
+    const n = N.nombresAutomaticos({ equipos:EN, ubicaciones:U, tipos:T });
+    assert.equal(n.get(5), "Cámara en Poste 3 conectada a Switch en Torre K");
+    assert.equal(n.get(6), "Cámara (Norte) en Poste 3 conectada a Switch en Torre K");
+    assert.equal(n.get(7), "AP en Torre K enlazado a Switch");
+    assert.equal(n.get(8), "Cámara en Poste 3 enlazada a Switch en Torre K");
+    assert.equal(N.nombreBase({ ubicacion_id:"2", tipo_equipo:"camara", servidor_id:"4", medio:"" }, N.contextoNombres({ equipos:EN, ubicaciones:U, tipos:T })), "Cámara en Poste 3 enlazada a Switch en Torre K", "valores del formulario (texto)");
+  });
+}
+
+// ---------------------------------------------------------------- 009: piscinas
+prueba("piscinas: validación de puntos (igual que el CHECK)", ()=>{
+  assert.ok(PI.validarPuntosPiscina([[-2.3, -79.7], [-2.3, -79.69], [-2.31, -79.69]]));
+  assert.ok(!PI.validarPuntosPiscina([[-2.3, -79.7], [-2.3, -79.69]]), "dos puntos");
+  assert.ok(!PI.validarPuntosPiscina([[-2.3, -79.7], [-2.3, -79.69], [-95, 0]]), "latitud fuera de rango");
+  assert.ok(!PI.validarPuntosPiscina([[-2.3, -79.7], [-2.3, "x"], [-2.31, -79.69]]), "no numérico");
+  assert.ok(!PI.validarPuntosPiscina(null));
+});
+prueba("piscinas: un cuadrado de 4,7 ha mide 4,7 ha y su centro es el pedido", ()=>{
+  const q = PI.cuadradoAlrededor([-2.34, -79.72], 4.7);
+  cerca(PI.areaHectareas(q), 4.7, 0.01);
+  const c = PI.centroide(q);
+  cerca(c[0], -2.34, 1e-6); cerca(c[1], -79.72, 1e-6);
+  cerca(geo.distanciaKm({ lat:q[0][0], lng:q[0][1] }, { lat:q[1][0], lng:q[1][1] }) * 1000, Math.sqrt(47000), 0.5, "lado");
+});
+prueba("piscinas: el área no depende del sentido ni del punto de inicio", ()=>{
+  const q = PI.cuadradoAlrededor([-2.34, -79.72], 2);
+  cerca(PI.areaM2([...q].reverse()), PI.areaM2(q), 1e-6);
+  cerca(PI.areaM2([...q.slice(2), ...q.slice(0, 2)]), PI.areaM2(q), 1e-6);
+});
+prueba("piscinas: editor (insertar en un lado, mover, quitar sin bajar de 3)", ()=>{
+  const q = PI.cuadradoAlrededor([-2.34, -79.72], 1);
+  const m = PI.puntoMedio(q[0], q[1]);
+  const q5 = PI.insertarVertice(q, 0, m);
+  assert.equal(q5.length, 5); assert.deepEqual(q5[1], m);
+  const mov = PI.moverVertice(q5, 1, PI.desplazarMetros(m, 10, 0));
+  cerca(geo.distanciaKm({ lat:m[0], lng:m[1] }, { lat:mov[1][0], lng:mov[1][1] }) * 1000, 10, 0.05, "10 m al norte");
+  assert.equal(PI.quitarVertice(q5, 1).length, 4);
+  assert.equal(PI.quitarVertice(q.slice(0, 3), 0), null);
+  assert.deepEqual(q, PI.cuadradoAlrededor([-2.34, -79.72], 1), "no muta el original");
+});
+prueba("piscinas: validación del formulario, hectáreas con coma, sector y textos", ()=>{
+  const lista = [{ id:1, nombre:"L01" }];
+  assert.equal(PI.validarPiscina({ nombre:" l01 " }, lista).errores.nombre, "Ya hay una piscina con ese nombre.");
+  assert.ok(PI.validarPiscina({ nombre:"L01" }, lista, 1).ok);
+  assert.ok(PI.validarPiscina({ nombre:"" }).errores.nombre);
+  assert.ok(PI.validarPiscina({ nombre:"X", hectareas:"-1" }).errores.hectareas);
+  assert.ok(PI.validarPiscina({ nombre:"X", hectareas:"4,7" }).ok);
+  assert.ok(PI.validarPiscina({ nombre:"X", puntos:[[0, 0]] }).errores.puntos);
+  assert.equal(PI.numeroHectareas("4,75"), 4.75); assert.equal(PI.numeroHectareas(""), null); assert.ok(Number.isNaN(PI.numeroHectareas("abc")));
+  assert.equal(PI.sectorDeNombre("pcm04"), "PCM"); assert.equal(PI.sectorDeNombre("12"), "");
+  assert.equal(PI.fmtHectareas(4.7), "4,70 ha"); assert.equal(PI.fmtHectareas(null), "—");
+  cerca(PI.diferenciaArea(4.7, PI.cuadradoAlrededor([-2.34, -79.72], 4.935)), 5, 0.05);
+  assert.equal(PI.diferenciaArea(null, []), null);
+});
+prueba("piscinas: caja de varias piscinas", ()=>{
+  const caja = PI.cajaPiscinas([{ puntos:[[-2.3, -79.7], [-2.31, -79.69], [-2.32, -79.71]] }, { puntos:[[-2.35, -79.72], [-2.36, -79.7], [-2.34, -79.73]] }]);
+  assert.deepEqual(caja, [[-2.36, -79.73], [-2.3, -79.69]]);
+  assert.equal(PI.cajaPiscinas([]), null);
+});
+prueba("errores de la 008/009 traducidos", ()=>{
+  assert.match(L.traducirErrorMapa({ code:"23514", message:'violates check constraint "equipos_radioenlace_medio_valido"' }), /cable, fibra/);
+  assert.match(L.traducirErrorMapa({ code:"23505", message:'duplicate key value violates unique constraint "piscinas_nombre_unico"' }), /Ya hay una piscina/);
+  assert.match(L.traducirErrorMapa({ code:"PGRST205", message:"Could not find the table 'public.piscinas' in the schema cache" }), /009_piscinas/);
+  assert.match(L.traducirErrorMapa({ code:"PGRST204", message:"Could not find the 'medio' column of 'equipos_radioenlace' in the schema cache" }), /008_medio_y_nombres/);
 });
 
 console.log(`\n=== ${ok}/${total} pruebas OK ===`);

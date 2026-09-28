@@ -4,7 +4,7 @@
 import { esc, fmtFecha, fmtTag } from "../../nucleo/helpers.js";
 import { fmtAzimut, fmtCoordenadas, fmtDistancia, urlGoogleMaps } from "../../nucleo/geo.js";
 import { infoTipoUbicacion, ordenarUbicaciones } from "../../nucleo/mapa-logica.js";
-import { caminoARaiz, describirConexion, infoEstado, infoRol, tramosDeCamino } from "../../nucleo/mapa-jerarquia.js";
+import { caminoARaiz, describirConexion, infoEstado, infoMedio, infoRol, medioEnlace, tramosDeCamino } from "../../nucleo/mapa-jerarquia.js";
 import { atajosQueLoApagan } from "../../nucleo/mapa-nombres.js";
 import { colorTipo, iconoTipoTam, tintarClaro } from "../../nucleo/opciones-configurables.js";
 import { urlFoto } from "../../negocio/operaciones.js";
@@ -13,9 +13,17 @@ import { GLIFO_RADIO } from "./leaflet.js";
 const P = "inventario-tecnologico-";
 const MAX_CLIENTES_LISTA = 12;
 
-// Símbolos del camino a la raíz: onda = enlace inalámbrico, enchufe = cable.
+// Símbolos del camino a la raíz y del cableado: onda = enlace inalámbrico,
+// enchufe = cable, punta con luz = fibra, globo = entrada de internet.
 const ICONO_ONDA = `<svg viewBox="0 0 20 12" width="14" height="9" aria-hidden="true" focusable="false"><path d="M1 6c1.5-4 3-4 4.5 0s3 4 4.5 0 3-4 4.5 0 3 4 4.5 0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>`;
 const ICONO_CABLE = `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false"><path d="M5.5 1.5v3M10.5 1.5v3M3.5 4.5h9v3a4.5 4.5 0 0 1-9 0zM8 12v2.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICONO_FIBRA = `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false"><path d="M1.5 8h7.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="11" cy="8" r="2.3" fill="currentColor"/><path d="M11 2.4v1.4M11 12.2v1.4M14.6 8h-1.3M13.6 5.2l-.9.9M13.6 10.8l-.9-.9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`;
+const ICONO_GLOBO = `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M1.9 8h12.2M8 1.8c2.2 2.2 2.2 10.2 0 12.4M8 1.8c-2.2 2.2-2.2 10.2 0 12.4" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>`;
+const ICONO_CAJA = `<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><path d="M2.5 4.8 8 2.2l5.5 2.6v6.4L8 13.8l-5.5-2.6zM2.5 4.8 8 7.4l5.5-2.6M8 7.4v6.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+const ICONO_RAYO = `<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><path d="M9.2 1.5 3.6 9h4l-1 5.5L12.4 7h-4z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+const ICONO_MEDIO = { inalambrico: ICONO_ONDA, cable: ICONO_CABLE, fibra: ICONO_FIBRA };
+
+const tieneValor = v=>v !== null && v !== undefined;
 
 function btn(accion, texto, { id = null, clase = "", titulo = "", pressed = null } = {}){
   return `<button type="button" class="${P}btn ${P}btn-sm ${clase}" data-accion="${accion}"${id !== null ? ` data-id="${id}"` : ""}${titulo ? ` title="${esc(titulo)}"` : ""}${pressed !== null ? ` aria-pressed="${pressed}"` : ""}>${texto}</button>`;
@@ -69,6 +77,26 @@ function contarEnUbicacion(ctx, ubicacionId){
 }
 
 function plural(n, uno, varios){ return `${n} ${n === 1 ? uno : varios}`; }
+
+// Sección del panel como tarjeta: cabecera con su color (ícono, título,
+// cantidad y acción) y cuerpo. Cada sección de la ubicación tiene el suyo, así
+// se distinguen de un vistazo.
+function tarjeta({ tipo, icono, titulo, n = null, accion = "", cuerpo = "", ayuda = "" }){
+  return `<section class="${P}mapa-seccion ${P}mapa-tarjeta ${P}mapa-tarjeta-${tipo}" aria-label="${esc(titulo)}">
+    <div class="${P}mapa-tarjeta-cab">
+      <span class="${P}mapa-tarjeta-icono" aria-hidden="true">${icono}</span>
+      <span class="${P}mapa-tarjeta-titulo">${esc(titulo)}</span>
+      ${n !== null ? `<span class="${P}mapa-tarjeta-n" title="${esc(plural(n, "elemento", "elementos"))}">${n}</span>` : ""}
+      ${accion ? `<span class="${P}mapa-tarjeta-accion">${accion}</span>` : ""}
+    </div>
+    <div class="${P}mapa-tarjeta-cuerpo">${ayuda ? `<div class="${P}mapa-tarjeta-ayuda">${ayuda}</div>` : ""}${cuerpo}</div>
+  </section>`;
+}
+
+// Texto del medio con la distancia (si el otro extremo está en otra ubicación).
+function textoMedio(medio, distanciaKm){
+  return `${infoMedio(medio).badge}${tieneValor(distanciaKm) ? ` · ${esc(fmtDistancia(distanciaKm))}` : ""}`;
+}
 
 function nombreEquipo(ctx, id){
   const e = ctx.red.equipoPorId.get(id);
@@ -134,14 +162,12 @@ function htmlAtajos(ctx){
       ${ctx.esAdmin ? btn("editar-atajo", "Editar", { id: a.id, clase: `${P}btn-ghost`, titulo: `Editar el atajo «${a.nombre}»` }) : ""}
     </li>`;
   }).join("");
-  return `<section class="${P}mapa-atajos" aria-label="Atajos de simulación">
-    <div class="${P}mapa-seccion-cab">
-      <span class="${P}section-title">Atajos de simulación</span>
-      ${ctx.esAdmin && hayCaidas ? btn("guardar-atajo", "Guardar caídas como atajo", { titulo: "Guarda los equipos caídos ahora como un atajo con nombre" }) : ""}
-    </div>
-    ${filas ? `<ul class="${P}mapa-atajos-lista">${filas}</ul>`
-      : `<div class="${P}mapa-vacio">Sin atajos todavía.${ctx.esAdmin ? " Marca las caídas que quieras (casillas de cada torre) y usa «Guardar caídas como atajo»." : " Los crea el administrador."}</div>`}
-  </section>`;
+  return tarjeta({
+    tipo: "atajos", icono: ICONO_RAYO, titulo: "Atajos de simulación", n: ctx.atajos.length,
+    accion: ctx.esAdmin && hayCaidas ? btn("guardar-atajo", "Guardar caídas como atajo", { titulo: "Guarda los equipos caídos ahora como un atajo con nombre" }) : "",
+    cuerpo: filas ? `<ul class="${P}mapa-atajos-lista">${filas}</ul>`
+      : `<div class="${P}mapa-vacio">Sin atajos todavía.${ctx.esAdmin ? " Marca las caídas que quieras (casillas de cada torre) y usa «Guardar caídas como atajo»." : " Los crea el administrador."}</div>`,
+  });
 }
 
 function htmlResumenSimulacion(ctx){
@@ -154,7 +180,7 @@ function htmlResumenSimulacion(ctx){
     const st = ctx.sim.estado.get(id);
     return st && st.conectado
       ? ` · <span class="${P}mapa-sim-recuperado">↺ recuperado vía respaldo → ${esc(nombreEquipo(ctx, st.via))}</span>`
-      : ` · <span class="${P}mapa-muted">sin conectividad</span>`;
+      : ` · <span class="${P}mapa-muted">sin respaldo propio: queda cortado</span>`;
   };
   return `<section class="${P}mapa-sim-resumen" aria-label="Simulación de fallas">
     <div class="${P}mapa-sim-titulo">Simulación de fallas <span class="${P}mapa-muted">(solo en esta pantalla, no se guarda)</span></div>
@@ -200,66 +226,170 @@ export function htmlPanelUbicacion(ctx, u){
     </div>
     ${ctx.simActiva ? htmlResumenSimulacionCorto(ctx) : ""}
 
-    <section class="${P}mapa-seccion" aria-label="Equipos de red">
-      <div class="${P}mapa-seccion-cab">
-        <span class="${P}section-title">Equipos de red (${equipos.length})</span>
-        ${ctx.esAdmin ? btn("nuevo-equipo", "+ Equipo", { id: u.id }) : ""}
-      </div>
-      ${equipos.length && ctx.puedeSimular ? `<div class="${P}mapa-ayuda-caida">Marca la casilla de un equipo para simular su caída (solo en esta pantalla, no se guarda).</div>` : ""}
-      ${equipos.length
+    ${tarjeta({
+      tipo: "equipos", icono: GLIFO_RADIO, titulo: "Equipos de red", n: equipos.length,
+      accion: ctx.esAdmin ? btn("nuevo-equipo", "+ Equipo", { id: u.id }) : "",
+      ayuda: equipos.length && ctx.puedeSimular ? "Marca la casilla de un equipo para simular su caída (solo en esta pantalla, no se guarda)." : "",
+      cuerpo: equipos.length
         ? `<ul class="${P}mapa-lista">${equipos.map(e=>htmlEquipo(ctx, e, s.equipoId === e.id, u)).join("")}</ul>`
-        : `<div class="${P}mapa-vacio">Sin equipos de red.</div>`}
-    </section>
+        : `<div class="${P}mapa-vacio">Sin equipos de red.</div>`,
+    })}
 
     ${htmlCableado(ctx, u, equipos)}
 
-    <section class="${P}mapa-seccion" aria-label="Activos en esta ubicación">
-      <div class="${P}mapa-seccion-cab">
-        <span class="${P}section-title">Activos en esta ubicación (${activos.length})</span>
-        ${ctx.puedeAsignar && u.activa !== false ? btn("asignar-activos", "+ Asignar", { id: u.id, titulo: "Asignar o traer activos a esta ubicación" }) : ""}
-      </div>
-      ${activos.length
+    ${tarjeta({
+      tipo: "activos", icono: ICONO_CAJA, titulo: "Activos en esta ubicación", n: activos.length,
+      accion: ctx.puedeAsignar && u.activa !== false ? btn("asignar-activos", "+ Asignar", { id: u.id, titulo: "Asignar o traer activos a esta ubicación" }) : "",
+      cuerpo: activos.length
         ? `<ul class="${P}mapa-lista">${activos.map(a=>htmlActivo(ctx, a, u)).join("")}</ul>`
-        : `<div class="${P}mapa-vacio">Ningún activo registrado aquí.</div>`}
-    </section>`;
+        : `<div class="${P}mapa-vacio">Ningún activo registrado aquí.</div>`,
+    })}`;
 }
 
-// Diagrama del cableado dentro de la ubicación: un árbol por cada equipo que
-// recibe la conexión de afuera (o es raíz), con sus equipos por cable debajo
-// (switches, cámaras…). Solo aparece si en la ubicación hay alguna conexión
-// por cable.
+// Cableado dentro de la ubicación, dibujado como el camino a la raíz. Cada
+// equipo que recibe la conexión desde afuera (o es raíz) encabeza un árbol:
+//   * arriba, su ENTRADA: el símbolo del medio sobre la línea (onda, cable o
+//     fibra) y al lado el badge («inalámbrico · 8,58 km») y de dónde viene;
+//   * debajo, lo que cuelga de él dentro de la ubicación, cada rama con su
+//     conector (símbolo + badge), igual que los tramos del camino;
+//   * un respaldo dentro de la ubicación (p. ej. el router que también está
+//     cableado al segundo enlace) es una rama punteada: «respaldo · prioridad 1»;
+//   * cada equipo dice qué SALE de él hacia otras ubicaciones (por radio,
+//     cable o fibra).
+// Con la simulación, las ramas que no llevan servicio se marcan (cortado,
+// sin servicio, sin uso) y el respaldo en uso se pinta en verde.
+// Solo aparece si en la ubicación hay alguna conexión interna.
 function htmlCableado(ctx, u, equipos){
+  const red = ctx.red;
+  const sim = ctx.sim;
   const aqui = new Set(equipos.map(e=>e.id));
+  const servidorAqui = e=>tieneValor(e.servidor_id) && aqui.has(e.servidor_id);
   const hijos = new Map();
+  for(const e of equipos) if(servidorAqui(e)){ if(!hijos.has(e.servidor_id)) hijos.set(e.servidor_id, []); hijos.get(e.servidor_id).push(e); }
+  const respaldosAqui = new Map(); // servidor alternativo (aquí) → [{ equipo, respaldo }]
   for(const e of equipos){
-    if(e.servidor_id !== null && e.servidor_id !== undefined && aqui.has(e.servidor_id)){
-      if(!hijos.has(e.servidor_id)) hijos.set(e.servidor_id, []);
-      hijos.get(e.servidor_id).push(e);
+    for(const r of red.respaldosPorEquipo.get(e.id) || []){
+      if(!aqui.has(r.servidor_alternativo_id)) continue;
+      if(!respaldosAqui.has(r.servidor_alternativo_id)) respaldosAqui.set(r.servidor_alternativo_id, []);
+      respaldosAqui.get(r.servidor_alternativo_id).push({ equipo: e, respaldo: r });
     }
   }
-  if(!hijos.size) return "";
-  const raices = equipos.filter(e=>!(e.servidor_id !== null && e.servidor_id !== undefined && aqui.has(e.servidor_id)));
-  const nodo = (e, profundidad)=>{
-    const st = ctx.sim ? ctx.sim.estado.get(e.id) : null;
-    const s = e.servidor_id !== null && e.servidor_id !== undefined ? ctx.red.equipoPorId.get(e.servidor_id) : null;
-    const us = s ? ctx.red.ubicacionPorId.get(s.ubicacion_id) : null;
-    const subida = profundidad === 0
-      ? (s ? `<span class="${P}mapa-cableado-subida">${ICONO_ONDA} de ${esc(us ? us.nombre : "otra ubicación")}</span>` : `<span class="${P}mapa-cableado-subida">raíz</span>`)
-      : "";
-    const lista = (hijos.get(e.id) || []).map(h=>nodo(h, profundidad + 1)).join("");
-    return `<li class="${P}mapa-cableado-nodo${st && st.estado !== "servicio" ? ` ${P}mapa-cableado-${st.estado}` : ""}">
-      <div class="${P}mapa-cableado-fila">
-        ${profundidad > 0 ? `<span class="${P}mapa-cableado-simbolo" aria-label="por cable">${ICONO_CABLE}</span>` : ""}
-        <button type="button" class="${P}mapa-enlace-texto" data-accion="seleccionar-equipo-mapa" data-id="${e.id}" title="${esc(e.nombre)}">${esc(nombreEnUbicacion(ctx, e, u))}</button>
-        ${chipRed(ctx, e)}${st && st.estado !== "servicio" ? pillEstado(st.estado) : ""}${subida}
+  if(!hijos.size && !respaldosAqui.size) return "";
+  const estadoDe = id=>sim ? sim.estado.get(id) : null;
+  const conectado = id=>{ const st = estadoDe(id); return !sim || !!(st && st.conectado); };
+
+  // Lo que sale de un equipo hacia otras ubicaciones.
+  const salidas = e=>{
+    const porMedio = new Map();
+    for(const c of red.clientes.get(e.id) || []){
+      if(c.ubicacion_id === e.ubicacion_id) continue;
+      const m = medioEnlace(red, c.id, e.id);
+      if(!porMedio.has(m)) porMedio.set(m, []);
+      porMedio.get(m).push(c);
+    }
+    return [...porMedio].map(([m, lista])=>{
+      const destino = lista.length === 1
+        ? `→ <button type="button" class="${P}mapa-enlace-texto" data-accion="seleccionar-equipo-mapa" data-id="${lista[0].id}" title="${esc(lista[0].nombre)}">${esc(nombreUbicacionDe(ctx, lista[0].id))}</button>`
+        : `${lista.length} ${m === "inalambrico" ? "clientes por radio" : `por ${infoMedio(m).badge}`}`;
+      return `<span class="${P}mapa-cab-salida ${P}mapa-cab-medio-${m}" title="Sale ${m === "inalambrico" ? "por radio" : `por ${infoMedio(m).badge}`} hacia otra ubicación"><span class="${P}mapa-cab-salida-icono" aria-hidden="true">${ICONO_MEDIO[m]}</span>${destino}</span>`;
+    }).join("");
+  };
+
+  const fila = (e, extraClase = "")=>{
+    const st = estadoDe(e.id);
+    const sal = salidas(e);
+    return `<div class="${P}mapa-cab-nodo${st && st.estado !== "servicio" ? ` ${P}mapa-cab-nodo-${st.estado}` : ""}${extraClase}">
+      <span class="${P}mapa-cab-punto" aria-hidden="true"></span>
+      <div class="${P}mapa-cab-texto">
+        <button type="button" class="${P}mapa-enlace-texto ${P}mapa-cab-nombre" data-accion="seleccionar-equipo-mapa" data-id="${e.id}" title="${esc(e.nombre)}">${esc(nombreEnUbicacion(ctx, e, u))}</button>
+        <span class="${P}mapa-cab-meta">${pillRolOTipo(ctx, e)}${st && st.estado !== "servicio" ? pillEstado(st.estado) : ""}${chipRed(ctx, e)}</span>
+        ${sal ? `<span class="${P}mapa-cab-salidas">${sal}</span>` : ""}
       </div>
-      ${lista ? `<ul class="${P}mapa-cableado-hijos">${lista}</ul>` : ""}
+    </div>`;
+  };
+
+  // Conector de una rama (enlace interno principal): servidor p → cliente c.
+  const conector = (p, c)=>{
+    const m = medioEnlace(red, c.id, p.id);
+    const st = estadoDe(c.id);
+    let marca = "", clase = "";
+    if(sim){
+      const funciona = !!(st && st.conectado && st.via === p.id);
+      if(st && st.caido){ marca = "cortado"; clase = "roto"; }
+      else if(!funciona && st && st.conectado){ marca = "sin uso"; clase = "sin-uso"; }
+      else if(!funciona) clase = "roto"; // el cable está bien: lo que falta es el servicio de más arriba
+    }
+    return `<div class="${P}mapa-cab-conector ${P}mapa-cab-medio-${m}${clase ? ` ${P}mapa-cab-${clase}` : ""}">
+      <span class="${P}mapa-cab-simbolo" aria-hidden="true">${ICONO_MEDIO[m]}</span>
+      <span class="${P}mapa-camino-medio">${textoMedio(m, null)}</span>${marca ? `<span class="${P}mapa-camino-marca ${P}mapa-cab-marca-${clase}">${marca}</span>` : ""}
+    </div>`;
+  };
+
+  // Rama de respaldo: el equipo e puede conmutar al servidor alternativo p (aquí).
+  const ramaRespaldo = ({ equipo: e, respaldo: r })=>{
+    const st = estadoDe(e.id);
+    const enUso = !!(st && st.conectado && st.respaldo && st.respaldo.id === r.id);
+    const m = medioEnlace(red, e.id, r.servidor_alternativo_id);
+    return `<li class="${P}mapa-cab-rama ${P}mapa-cab-rama-respaldo${enUso ? ` ${P}mapa-cab-en-uso` : ""}">
+      <div class="${P}mapa-cab-conector ${P}mapa-cab-medio-${m}">
+        <span class="${P}mapa-cab-simbolo" aria-hidden="true">${ICONO_MEDIO[m]}</span>
+        <span class="${P}mapa-camino-medio">${textoMedio(m, null)} · respaldo</span><span class="${P}mapa-camino-marca ${enUso ? `${P}mapa-camino-respaldo` : ""}" title="Prioridad ${r.prioridad} (1 = primera opción)">${enUso ? "en uso" : `prioridad ${r.prioridad}`}</span>
+      </div>
+      <div class="${P}mapa-cab-nodo ${P}mapa-cab-nodo-ref">
+        <span class="${P}mapa-cab-punto" aria-hidden="true"></span>
+        <div class="${P}mapa-cab-texto"><span class="${P}mapa-muted">↺ respaldo de</span> <button type="button" class="${P}mapa-enlace-texto" data-accion="seleccionar-equipo-mapa" data-id="${e.id}" title="${esc(e.nombre)}">${esc(nombreEnUbicacion(ctx, e, u))}</button></div>
+      </div>
     </li>`;
   };
-  return `<section class="${P}mapa-seccion ${P}mapa-cableado" aria-label="Cableado en esta ubicación">
-    <div class="${P}mapa-seccion-cab"><span class="${P}section-title">Cableado en esta ubicación</span></div>
-    <ul class="${P}mapa-cableado-arbol">${raices.map(e=>nodo(e, 0)).join("")}</ul>
-  </section>`;
+
+  const vistos = new Set();
+  const ramas = e=>{
+    const lista = [
+      ...(hijos.get(e.id) || []).filter(c=>!vistos.has(c.id)).map(c=>{
+        vistos.add(c.id);
+        const sub = ramas(c);
+        return `<li class="${P}mapa-cab-rama${conectado(c.id) ? "" : ` ${P}mapa-cab-rama-sin`}">${conector(e, c)}${fila(c, sub ? ` ${P}mapa-cab-con-hijos` : "")}${sub}</li>`;
+      }),
+      ...(respaldosAqui.get(e.id) || []).map(ramaRespaldo),
+    ];
+    return lista.length ? `<ul class="${P}mapa-cab-hijos">${lista.join("")}</ul>` : "";
+  };
+
+  // Entrada de un árbol: de dónde recibe la conexión el equipo de arriba.
+  const entrada = e=>{
+    const s = tieneValor(e.servidor_id) ? red.equipoPorId.get(e.servidor_id) : null;
+    if(!s) return `<div class="${P}mapa-cab-entrada ${P}mapa-cab-entrada-raiz">
+        <span class="${P}mapa-cab-simbolo" aria-hidden="true">${ICONO_GLOBO}</span>
+        <span class="${P}mapa-camino-medio">raíz · entrada de internet</span>
+      </div>`;
+    const d = describirConexion(red, e.id, s.id);
+    const st = estadoDe(e.id);
+    let marca = "", clase = "";
+    if(sim){
+      const funciona = !!(st && st.conectado && st.via === s.id);
+      if(st && st.caido){ marca = st.conectado ? "cortado · recuperado vía respaldo" : "cortado"; clase = st.conectado ? "respaldo" : "roto"; }
+      else if(!funciona && st && st.conectado){ marca = `vía respaldo → ${esc(nombreEquipo(ctx, st.via))}`; clase = "respaldo"; }
+      else if(!funciona){ marca = "sin servicio"; clase = "roto"; }
+    }
+    return `<div class="${P}mapa-cab-entrada ${P}mapa-cab-medio-${d.medio}${clase ? ` ${P}mapa-cab-${clase}` : ""}">
+      <span class="${P}mapa-cab-simbolo" aria-hidden="true">${ICONO_MEDIO[d.medio]}</span>
+      <span class="${P}mapa-camino-medio">${textoMedio(d.medio, d.distanciaKm)}</span>${marca ? `<span class="${P}mapa-camino-marca ${P}mapa-cab-marca-${clase}">${marca}</span>` : ""}
+      <button type="button" class="${P}mapa-enlace-texto ${P}mapa-cab-origen" data-accion="seleccionar-equipo-mapa" data-id="${s.id}" title="${esc(s.nombre)}"><span class="${P}mapa-muted">desde</span> ${esc(d.mismaUbicacion ? s.nombre : nombreEnUbicacion(ctx, s, d.ubicacionServidor))}${d.mismaUbicacion ? "" : `<span class="${P}mapa-muted"> · ${esc(d.ubicacionServidor ? d.ubicacionServidor.nombre : "otra ubicación")}</span>`}</button>
+    </div>`;
+  };
+
+  const raices = equipos.filter(e=>!servidorAqui(e));
+  const arboles = raices.map(e=>{
+    vistos.add(e.id);
+    const sub = ramas(e);
+    return `<li class="${P}mapa-cab-arbol${conectado(e.id) ? "" : ` ${P}mapa-cab-arbol-sin`}">${entrada(e)}${fila(e, sub ? ` ${P}mapa-cab-con-hijos` : "")}${sub}</li>`;
+  });
+  const internos = equipos.filter(servidorAqui).length;
+  return tarjeta({
+    tipo: "cableado", icono: ICONO_CABLE, titulo: "Cableado en esta ubicación", n: internos,
+    ayuda: "Arriba, por dónde entra la conexión; debajo, lo que cuelga por cable dentro de la ubicación.",
+    cuerpo: `<ol class="${P}mapa-cab">${arboles.join("")}</ol>`,
+  });
 }
 
 function htmlResumenSimulacionCorto(ctx){
@@ -313,21 +443,23 @@ function htmlEquipo(ctx, e, seleccionado, u = null){
 // medio (onda o cable) y, junto a ella, el badge «inalámbrico» / «cable»
 // (más «vía respaldo» o «cortado» en la simulación y la distancia si es radio).
 function htmlConectorCamino(ctx, t){
-  const medio = t.cable ? "cable" : "inalambrico";
-  const d = t.cable ? null : describirConexion(ctx.red, t.cliente, t.servidor);
+  const medio = t.medio || (t.cable ? "cable" : "inalambrico");
+  const d = describirConexion(ctx.red, t.cliente, t.servidor);
   const roto = !!(ctx.sim && !t.funciona);
   const badges = [
-    `<span class="${P}mapa-camino-medio">${t.cable ? "cable" : "inalámbrico"}${d && d.distanciaKm !== null && d.distanciaKm !== undefined ? ` · ${esc(fmtDistancia(d.distanciaKm))}` : ""}</span>`,
+    `<span class="${P}mapa-camino-medio">${textoMedio(medio, d && !d.mismaUbicacion ? d.distanciaKm : null)}</span>`,
     t.respaldo ? `<span class="${P}mapa-camino-marca ${P}mapa-camino-respaldo">vía respaldo</span>` : "",
     roto ? `<span class="${P}mapa-camino-marca ${P}mapa-camino-cortado">cortado</span>` : "",
   ].join("");
   return `<div class="${P}mapa-camino-conector ${P}mapa-camino-${medio}${t.respaldo ? ` ${P}mapa-camino-conector-respaldo` : ""}${roto ? ` ${P}mapa-camino-conector-roto` : ""}">
-    <span class="${P}mapa-camino-simbolo" aria-hidden="true">${t.cable ? ICONO_CABLE : ICONO_ONDA}</span>${badges}
+    <span class="${P}mapa-camino-simbolo" aria-hidden="true">${ICONO_MEDIO[medio]}</span>${badges}
   </div>`;
 }
 
 function htmlDatosConexion(d){
-  if(d.cable) return `<div class="${P}mapa-muted">Por cable (misma ubicación).</div>`;
+  const porQue = d.medio === "fibra" ? "Por fibra óptica" : "Por cable";
+  if(d.cable && d.mismaUbicacion) return `<div class="${P}mapa-muted">${porQue} (misma ubicación).</div>`;
+  if(d.cable) return `<div class="${P}mapa-muted">${porQue} · ${esc(fmtDistancia(d.distanciaKm))} hasta su servidor.</div>`;
   return `<dl class="${P}mapa-enlace-datos">
       <div><dt>Distancia</dt><dd>${fmtDistancia(d.distanciaKm)}</dd></div>
       <div><dt>Azimut desde aquí</dt><dd>${fmtAzimut(d.azimutIda)}</dd></div>
@@ -388,8 +520,8 @@ function htmlEquipoDetalle(ctx, e, activo){
 
   const listaClientes = clientes.slice(0, MAX_CLIENTES_LISTA).map(c=>{
     const cst = ctx.sim ? ctx.sim.estado.get(c.id) : null;
-    const cable = c.ubicacion_id === e.ubicacion_id;
-    return `<li><button type="button" class="${P}mapa-enlace-texto" data-accion="seleccionar-equipo-mapa" data-id="${c.id}">${esc(c.nombre)}</button> <span class="${P}mapa-muted">${esc(nombreUbicacionDe(ctx, c.id))}${cable ? " · cable" : ""}</span>${cst && cst.estado !== "servicio" ? ` ${pillEstado(cst.estado)}` : ""}</li>`;
+    const m = medioEnlace(red, c.id, e.id);
+    return `<li><button type="button" class="${P}mapa-enlace-texto" data-accion="seleccionar-equipo-mapa" data-id="${c.id}">${esc(c.nombre)}</button> <span class="${P}mapa-muted">${esc(nombreUbicacionDe(ctx, c.id))}${m !== "inalambrico" ? ` · ${infoMedio(m).badge}` : ""}</span>${cst && cst.estado !== "servicio" ? ` ${pillEstado(cst.estado)}` : ""}</li>`;
   }).join("") + (clientes.length > MAX_CLIENTES_LISTA ? `<li class="${P}mapa-muted">y ${clientes.length - MAX_CLIENTES_LISTA} más</li>` : "");
   const clasePropia = remotos.length === 1 ? "backbone (punto a punto)" : (remotos.length > 1 ? "distribución P2MP" : "");
   const clientesHtml = `<div class="${P}mapa-bloque">
@@ -407,7 +539,7 @@ function htmlEquipoDetalle(ctx, e, activo){
     return `<li class="${P}mapa-respaldo${enUso ? ` ${P}mapa-respaldo-en-uso` : ""}" data-respaldo-id="${r.id}">
       <span class="${P}mapa-respaldo-prioridad" title="Prioridad ${r.prioridad} (1 = primera opción)">${r.prioridad}</span>
       <span class="${P}mapa-respaldo-texto"><button type="button" class="${P}mapa-enlace-texto" data-accion="seleccionar-equipo-mapa" data-id="${r.servidor_alternativo_id}">${esc(d ? d.servidor.nombre : nombreEquipo(ctx, r.servidor_alternativo_id))}</button>
-        <span class="${P}mapa-muted">en ${esc(d && d.ubicacionServidor ? d.ubicacionServidor.nombre : "—")} · ${d && d.cable ? "cable" : fmtDistancia(d ? d.distanciaKm : null)}</span>
+        <span class="${P}mapa-muted">en ${esc(d && d.ubicacionServidor ? d.ubicacionServidor.nombre : "—")} · ${d && d.mismaUbicacion ? infoMedio(d.medio).badge : textoMedio(d ? d.medio : "inalambrico", d ? d.distanciaKm : null)}</span>
         ${enUso ? `<span class="${P}mapa-estado ${P}mapa-estado-respaldo">en uso</span>` : ""}
         ${r.notas ? `<span class="${P}mapa-respaldo-notas">${esc(r.notas)}</span>` : ""}</span>
       ${ctx.esAdmin ? `<span class="${P}mapa-respaldo-acciones">${btn("editar-respaldo", "Editar", { id: r.id })}${btn("eliminar-respaldo", "Quitar", { id: r.id, titulo: "Quitar este respaldo" })}</span>` : ""}

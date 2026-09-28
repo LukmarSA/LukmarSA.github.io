@@ -3,15 +3,16 @@
 // (abrirModal/cerrarModal) y, al guardar, avisan con mostrarToast y devuelven
 // el control con alGuardar.
 import { cargarActivos } from "../../nucleo/datos.js";
-import { cargarAtajos, cargarEquiposRadioenlace, cargarRedes, cargarRespaldos, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, estadoMapa, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
-import { GENEROS, nombreParaGuardar } from "../../nucleo/mapa-nombres.js";
+import { cargarAtajos, cargarEquiposRadioenlace, cargarPiscinas, cargarRedes, cargarRespaldos, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, estadoMapa, hayMedio, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
+import { GENEROS, nombreParaGuardar, nombresAutomaticos } from "../../nucleo/mapa-nombres.js";
 import { azimutGrados, distanciaKm, fmtAzimut, fmtCoordenadas, fmtDistancia, parsearCoordenadas } from "../../nucleo/geo.js";
 import { esc, fmtFecha, fmtTag } from "../../nucleo/helpers.js";
 import { coincideActivo, hoyLocalISO, infoTipoUbicacion, ordenarUbicaciones, validarFechaMovimiento } from "../../nucleo/mapa-logica.js";
-import { candidatosRespaldo, candidatosServidor, describirConexion, siguientePrioridad } from "../../nucleo/mapa-jerarquia.js";
+import { MEDIOS, candidatosRespaldo, candidatosServidor, describirConexion, esMedio, siguientePrioridad } from "../../nucleo/mapa-jerarquia.js";
 import { opcionesVigentes } from "../../nucleo/opciones-configurables.js";
 import { esAdmin } from "../../nucleo/permisos.js";
-import { ErrorValidacion, asignarActivosAUbicacion, crearAtajo, crearEquipo, crearRed, crearRespaldo, crearTipoEquipo, crearTipoUbicacion, crearUbicacion, editarAtajo, editarEquipo, editarRed, editarRespaldo, editarTipoEquipo, editarUbicacion, eliminarAtajo, eliminarRed } from "../../negocio/operaciones-mapa.js";
+import { cuadradoAlrededor, sectorDeNombre } from "../../nucleo/piscinas.js";
+import { ErrorValidacion, asignarActivosAUbicacion, asignarEnLote, crearAtajo, crearPiscina, editarPiscina, eliminarPiscina, crearEquipo, crearRed, crearRespaldo, crearTipoEquipo, crearTipoUbicacion, crearUbicacion, editarAtajo, editarEquipo, editarRed, editarRespaldo, editarTipoEquipo, editarUbicacion, eliminarAtajo, eliminarRed } from "../../negocio/operaciones-mapa.js";
 import { urlFoto } from "../../negocio/operaciones.js";
 import { abrirModal, cerrarModal, mostrarToast } from "../render-raiz.js";
 
@@ -71,10 +72,19 @@ function opcionesEquiposPorUbicacion(equipos, seleccionado, ubicacionLocal){
   }).join("");
 }
 
+// d = { servidor, ubicacionServidor, medio, mismaUbicacion, distanciaKm, azimutIda, azimutVuelta }
+// (sin medio: cable si es la misma ubicación, radio si es otra).
 function textoConexion(d){
   if(!d) return "";
-  if(d.cable) return `Por cable: «${d.servidor.nombre}» está en la misma ubicación (no se dibuja línea).`;
-  return `Radioenlace con «${d.servidor.nombre}» en «${d.ubicacionServidor ? d.ubicacionServidor.nombre : "—"}»: ${fmtDistancia(d.distanciaKm)} · azimut desde aquí ${fmtAzimut(d.azimutIda)} · desde allá ${fmtAzimut(d.azimutVuelta)}`;
+  const misma = d.mismaUbicacion ?? d.cable;
+  const medio = d.medio || (misma ? "cable" : "inalambrico");
+  const donde = `«${d.ubicacionServidor ? d.ubicacionServidor.nombre : "—"}»`;
+  if(misma){
+    if(medio === "inalambrico") return `Inalámbrico con «${d.servidor.nombre}», en la misma ubicación (no se dibuja línea).`;
+    return `Por ${medio === "fibra" ? "fibra óptica" : "cable"}: «${d.servidor.nombre}» está en la misma ubicación (no se dibuja línea).`;
+  }
+  if(medio !== "inalambrico") return `Por ${medio === "fibra" ? "fibra óptica" : "cable"} hasta «${d.servidor.nombre}» en ${donde}: ${fmtDistancia(d.distanciaKm)}. En el mapa se dibuja como línea de ${medio === "fibra" ? "fibra" : "cable"}.`;
+  return `Radioenlace con «${d.servidor.nombre}» en ${donde}: ${fmtDistancia(d.distanciaKm)} · azimut desde aquí ${fmtAzimut(d.azimutIda)} · desde allá ${fmtAzimut(d.azimutVuelta)}`;
 }
 
 // ===========================================================================
@@ -329,6 +339,17 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
           </select>
           ${redes.length ? "" : `<div class="${P}hint">Todavía no hay redes: se crean en «Redes y tipos», en la barra del mapa.</div>`}
         </div>` : "";
+  // 008: medio del enlace con el servidor (vacío = automático).
+  const conMedio = hayMedio();
+  const campoMedio = conMedio ? `
+        <div class="${P}field" id="${P}equipo-medio-campo">
+          <label for="${P}equipo-medio">Medio de la conexión</label>
+          <select id="${P}equipo-medio">
+            <option value="">Automático</option>
+            ${MEDIOS.map(m=>`<option value="${m.id}" ${actual && actual.medio === m.id ? "selected" : ""}>${esc(m.etiqueta)}</option>`).join("")}
+          </select>
+          <div class="${P}hint" id="${P}equipo-medio-ayuda"></div>
+        </div>` : "";
   const vistaNombre = conRed ? `
         <div class="${P}field ${P}span-2">
           <span class="${P}field-titulo">Nombre <span class="${P}mapa-muted">(automático)</span></span>
@@ -354,8 +375,9 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
           <div class="${P}hint" id="${P}equipo-servidor-calculo"></div>
           <div class="${P}field-error" data-error="servidor_id"></div>
         </div>
+        ${campoMedio}
         ${campoRed}
-        <div class="${P}field${conRed ? "" : ` ${P}span-2`}">
+        <div class="${P}field${conRed && !conMedio ? "" : ` ${P}span-2`}">
           <label for="${P}equipo-modelo">Modelo <span class="${P}mapa-muted">(opcional)</span></label>
           <input type="text" id="${P}equipo-modelo" maxlength="120" value="${esc(actual && actual.modelo || "")}" placeholder="Ej.: Cambium PTP 550">
         </div>
@@ -411,14 +433,22 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
       selServ.innerHTML = `<option value="" ${servidorElegido === null ? "selected" : ""}>— Ninguno: es una raíz (entrada de internet) —</option>`
         + opcionesEquiposPorUbicacion(posiblesServidores, servidorElegido, Number(selUbic.value));
     };
+    const selMedio = $(`#${P}equipo-medio`);
+    const campoMedioEl = $(`#${P}equipo-medio-campo`);
+    const ayudaMedio = $(`#${P}equipo-medio-ayuda`);
     const pintarCalculoServ = ()=>{
       const sid = selServ.value ? Number(selServ.value) : null;
+      if(campoMedioEl) campoMedioEl.hidden = sid === null;
       if(sid === null){ calculoServ.textContent = clientesActuales ? `Queda como raíz. Sus ${clientesActuales} cliente(s) siguen colgando de él.` : "Queda como raíz: punto de entrada de internet."; return; }
       const s2 = indices.equipoPorId.get(sid);
       const uA = indices.ubicacionPorId.get(Number(selUbic.value));
       const uS = s2 ? indices.ubicacionPorId.get(s2.ubicacion_id) : null;
       if(!s2 || !uA || !uS){ calculoServ.textContent = ""; return; }
-      calculoServ.textContent = textoConexion({ servidor: s2, ubicacionServidor: uS, cable: uA.id === uS.id, distanciaKm: distanciaKm(uA, uS), azimutIda: azimutGrados(uA, uS), azimutVuelta: azimutGrados(uS, uA) });
+      const misma = uA.id === uS.id;
+      const auto = misma ? "cable" : "inalambrico";
+      const medio = selMedio && esMedio(selMedio.value) ? selMedio.value : auto;
+      if(ayudaMedio) ayudaMedio.textContent = selMedio && selMedio.value ? "" : `Automático: ${misma ? "cable (misma ubicación)" : "inalámbrico (otra ubicación)"}.`;
+      calculoServ.textContent = textoConexion({ servidor: s2, ubicacionServidor: uS, medio, mismaUbicacion: misma, distanciaKm: distanciaKm(uA, uS), azimutIda: azimutGrados(uA, uS), azimutVuelta: azimutGrados(uS, uA) });
     };
     pintarServidores();
     pintarCalculoServ();
@@ -428,7 +458,7 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
     const selTipo = $(`#${P}equipo-tipo`);
     const inputRef = $(`#${P}equipo-referencia`);
     const salidaNombre = $(`#${P}equipo-nombre-auto`);
-    const filaNombre = ()=>({ ubicacion_id: Number(selUbic.value), tipo_equipo: selTipo ? selTipo.value || null : null, referencia: inputRef ? inputRef.value : null, servidor_id: selServ.value ? Number(selServ.value) : null });
+    const filaNombre = ()=>({ ubicacion_id: Number(selUbic.value), tipo_equipo: selTipo ? selTipo.value || null : null, referencia: inputRef ? inputRef.value : null, servidor_id: selServ.value ? Number(selServ.value) : null, medio: selMedio ? selMedio.value || null : null });
     const nombreAuto = ()=>nombreParaGuardar(filaNombre(), { equipos: cargarEquiposRadioenlace(), ubicaciones: cargarUbicaciones(), tipos: cargarTiposEquipo() }, id);
     function pintarNombre(){
       if(!salidaNombre) return;
@@ -441,6 +471,7 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
     }
     if(selTipo) selTipo.addEventListener("change", pintarNombre);
     if(inputRef) inputRef.addEventListener("input", pintarNombre);
+    if(selMedio) selMedio.addEventListener("change", ()=>{ pintarCalculoServ(); pintarNombre(); });
     pintarNombre();
 
     pintarCandidatos();
@@ -473,6 +504,7 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
         campos.red_id = $(`#${P}equipo-red`).value ? Number($(`#${P}equipo-red`).value) : null;
         if(!campos.tipo_equipo){ mostrarErrores(raiz, { tipo_equipo: "Elige el tipo de equipo: con él se arma el nombre." }, ""); selTipo.focus(); return; }
       }
+      if(conMedio) campos.medio = campos.servidor_id === null ? null : (selMedio.value || null);
       // Si el servidor elegido era uno de sus respaldos, la base lo quita de los respaldos.
       const promovido = id && campos.servidor_id !== null && campos.servidor_id !== servidorActual
         && cargarRespaldos().some(r=>r.equipo_id === id && r.servidor_alternativo_id === campos.servidor_id);
@@ -917,16 +949,28 @@ export function abrirRedesYTipos({ alCambiar } = {}){
         </div>
       </section>
     </div>
-    <div class="${P}modal-footer"><button type="button" class="${P}btn ${P}modal-close">Cerrar</button></div>
+    <div class="${P}modal-footer">
+      ${equipos.length ? `<button type="button" class="${P}btn" data-cat="lote" title="Elegir el tipo y la red de varios equipos a la vez">Asignar a varios equipos…</button>` : ""}
+      <span class="${P}fb-spacer"></span>
+      <button type="button" class="${P}btn ${P}modal-close">Cerrar</button>
+    </div>
   </div>`;
   abrirModal(html, ()=>{
     const raiz = raizModal();
+    // Enter en un campo de texto = su botón (agregar o guardar esa fila).
+    raiz.addEventListener("keydown", e=>{
+      if(e.key !== "Enter" || e.target.tagName !== "INPUT" || e.target.type !== "text") return;
+      const fila = e.target.closest(`.${P}catalogo-fila`);
+      const boton = fila && fila.querySelector('[data-cat="crear-red"], [data-cat="crear-tipo"], [data-cat="guardar-red"], [data-cat="guardar-tipo"]');
+      if(boton){ e.preventDefault(); boton.click(); }
+    });
     const valor = (fila, campo)=>{ const el = fila.querySelector(`[data-campo="${campo}"]`); return el.type === "checkbox" ? el.checked : el.value; };
     const hecho = mensaje=>{ mostrarToast(mensaje, "success"); if(alCambiar) alCambiar(); abrirRedesYTipos({ alCambiar }); };
     raiz.addEventListener("click", async e=>{
       const b = e.target.closest("[data-cat]");
       if(!b) return;
       const fila = b.closest(`.${P}catalogo-fila`);
+      if(b.dataset.cat === "lote") return abrirAsignacionEnLote({ alGuardar: alCambiar });
       try{
         switch(b.dataset.cat){
           case "crear-red": {
@@ -954,6 +998,249 @@ export function abrirRedesYTipos({ alCambiar } = {}){
         mostrarToast(err instanceof ErrorValidacion ? Object.values(err.errores)[0] : (err.message || String(err)), "error");
       }
     });
+  });
+}
+
+// ===========================================================================
+// Tipo y red en lote (007): elegir varios equipos (con filtros) y ponerles el
+// mismo tipo y/o la misma red. Muestra cómo quedan los nombres automáticos
+// antes de aplicar.
+// ===========================================================================
+const NO_CAMBIAR = "__igual";
+export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
+  const equipos = cargarEquiposRadioenlace();
+  const ubicaciones = cargarUbicaciones();
+  const tiposUbic = cargarTiposUbicacion();
+  const tipos = cargarTiposEquipo();
+  const redes = cargarRedes();
+  const ubicPorId = new Map(ubicaciones.map(u=>[u.id, u]));
+  const tipoPorValor = new Map(tipos.map(t=>[t.valor, t]));
+  const redPorId = new Map(redes.map(r=>[r.id, r]));
+  const elegidos = new Set(seleccion.filter(id=>equipos.some(e=>e.id === id)));
+  const conEquipos = ordenarUbicaciones(ubicaciones.filter(u=>equipos.some(e=>e.ubicacion_id === u.id)), tiposUbic);
+  const html = `<div class="${P}modal ${P}modal-wide">
+    ${cabecera("Tipo y red en lote")}
+    <div class="${P}modal-body">
+      <div class="${P}alert ${P}alert-error" data-alerta hidden></div>
+      <div class="${P}hint">Marca los equipos y elige qué ponerles. Lo que dejes en «No cambiar» queda como está.</div>
+      <div class="${P}lote-filtros">
+        <input type="search" id="${P}lote-buscar" placeholder="Filtrar por nombre, modelo o ubicación…" autocomplete="off" aria-label="Filtrar equipos">
+        <select id="${P}lote-ubicacion" aria-label="Ubicación"><option value="">Todas las ubicaciones</option>${conEquipos.map(u=>`<option value="${u.id}">${esc(u.nombre)}</option>`).join("")}</select>
+        <label class="${P}mapa-check"><input type="checkbox" id="${P}lote-sin-tipo"> Solo sin tipo</label>
+        <label class="${P}mapa-check"><input type="checkbox" id="${P}lote-sin-red"> Solo sin red</label>
+      </div>
+      <div class="${P}lote-tabla">
+        <table>
+          <thead><tr>
+            <th class="${P}lote-col-check"><input type="checkbox" id="${P}lote-todos" aria-label="Marcar todos los que se ven"></th>
+            <th>Equipo</th><th>Ubicación</th><th>Tipo</th><th>Red</th>
+          </tr></thead>
+          <tbody id="${P}lote-filas"></tbody>
+        </table>
+      </div>
+      <div class="${P}form-grid ${P}lote-cambios">
+        <div class="${P}field">
+          <label for="${P}lote-tipo">Tipo</label>
+          <select id="${P}lote-tipo"><option value="${NO_CAMBIAR}">— No cambiar —</option>${tipos.filter(t=>t.activo !== false).map(t=>`<option value="${esc(t.valor)}">${esc(t.etiqueta)}</option>`).join("")}</select>
+        </div>
+        <div class="${P}field">
+          <label for="${P}lote-red">Red</label>
+          <select id="${P}lote-red"><option value="${NO_CAMBIAR}">— No cambiar —</option><option value="">— Quitar la red —</option>${redes.filter(r=>r.activa !== false).map(r=>`<option value="${r.id}">${esc(r.nombre)}</option>`).join("")}</select>
+          ${redes.length ? "" : `<div class="${P}hint">Todavía no hay redes: se crean en «Redes y tipos».</div>`}
+        </div>
+      </div>
+      <div class="${P}lote-vista" id="${P}lote-vista" aria-live="polite"></div>
+    </div>
+    <div class="${P}modal-footer">
+      <button type="button" class="${P}btn ${P}modal-close">Cancelar</button>
+      <button type="button" class="${P}btn ${P}btn-primary" id="${P}lote-aplicar" disabled>Aplicar</button>
+    </div>
+  </div>`;
+  abrirModal(html, ()=>{
+    const raiz = raizModal();
+    const $ = sel=>raiz.querySelector(sel);
+    const buscar = $(`#${P}lote-buscar`), selUbic = $(`#${P}lote-ubicacion`), sinTipo = $(`#${P}lote-sin-tipo`), sinRed = $(`#${P}lote-sin-red`);
+    const todos = $(`#${P}lote-todos`), cuerpo = $(`#${P}lote-filas`), selTipo = $(`#${P}lote-tipo`), selRed = $(`#${P}lote-red`);
+    const vista = $(`#${P}lote-vista`), aplicar = $(`#${P}lote-aplicar`);
+    const clave = t=>String(t ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const visibles = ()=>{
+      const q = clave(buscar.value.trim());
+      const u = selUbic.value ? Number(selUbic.value) : null;
+      return equipos.filter(e=>(u === null || e.ubicacion_id === u)
+        && (!sinTipo.checked || !e.tipo_equipo)
+        && (!sinRed.checked || e.red_id === null || e.red_id === undefined)
+        && (!q || clave([e.nombre, e.modelo, (ubicPorId.get(e.ubicacion_id) || {}).nombre].join(" ")).includes(q)));
+    };
+    const pintarFilas = ()=>{
+      const lista = visibles();
+      cuerpo.innerHTML = lista.length ? lista.map(e=>{
+        const t = e.tipo_equipo ? tipoPorValor.get(e.tipo_equipo) : null;
+        const r = e.red_id !== null && e.red_id !== undefined ? redPorId.get(e.red_id) : null;
+        const u = ubicPorId.get(e.ubicacion_id);
+        return `<tr class="${elegidos.has(e.id) ? `${P}lote-elegido` : ""}" data-id="${e.id}">
+          <td class="${P}lote-col-check"><input type="checkbox" data-lote-id="${e.id}"${elegidos.has(e.id) ? " checked" : ""} aria-label="Elegir «${esc(e.nombre)}»"></td>
+          <td>${esc(e.nombre)}${e.modelo ? `<div class="${P}mapa-muted">${esc(e.modelo)}</div>` : ""}</td>
+          <td>${esc(u ? u.nombre : "—")}</td>
+          <td>${t ? esc(t.etiqueta) : `<span class="${P}mapa-muted">sin tipo</span>`}</td>
+          <td>${r ? `<span class="${P}mapa-red-chip" style="--red-color:${esc(r.color)}">${esc(r.nombre)}</span>` : `<span class="${P}mapa-muted">sin red</span>`}</td>
+        </tr>`;
+      }).join("") : `<tr><td colspan="5" class="${P}mapa-vacio">Ningún equipo coincide con el filtro.</td></tr>`;
+      const marcados = lista.filter(e=>elegidos.has(e.id)).length;
+      todos.checked = !!lista.length && marcados === lista.length;
+      todos.indeterminate = marcados > 0 && marcados < lista.length;
+    };
+    const cambios = ()=>{
+      const c = {};
+      if(selTipo.value !== NO_CAMBIAR) c.tipo_equipo = selTipo.value;
+      if(selRed.value !== NO_CAMBIAR) c.red_id = selRed.value ? Number(selRed.value) : null;
+      return c;
+    };
+    const pintarVista = ()=>{
+      const n = elegidos.size;
+      const c = cambios();
+      const hayCambio = Object.keys(c).length > 0;
+      aplicar.disabled = !n || !hayCambio;
+      aplicar.textContent = n ? `Aplicar a ${plural(n, "equipo", "equipos")}` : "Aplicar";
+      if(!n){ vista.innerHTML = `<span class="${P}mapa-muted">Marca uno o más equipos.</span>`; return; }
+      const partes = [`<strong>${plural(n, "equipo elegido", "equipos elegidos")}</strong>`];
+      if("red_id" in c) partes.push(c.red_id === null ? "quedarán sin red" : `pasarán a la red «${esc(redPorId.get(c.red_id).nombre)}»`);
+      let lista = "";
+      if("tipo_equipo" in c){
+        partes.push(`serán «${esc(tipoPorValor.get(c.tipo_equipo).etiqueta)}»`);
+        // Cómo quedan los nombres automáticos (los de los demás también pueden correrse en la numeración).
+        const copia = equipos.map(e=>({ ...e, nombre: e.nombre_guardado ?? e.nombre, ...(elegidos.has(e.id) ? { tipo_equipo: c.tipo_equipo } : {}) }));
+        const nuevos = nombresAutomaticos({ equipos: copia, ubicaciones, tipos });
+        const cambian = equipos.filter(e=>nuevos.get(e.id) !== e.nombre);
+        lista = cambian.length ? `<div class="${P}mapa-muted">Nombres que cambian:</div><ul class="${P}lote-nombres">${cambian.slice(0, 8).map(e=>`<li><span class="${P}lote-antes">${esc(e.nombre)}</span> → <strong>${esc(nuevos.get(e.id))}</strong></li>`).join("")}${cambian.length > 8 ? `<li class="${P}mapa-muted">y ${cambian.length - 8} más</li>` : ""}</ul>` : `<div class="${P}mapa-muted">Ningún nombre cambia.</div>`;
+      }
+      vista.innerHTML = `<div>${partes.join(" · ")}${hayCambio ? "" : ` · <span class="${P}mapa-muted">elige el tipo, la red o los dos</span>`}</div>${lista}`;
+    };
+    const repintar = ()=>{ pintarFilas(); pintarVista(); };
+    buscar.addEventListener("input", pintarFilas);
+    [selUbic, sinTipo, sinRed].forEach(el=>el.addEventListener("change", pintarFilas));
+    [selTipo, selRed].forEach(el=>el.addEventListener("change", pintarVista));
+    cuerpo.addEventListener("change", e=>{
+      const c = e.target.closest("[data-lote-id]");
+      if(!c) return;
+      const id = Number(c.dataset.loteId);
+      if(c.checked) elegidos.add(id); else elegidos.delete(id);
+      c.closest("tr").classList.toggle(`${P}lote-elegido`, c.checked);
+      const lista = visibles();
+      const marcados = lista.filter(x=>elegidos.has(x.id)).length;
+      todos.checked = !!lista.length && marcados === lista.length;
+      todos.indeterminate = marcados > 0 && marcados < lista.length;
+      pintarVista();
+    });
+    todos.addEventListener("change", ()=>{
+      for(const e of visibles()){ if(todos.checked) elegidos.add(e.id); else elegidos.delete(e.id); }
+      repintar();
+    });
+    aplicar.addEventListener("click", async e=>{
+      mostrarErrores(raiz, {}, "");
+      try{
+        const n = await conBotonOcupado(e.currentTarget, "Aplicando…", ()=>asignarEnLote([...elegidos], cambios()));
+        cerrarModal();
+        mostrarToast(`Listo: ${plural(n, "equipo actualizado", "equipos actualizados")}.`, "success");
+        if(alGuardar) alGuardar();
+      }catch(err){
+        manejarErrorGuardado(raiz, err);
+      }
+    });
+    repintar();
+    buscar.focus();
+  });
+}
+
+// ===========================================================================
+// Piscina (009): datos (nombre, sector, hectáreas del plano, notas, «por
+// revisar»). Nueva: se crea como un cuadrado con sus hectáreas en el centro
+// del mapa y alGuardar(id, { nueva: true }) abre el editor de la forma.
+// ===========================================================================
+export function abrirFormPiscina({ id = null, centro = null } = {}, { alGuardar, alEliminar } = {}){
+  const actual = id ? cargarPiscinas().find(p=>p.id === id) : null;
+  if(id && !actual){ mostrarToast("Esa piscina ya no existe. Recarga el mapa.", "error"); return; }
+  const html = `<div class="${P}modal ${P}modal-angosto">
+    ${cabecera(actual ? `Piscina ${actual.nombre}` : "Nueva piscina")}
+    <div class="${P}modal-body">
+      <div class="${P}alert ${P}alert-error" data-alerta hidden></div>
+      <div class="${P}form-grid">
+        <div class="${P}field">
+          <label for="${P}piscina-nombre">Nombre</label>
+          <input type="text" id="${P}piscina-nombre" maxlength="40" value="${esc(actual ? actual.nombre : "")}" placeholder="Ej.: L29" autocomplete="off">
+          <div class="${P}field-error" data-error="nombre"></div>
+        </div>
+        <div class="${P}field">
+          <label for="${P}piscina-sector">Sector <span class="${P}mapa-muted">(opcional)</span></label>
+          <input type="text" id="${P}piscina-sector" maxlength="40" value="${esc(actual && actual.sector || "")}" placeholder="Se toma del nombre">
+          <div class="${P}field-error" data-error="sector"></div>
+        </div>
+        <div class="${P}field">
+          <label for="${P}piscina-hectareas">Hectáreas <span class="${P}mapa-muted">(del plano)</span></label>
+          <input type="text" inputmode="decimal" id="${P}piscina-hectareas" value="${actual && actual.hectareas !== null && actual.hectareas !== undefined ? esc(String(actual.hectareas).replace(".", ",")) : ""}" placeholder="Ej.: 4,7">
+          <div class="${P}field-error" data-error="hectareas"></div>
+        </div>
+        <div class="${P}field">
+          <span class="${P}field-titulo">Revisión</span>
+          <label class="${P}mapa-check"><input type="checkbox" id="${P}piscina-revisar"${actual && actual.revisar ? " checked" : ""}> Por revisar</label>
+        </div>
+        <div class="${P}field ${P}span-2">
+          <label for="${P}piscina-notas">Notas <span class="${P}mapa-muted">(opcional)</span></label>
+          <textarea id="${P}piscina-notas" maxlength="1000" placeholder="Estado, uso, observaciones…">${esc(actual && actual.notas || "")}</textarea>
+        </div>
+      </div>
+      ${actual ? "" : `<div class="${P}hint">Se crea como un cuadrado ${centro ? "en el centro del mapa" : ""} con esas hectáreas (1 si no pones); después ajustas su forma arrastrando los puntos.</div>`}
+    </div>
+    <div class="${P}modal-footer">
+      ${actual ? `<button type="button" class="${P}btn ${P}btn-danger" id="${P}piscina-eliminar">Eliminar</button><span class="${P}fb-spacer"></span>` : ""}
+      <button type="button" class="${P}btn ${P}modal-close">Cancelar</button>
+      <button type="button" class="${P}btn ${P}btn-primary" id="${P}piscina-guardar">${actual ? "Guardar" : "Crear y dibujar"}</button>
+    </div>
+  </div>`;
+  abrirModal(html, ()=>{
+    const raiz = raizModal();
+    const $ = sel=>raiz.querySelector(sel);
+    const nombre = $(`#${P}piscina-nombre`), sector = $(`#${P}piscina-sector`);
+    nombre.addEventListener("input", ()=>{ sector.placeholder = sectorDeNombre(nombre.value) || "Se toma del nombre"; });
+    raiz.addEventListener("keydown", e=>{ if(e.key === "Enter" && e.target.tagName === "INPUT"){ e.preventDefault(); $(`#${P}piscina-guardar`).click(); } });
+    $(`#${P}piscina-guardar`).addEventListener("click", async e=>{
+      mostrarErrores(raiz, {}, "");
+      const campos = {
+        nombre: nombre.value,
+        sector: sector.value.trim() || sectorDeNombre(nombre.value),
+        hectareas: $(`#${P}piscina-hectareas`).value,
+        notas: $(`#${P}piscina-notas`).value,
+        revisar: $(`#${P}piscina-revisar`).checked,
+      };
+      try{
+        if(actual){
+          await conBotonOcupado(e.currentTarget, "Guardando…", ()=>editarPiscina(id, campos));
+          cerrarModal();
+          mostrarToast(`Piscina ${campos.nombre.trim()} guardada.`, "success");
+          if(alGuardar) alGuardar(id, { nueva: false });
+        } else {
+          const ha = Number(String(campos.hectareas).replace(",", ".")) || 1;
+          const nuevoId = await conBotonOcupado(e.currentTarget, "Creando…", ()=>crearPiscina({ ...campos, puntos: cuadradoAlrededor(centro || [0, 0], ha) }));
+          cerrarModal();
+          mostrarToast(`Piscina ${campos.nombre.trim()} creada: ajusta su forma y guarda.`, "success");
+          if(alGuardar) alGuardar(nuevoId, { nueva: true });
+        }
+      }catch(err){
+        manejarErrorGuardado(raiz, err);
+      }
+    });
+    const botonEliminar = $(`#${P}piscina-eliminar`);
+    if(botonEliminar) botonEliminar.addEventListener("click", async e=>{
+      if(botonEliminar.dataset.confirmar !== "1"){ botonEliminar.dataset.confirmar = "1"; botonEliminar.textContent = "¿Eliminar? Confirmar"; return; }
+      try{
+        await conBotonOcupado(e.currentTarget, "Eliminando…", ()=>eliminarPiscina(id));
+        cerrarModal();
+        mostrarToast(`Piscina ${actual.nombre} eliminada.`, "success");
+        if(alEliminar) alEliminar(id);
+      }catch(err){
+        manejarErrorGuardado(raiz, err);
+      }
+    });
+    nombre.focus();
   });
 }
 

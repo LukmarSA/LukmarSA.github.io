@@ -7,10 +7,14 @@
 //
 // Conceptos
 //   * servidor_id = servidor ACTIVO. NULL = raíz (entrada de internet).
-//   * Un servidor en la misma ubicación es una conexión por cable dentro de
-//     la torre: no se dibuja y no cuenta para decidir backbone o P2MP.
-//   * Clientes "remotos" de X = los que cuelgan de X desde OTRA ubicación.
-//     1 remoto → el enlace es backbone (punto a punto); varios → P2MP.
+//   * Medio del enlace con su servidor (migración 008: equipos_radioenlace.medio):
+//     "cable", "fibra" o "inalambrico". Sin medio (NULL, o antes de la 008) se
+//     deduce: en la misma ubicación, cable; en otra, inalámbrico.
+//   * Un enlace por cable dentro de la torre no se dibuja y no cuenta para
+//     decidir backbone o P2MP. Un cable o una fibra entre dos ubicaciones se
+//     dibuja con su propio estilo (clase "cable" / "fibra"), tampoco cuenta.
+//   * Clientes "remotos" de X = los que cuelgan de X por RADIO desde OTRA
+//     ubicación. 1 remoto → el enlace es backbone (punto a punto); varios → P2MP.
 //   * Más de UMBRAL_AGRUPAR_CLIENTES remotos → las líneas de ese servidor se
 //     agrupan en un indicador ("AP · 23 clientes") hasta que se lo expande.
 //   * Simulación: "caído" = se corta el enlace de subida del equipo (el equipo
@@ -40,6 +44,25 @@ export function infoRol(id){ return ROLES.find(r=>r.id === id) || ROLES[ROLES.le
 export function infoEstado(id){ return ESTADOS_SIMULACION.find(e=>e.id === id) || ESTADOS_SIMULACION[0]; }
 
 const tieneValor = v=>v !== null && v !== undefined;
+
+export const MEDIOS = [
+  { id: "cable",       etiqueta: "Cable",        badge: "cable" },
+  { id: "fibra",       etiqueta: "Fibra óptica", badge: "fibra" },
+  { id: "inalambrico", etiqueta: "Inalámbrico",  badge: "inalámbrico" },
+];
+const ID_MEDIOS = new Set(MEDIOS.map(m=>m.id));
+export function esMedio(v){ return ID_MEDIOS.has(v); }
+export function infoMedio(id){ return MEDIOS.find(m=>m.id === id) || MEDIOS[2]; }
+
+// Medio del enlace cliente → servidor. El medio guardado vale solo para el
+// servidor principal (servidor_id): un respaldo siempre se deduce por la
+// ubicación.
+export function medioDe(cliente, servidor){
+  if(!cliente || !servidor) return null;
+  if(esMedio(cliente.medio) && tieneValor(cliente.servidor_id) && Number(cliente.servidor_id) === Number(servidor.id)) return cliente.medio;
+  return Number(cliente.ubicacion_id) === Number(servidor.ubicacion_id) ? "cable" : "inalambrico";
+}
+
 function agregar(mapa, clave, valor){
   if(!mapa.has(clave)) mapa.set(clave, []);
   mapa.get(clave).push(valor);
@@ -56,7 +79,7 @@ function calcularRol(e, red){
   const remotos = (red.clientesRemotos.get(e.id) || []).length;
   if(remotos > 1) return "distribucion";
   if(remotos === 1) return "backbone";
-  if(s.ubicacion_id !== e.ubicacion_id) return (red.clientesRemotos.get(s.id) || []).length === 1 ? "backbone" : "cliente";
+  if(medioDe(e, s) === "inalambrico" && s.ubicacion_id !== e.ubicacion_id) return (red.clientesRemotos.get(s.id) || []).length === 1 ? "backbone" : "cliente";
   return (red.clientes.get(e.id) || []).length ? "backbone" : "cliente";
 }
 
@@ -73,7 +96,7 @@ export function analizarRed({ equipos = [], ubicaciones = [], respaldos = [] } =
     const s = servidorDe(e);
     if(!s) continue;
     agregar(clientes, s.id, e);
-    if(s.ubicacion_id !== e.ubicacion_id) agregar(clientesRemotos, s.id, e);
+    if(s.ubicacion_id !== e.ubicacion_id && medioDe(e, s) === "inalambrico") agregar(clientesRemotos, s.id, e);
   }
   const porNombre = (a, b)=>String(a.nombre).localeCompare(String(b.nombre), "es");
   for(const lista of clientes.values()) lista.sort(porNombre);
@@ -90,7 +113,8 @@ export function analizarRed({ equipos = [], ubicaciones = [], respaldos = [] } =
 
   const agrupados = new Set([...clientesRemotos].filter(([, l])=>l.length > UMBRAL_AGRUPAR_CLIENTES).map(([id])=>id));
 
-  // Una línea por equipo cuyo servidor está en otra ubicación.
+  // Una línea por equipo cuyo servidor está en otra ubicación: radioenlace
+  // (backbone o P2MP) o, con la 008, cable/fibra entre sitios.
   const enlaces = [];
   const enlacePorCliente = new Map();
   for(const e of equipos){
@@ -98,10 +122,12 @@ export function analizarRed({ equipos = [], ubicaciones = [], respaldos = [] } =
     if(!s || s.ubicacion_id === e.ubicacion_id) continue;
     const uCliente = ubicacionPorId.get(e.ubicacion_id), uServidor = ubicacionPorId.get(s.ubicacion_id);
     if(!uCliente || !uServidor) continue;
+    const medio = medioDe(e, s);
+    const radio = medio === "inalambrico";
     const l = {
-      id: e.id, cliente: e, servidor: s, uCliente, uServidor,
-      clase: (clientesRemotos.get(s.id) || []).length === 1 ? "backbone" : "p2mp",
-      agrupado: agrupados.has(s.id),
+      id: e.id, cliente: e, servidor: s, uCliente, uServidor, medio,
+      clase: radio ? ((clientesRemotos.get(s.id) || []).length === 1 ? "backbone" : "p2mp") : medio,
+      agrupado: radio && agrupados.has(s.id),
       banda: s.banda || e.banda || null,
       frecuencia: tieneValor(s.frecuencia_mhz) ? Number(s.frecuencia_mhz) : (tieneValor(e.frecuencia_mhz) ? Number(e.frecuencia_mhz) : null),
       ...geometria(uServidor, uCliente),
@@ -120,9 +146,15 @@ export function servidorDe(red, equipoId){
   return e && tieneValor(e.servidor_id) ? (red.equipoPorId.get(e.servidor_id) || null) : null;
 }
 
+// Medio del enlace entre dos equipos de la red (ver medioDe).
+export function medioEnlace(red, clienteId, servidorId){
+  return medioDe(red.equipoPorId.get(clienteId), red.equipoPorId.get(servidorId));
+}
+
+// Cable o fibra (no radio).
 export function esPorCable(red, clienteId, servidorId){
-  const c = red.equipoPorId.get(clienteId), s = red.equipoPorId.get(servidorId);
-  return !!(c && s && c.ubicacion_id === s.ubicacion_id);
+  const m = medioEnlace(red, clienteId, servidorId);
+  return m === "cable" || m === "fibra";
 }
 
 // Lo que el panel muestra de la conexión de un equipo hacia un servidor (el
@@ -132,10 +164,12 @@ export function describirConexion(red, equipoId, servidorId){
   const e = red.equipoPorId.get(equipoId), s = red.equipoPorId.get(servidorId);
   if(!e || !s) return null;
   const u = red.ubicacionPorId.get(e.ubicacion_id), us = red.ubicacionPorId.get(s.ubicacion_id);
-  const cable = e.ubicacion_id === s.ubicacion_id;
-  const g = cable ? { distanciaKm: null, azimutIda: null, azimutVuelta: null } : geometria(u, us);
+  const medio = medioDe(e, s);
+  const cable = medio !== "inalambrico";
+  const mismaUbicacion = e.ubicacion_id === s.ubicacion_id;
+  const g = mismaUbicacion ? { distanciaKm: null, azimutIda: null, azimutVuelta: null } : geometria(u, us);
   return {
-    equipo: e, servidor: s, ubicacion: u || null, ubicacionServidor: us || null, cable,
+    equipo: e, servidor: s, ubicacion: u || null, ubicacionServidor: us || null, cable, medio, mismaUbicacion,
     distanciaKm: g.distanciaKm, azimutIda: g.azimutIda, azimutVuelta: g.azimutVuelta,
     banda: s.banda || e.banda || null,
     frecuencia: tieneValor(s.frecuencia_mhz) ? Number(s.frecuencia_mhz) : (tieneValor(e.frecuencia_mhz) ? Number(e.frecuencia_mhz) : null),
@@ -311,14 +345,18 @@ export function tramosDeCamino(red, camino, sim = null){
     const cliente = camino[i], servidor = camino[i + 1];
     const st = sim ? sim.estado.get(cliente) : null;
     const respaldo = st && st.conectado && st.via === servidor ? st.respaldo : null;
-    tramos.push({ cliente, servidor, respaldo, cable: esPorCable(red, cliente, servidor), funciona: !sim || !!(st && st.conectado && st.via === servidor) });
+    const medio = medioEnlace(red, cliente, servidor);
+    tramos.push({ cliente, servidor, respaldo, medio, cable: medio !== "inalambrico", funciona: !sim || !!(st && st.conectado && st.via === servidor) });
   }
   return tramos;
 }
 
 // Filtro (c): tipo = rol calculado; estado = el de la simulación (solo si está activa).
-export function equipoVisible(red, equipoId, { rolesOcultos = [], estadosOcultos = [] } = {}, sim = null){
+// Filtro por red (007): "sin" = equipos sin red.
+export function claveRed(e){ return e && tieneValor(e.red_id) ? String(e.red_id) : "sin"; }
+export function equipoVisible(red, equipoId, { rolesOcultos = [], estadosOcultos = [], redesOcultas = [] } = {}, sim = null){
   if(rolesOcultos.includes(red.rol.get(equipoId))) return false;
+  if(redesOcultas.length && redesOcultas.includes(claveRed(red.equipoPorId.get(equipoId)))) return false;
   if(sim && estadosOcultos.includes((sim.estado.get(equipoId) || {}).estado)) return false;
   return true;
 }
@@ -336,6 +374,7 @@ export function resumenRed(red){
     raices: [...red.rol.values()].filter(r=>r === "raiz").length,
     backbone: red.enlaces.filter(l=>l.clase === "backbone").length,
     p2mp: red.enlaces.filter(l=>l.clase === "p2mp").length,
+    cable: red.enlaces.filter(l=>l.clase === "cable" || l.clase === "fibra").length,
     respaldos,
     agrupados: red.agrupados.size,
   };
@@ -363,16 +402,16 @@ export function estadoPorUbicacion(red, sim = null){
 // La vista solo traduce esto a Leaflet.
 // ---------------------------------------------------------------------------
 // opciones:
-//   lineas          { backbone, p2mp, respaldos } (toggles)
+//   lineas          { backbone, p2mp, cable, respaldos } (toggles; "cable" = cable y fibra entre sitios)
 //   visibleEquipo   id → bool (filtros de rol/estado)
 //   visibleUbicacion id → bool (filtros de tipo/archivadas)
 //   sim             resultado de simularFallas, o null
 //   seleccionId     equipo seleccionado (resalta su camino y atenúa el resto)
 //   expandidos      Set de servidores agrupados que el usuario expandió
 //
-// estilo: "backbone" | "p2mp" | "cadena" | "cadenaRespaldo" | "cadenaRota" |
+// estilo: "backbone" | "p2mp" | "cable" | "fibra" | "cadena" | "cadenaRespaldo" | "cadenaRota" |
 //         "cortado" | "sinConexion" | "respaldo" | "recuperado"
-export function planDeLineas(red, { lineas = { backbone: true, p2mp: true, respaldos: false }, visibleEquipo = ()=>true, visibleUbicacion = ()=>true, sim = null, seleccionId = null, expandidos = new Set() } = {}){
+export function planDeLineas(red, { lineas = { backbone: true, p2mp: true, cable: true, respaldos: false }, visibleEquipo = ()=>true, visibleUbicacion = ()=>true, sim = null, seleccionId = null, expandidos = new Set() } = {}){
   const out = [];
   const camino = seleccionId !== null && red.equipoPorId.has(seleccionId) ? caminoARaiz(red, seleccionId, sim) : [];
   const tramos = tramosDeCamino(red, camino, sim);
@@ -389,7 +428,7 @@ export function planDeLineas(red, { lineas = { backbone: true, p2mp: true, respa
     const funciona = !sim || !!(st && st.conectado && st.via === s);
     // La línea del equipo seleccionado se ve siempre (aunque su servidor esté agrupado o filtrado).
     if(!cadena && c !== seleccionId){
-      if(!lineas[l.clase]) continue;
+      if(!lineas[l.clase === "fibra" ? "cable" : l.clase]) continue;
       if(!visibleEquipo(c) || !visibleEquipo(s)) continue;
       if(!visibleUbicacion(l.uCliente.id) || !visibleUbicacion(l.uServidor.id)) continue;
       if(l.agrupado && !expandido(s)) continue;
@@ -401,7 +440,7 @@ export function planDeLineas(red, { lineas = { backbone: true, p2mp: true, respa
     }
     if(cadena) estilo = funciona ? "cadena" : "cadenaRota";
     out.push({
-      clave: `p:${c}`, tipo: "principal", estilo, clase: l.clase, clienteId: c, servidorId: s,
+      clave: `p:${c}`, tipo: "principal", estilo, clase: l.clase, medio: l.medio, clienteId: c, servidorId: s,
       desde: punto(l.uServidor), hasta: punto(l.uCliente), distanciaKm: l.distanciaKm, banda: l.banda,
       enCadena: cadena, atenuada: hayCadena && !cadena && c !== seleccionId && !(s === seleccionId && clientesDirectos.has(c)),
     });

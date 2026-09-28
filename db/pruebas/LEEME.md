@@ -1,4 +1,4 @@
-# Pruebas del mapa (migraciones 002 a 007)
+# Pruebas del mapa (migraciones 002 a 009)
 
 Tres capas. Las dos primeras corren en local; la tercera corre en Supabase real
 y siempre termina sin dejar datos de prueba.
@@ -13,6 +13,8 @@ y siempre termina sin dejar datos de prueba.
 | `db/migraciones/005_quitar_tabla_enlaces.sql` | Después de desplegar. Borra la tabla `enlaces` de la 002 (solo si está vacía). |
 | `db/migraciones/006_plano_mapa.sql` | Cuando se quiera guardar el ajuste del plano. Crea `planos_mapa` (el plano de la capa «Plano» y sus tres esquinas sobre el mapa). Es aditiva y la app funciona sin ella: sin la 006 la capa usa el calce que trae la app y solo no se puede guardar un ajuste. |
 | `db/migraciones/007_red_tipos_atajos.sql` | Cuando se quiera la red de la finca. Crea `tipos_equipo_red` (8 tipos de semilla), `redes` y `atajos_simulacion`, y agrega `tipo_equipo`, `red_id` y `referencia` a `equipos_radioenlace`. Es aditiva y la app funciona sin ella: el nombre del equipo se sigue escribiendo a mano y no aparecen tipo, red, cableado por tipo ni atajos. |
+| `db/migraciones/008_medio_y_nombres.sql` | Después de la 007. Agrega `equipos_radioenlace.medio` (cable, fibra o inalámbrico; vacío = automático) y `recalcular_nombres_equipos()` con sus triggers: la base guarda siempre el nombre automático al día (cambie lo que cambie: tipo, referencia, servidor, ubicación, medio, nombre de una ubicación, etiqueta o género de un tipo). Es aditiva: la app anterior sigue funcionando. |
+| `db/migraciones/009_piscinas.sql` | Cuando se quiera la capa «Piscinas». Crea `piscinas` (nombre, sector, hectáreas del plano, contorno `[[lat, lng], …]`) con las 127 piscinas del plano de lotes de agosto de 2026. Es aditiva: sin ella no aparece la capa. |
 
 ## 1. Lógica pura (Node, sin navegador)
 
@@ -20,7 +22,7 @@ y siempre termina sin dejar datos de prueba.
 cd tests && npm install && npm run test:mapa
 ```
 
-`tests/mapa-unit.mjs` cubre distancia/azimut, el parseo de coordenadas, los índices y el buscador del mapa, las validaciones, la traducción de errores de Supabase, la jerarquía (roles, backbone/P2MP, agrupación, camino a la raíz, simulación de fallas con conmutación por prioridad y plan de líneas) la capa Plano (esquinas, mover, agrandar sin deformar, girar, matriz CSS y el calce con la carretera) y la red de la finca de la 007 (nombre automático con género, cable o radio, referencia y numeración; caídos efectivos de los atajos; validaciones de atajo, red y tipo). `tests/activo-unit.mjs` cubre el formulario «Nuevo activo» (campos según el tipo, qué se guarda, búsqueda y orden de tipos).
+`tests/mapa-unit.mjs` cubre distancia/azimut, el parseo de coordenadas, los índices y el buscador del mapa, las validaciones, la traducción de errores de Supabase, la jerarquía (roles, backbone/P2MP, agrupación, camino a la raíz, simulación de fallas con conmutación por prioridad y plan de líneas) la capa Plano (esquinas, mover, agrandar sin deformar, girar, matriz CSS y el calce con la carretera) la red de la finca de la 007 (nombre automático con género, cable o radio, referencia y numeración; caídos efectivos de los atajos; validaciones de atajo, red y tipo), el medio de la 008 (cable/fibra entre sitios: clase propia, no cuenta para backbone/P2MP, nombre «conectada a … en …», filtro por red) y las piscinas de la 009 (validación del contorno, área, centro, editor de vértices, formulario). `tests/activo-unit.mjs` cubre el formulario «Nuevo activo» (campos según el tipo, qué se guarda, búsqueda y orden de tipos).
 
 ## 2. Navegador real con Supabase simulado
 
@@ -39,9 +41,10 @@ npm run smoke:mapa
 - **Capa Plano:** la imagen en su lugar, «Ver plano», opacidad, y «Ajustar plano» (arrastrar, esquinas, flechas, giro, calce original, cancelar, guardar), sin la 006 y sin ser administrador.
 - **Detalle de la torre:** casilla por equipo para simular la caída (también con teclado), conectores del camino con onda o enchufe y su badge, y el detalle que se despliega como acordeón.
 - **Red de la finca (007):** nombres automáticos, red de cada equipo, cableado de la torre, atajos (encender, bloqueo de la casilla, guardar las caídas, editar, eliminar), formulario de equipo sin nombre a mano, «Redes y tipos», y un usuario con «Ver mapa» que no es administrador. Sin la 007 (el fixture por defecto) todo sigue como antes.
+- **v7:** el plano como capa superpuesta (sobre el mapa de carreteras o el satélite, recordada, y la base «Plano» de la v6 abre como satélite + plano); las secciones de la torre como tarjetas de colores; el cableado con conectores, entrada, salidas, rama de respaldo y marcas de la simulación; el medio de la 008 (campo, nombre, línea de fibra, sin la 008 no aparece); tipo y red en lote (con la 008 un solo UPDATE; sin ella, uno por equipo con su nombre); el filtro y los colores por red; la capa Piscinas de la 009 (clic, solo por revisar, editor de vértices con mouse y teclado, datos, nueva, eliminar, sin ser administrador y sin la 009).
 - **Inventario, «Nuevo activo»:** selector de Tipo con búsqueda y orden, campos según el tipo con transición, «+» en un submodal, lo que se guarda al crear y al editar.
 
-`SOLO=plano node mapa-smoke.mjs` corre un solo escenario (admin, permisos, fallas, celular, plano, torre, red o activo). Si Playwright no encuentra su navegador, usar `CHROMIUM_PATH=/ruta/al/chrome`.
+`SOLO=plano node mapa-smoke.mjs` corre un solo escenario (admin, permisos, fallas, celular, plano, torre, red, medio, lote, redes, piscinas o activo). Si Playwright no encuentra su navegador, usar `CHROMIUM_PATH=/ruta/al/chrome`.
 
 Las capturas quedan en `tests/capturas/`.
 
@@ -50,7 +53,7 @@ Las capturas quedan en `tests/capturas/`.
 | Paso | Archivo | Qué hace |
 |---|---|---|
 | a | `mapa_pruebas_restaurar_secuencias.sql` | Correr ANTES de (b): genera los `setval` para dejar las secuencias como estaban, porque `nextval` no se revierte con ROLLBACK. Guardar el resultado. |
-| b | `mapa_pruebas_reglas_rls.sql` | 102 pruebas de restricciones, triggers (ciclos, respaldo promovido), RLS (admin / visitante / registrador / anon), `equipo_radio_de_activo`, cambio de custodio del registrador, fechas de Ecuador, la tabla del plano (sección P), la red de la finca (sección R: tipos, redes, atajos, limpieza al borrar un equipo o una red), GRANT y auditoría, simulando usuarios con `request.jwt.claims`. Necesita la 004; la sección P necesita la 006 y la R, la 007 (sin ellas, «P0»/«R0» salen en falla y avisan). Termina en `RAISE EXCEPTION`, así que **todo se revierte** y el mensaje de error es el reporte en JSON. |
+| b | `mapa_pruebas_reglas_rls.sql` | 125 pruebas de restricciones, triggers (ciclos, respaldo promovido), RLS (admin / visitante / registrador / anon), `equipo_radio_de_activo`, cambio de custodio del registrador, fechas de Ecuador, la tabla del plano (sección P), la red de la finca (sección R: tipos, redes, atajos, limpieza al borrar un equipo o una red), el medio y los nombres al día (sección S: nombre armado en SQL, renombrar ubicación o tipo, numeración, nombres a mano, un ciclo de nombres cruzados), las piscinas (sección T: semilla, formas inválidas, RLS, GRANT, auditoría), GRANT y auditoría, simulando usuarios con `request.jwt.claims`. Necesita la 004; la sección P necesita la 006, la R la 007, la S la 008 y la T la 009 (sin ellas, «P0»/«R0»/«S0»/«T0» salen en falla y avisan). La S apaga un instante el trigger de nombres (ALTER TABLE, dentro de la misma transacción que se revierte). Termina en `RAISE EXCEPTION`, así que **todo se revierte** y el mensaje de error es el reporte en JSON. |
 | c | (resultado de a) | Pegar y correr los `setval` generados en (a). |
 | d | `mapa_datos_prueba.sql` | Crea una red `[PRUEBA]`: 17 ubicaciones, 25 equipos (2 raíces, backbone, un AP con 9 clientes) y 3 respaldos. |
 | e | (navegador) | Pestaña Mapa: clic en «CPE Piscina 1» → se resalta su camino hasta la raíz. Activar «Simulación de fallas» y simular la caída de «CPE Piscina 1» (recupera vía AP Santa Ana), de «Router Cerro Azul» (conmuta por cable al PTP de la Torre Norte), de «PTP Santa Ana ← Cerro Azul» (su subárbol queda sin conectividad) y del «AP Cerro Azul» junto con el anterior (Piscina 1 pasa a su respaldo de prioridad 2). Probar los toggles y «Restablecer simulación». |

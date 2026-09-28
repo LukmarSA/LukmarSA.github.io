@@ -3,7 +3,8 @@
 -- [PRUEBA] (lo de mapa_datos_prueba.sql y lo que se haya creado así desde
 -- la interfaz durante la prueba), más los tipos de ubicación cuyo valor
 -- empiece por "prueba" y, con la 007, los atajos, redes y tipos de equipo
--- que empiecen por [PRUEBA]. Sirve antes y después de las migraciones 005 y 007.
+-- que empiecen por [PRUEBA] y, con la 009, las piscinas [PRUEBA]. Sirve antes y
+-- después de las migraciones 005, 007 y 009.
 --
 -- * Los respaldos se van con sus equipos (ON DELETE CASCADE), también los
 --   que un equipo real tuviera apuntando a uno de prueba.
@@ -56,6 +57,10 @@ BEGIN
     EXECUTE 'DELETE FROM public.atajos_simulacion WHERE nombre LIKE ''[PRUEBA]%''';
     EXECUTE 'DELETE FROM public.redes WHERE nombre LIKE ''[PRUEBA]%''';
     EXECUTE 'DELETE FROM public.tipos_equipo_red t WHERE t.etiqueta LIKE ''[PRUEBA]%'' AND NOT EXISTS (SELECT 1 FROM public.equipos_radioenlace e WHERE e.tipo_equipo = t.valor)';
+  END IF;
+  -- 009 (si ya se corrió): piscinas de prueba.
+  IF to_regclass('public.piscinas') IS NOT NULL THEN
+    EXECUTE 'DELETE FROM public.piscinas WHERE nombre LIKE ''[PRUEBA]%''';
   END IF;
 END $$;
 
