@@ -7,7 +7,7 @@
 // equipos, respaldos y tipos: solo administrador; historial_ubicacion: acción
 // "asignar_ubicacion" de la matriz). La UI solo esconde los botones.
 import { sb } from "../nucleo/config.js";
-import { cargarAtajos, cargarPiscinas, cargarRedes, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, estadoMapa, hayMedio, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa } from "../nucleo/datos-mapa.js";
+import { cargarAtajos, cargarPiscinas, cargarRedes, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, datosNombres, estadoMapa, hayMedio, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa } from "../nucleo/datos-mapa.js";
 import { numeroHectareas, redondearPunto, validarPiscina } from "../nucleo/piscinas.js";
 import { nombreParaGuardar, nombresAutomaticos, slugTipo, validarAtajo, validarRed, validarTipoEquipo } from "../nucleo/mapa-nombres.js";
 import { copiarEsquinas, esquinasValidas } from "../nucleo/plano-mapa.js";
@@ -419,10 +419,9 @@ export async function asignarEnLote(ids, cambios = {}){
     return filas.length;
   }
   // Sin la 008: copia local que se va poniendo al día equipo por equipo.
-  const ubicaciones = cargarUbicaciones(), tipos = cargarTiposEquipo();
   const copia = cargarEquiposRadioenlace().map(e=>({ ...e }));
   const alDia = ()=>{
-    const nombres = nombresAutomaticos({ equipos: copia.map(e=>({ ...e, nombre: e.nombre_guardado ?? e.nombre })), ubicaciones, tipos });
+    const nombres = nombresAutomaticos(datosNombres(copia.map(e=>({ ...e, nombre: e.nombre_guardado ?? e.nombre }))));
     for(const e of copia) e.nombre = nombres.get(e.id) ?? e.nombre_guardado ?? e.nombre;
   };
   let hechos = 0;
@@ -430,7 +429,7 @@ export async function asignarEnLote(ids, cambios = {}){
     for(const id of lista){
       const e = copia.find(x=>x.id === id);
       const fila = { ...e, ...parche };
-      const nombre = nombreParaGuardar(fila, { equipos: copia, ubicaciones, tipos }, id) || e.nombre_guardado || e.nombre;
+      const nombre = nombreParaGuardar(fila, datosNombres(copia), id) || e.nombre_guardado || e.nombre;
       exigirFilas(await sb.from("equipos_radioenlace").update({ ...parche, nombre }).eq("id", id).select("id"), "aplicó el cambio");
       Object.assign(e, parche, { nombre_guardado: nombre });
       alDia();

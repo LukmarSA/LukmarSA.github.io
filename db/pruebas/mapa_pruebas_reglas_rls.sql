@@ -1,5 +1,5 @@
 -- =====================================================================
--- Pruebas de las reglas del mapa (migraciones 002 a 004, 006 a 009) contra la base
+-- Pruebas de las reglas del mapa (migraciones 002 a 004, 006 a 010) contra la base
 -- REAL, sin dejar rastro. Sirven antes y después de correr la 005.
 -- =====================================================================
 -- Todo corre dentro de un único bloque DO que termina con RAISE EXCEPTION:
@@ -68,6 +68,14 @@ DECLARE
   v_t2     text;
   v_pis    bigint;
   v_ts     timestamptz;
+  v_uu     bigint;
+  v_ru1    bigint;
+  v_ru2    bigint;
+  u_1      bigint;
+  u_2      bigint;
+  u_3      bigint;
+  u_4      bigint;
+  u_5      bigint;
 BEGIN
   IF to_regprocedure('public.equipo_radio_de_activo(integer)') IS NULL THEN
     RAISE EXCEPTION 'Falta la migración 004 (public.equipo_radio_de_activo no existe): aplícala antes de correr estas pruebas.';
@@ -1003,6 +1011,79 @@ BEGIN
     r := r || jsonb_build_object('t', 'T10 piscinas tiene GRANT completo para anon y authenticated', 'ok', v_txt IS NULL, 'det', coalesce('faltan: ' || v_txt, 'completo'));
     SELECT count(*) INTO v_n FROM public.auditoria WHERE accion IN ('INSERT_piscinas', 'UPDATE_piscinas') AND fecha >= now() - interval '1 minute';
     r := r || jsonb_build_object('t', 'T11 los cambios de piscinas quedan en auditoría', 'ok', v_n >= 2, 'det', format('filas %s', v_n));
+  END IF;
+
+  -- ================= U. Migración 010: la red en el nombre automático =================
+  PERFORM set_config('role', 'postgres', true);
+  IF to_regprocedure('public.version_nombres_equipos()') IS NULL THEN
+    r := r || jsonb_build_object('t', 'U0 migración 010 aplicada (version_nombres_equipos existe)', 'ok', false, 'det', 'falta correr db/migraciones/010_red_en_nombres.sql');
+  ELSE
+    SELECT count(*) INTO v_n FROM pg_trigger WHERE tgname = 'trg_redes_nombres_equipos_al_dia' AND NOT tgisinternal;
+    SELECT pg_get_triggerdef(oid) INTO v_txt FROM pg_trigger WHERE tgname = 'trg_equipos_radioenlace_nombres_al_dia' AND NOT tgisinternal;
+    r := r || jsonb_build_object('t', 'U0 migración 010: versión 2 de los nombres, trigger en redes y el de equipos también mira red_id',
+      'ok', public.version_nombres_equipos() = 2 AND v_n = 1 AND v_txt LIKE '%red_id%', 'det', format('versión %s, trigger en redes %s', public.version_nombres_equipos(), v_n));
+    r := r || jsonb_build_object('t', 'U1 la app puede preguntar la versión de los nombres (EXECUTE para anon y authenticated)',
+      'ok', has_function_privilege('anon', 'public.version_nombres_equipos()', 'EXECUTE') AND has_function_privilege('authenticated', 'public.version_nombres_equipos()', 'EXECUTE'), 'det', '');
+
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('role', 'authenticated', true);
+    BEGIN
+      INSERT INTO public.ubicaciones (nombre, tipo, lat, lng) VALUES ('[TX] Torre U', 'torre', -2.22, -79.92) RETURNING id INTO v_uu;
+      INSERT INTO public.ubicaciones (nombre, tipo, lat, lng) VALUES ('[TX] Poste U', 'torre', -2.2205, -79.9205) RETURNING id INTO v_us2;
+      INSERT INTO public.redes (nombre, color) VALUES ('[TX] Red U1', '#004DAB') RETURNING id INTO v_ru1;
+      INSERT INTO public.redes (nombre, color) VALUES (' [TX] Red U2 ', '#EC741D') RETURNING id INTO v_ru2;
+      -- (La sección R cambia el valor de «router» a «router_core»: se lo busca por su etiqueta.)
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, red_id)
+        VALUES (v_uu, '[TX] u1', coalesce((SELECT valor FROM public.tipos_equipo_red WHERE etiqueta = 'Router' ORDER BY valor LIMIT 1), 'router'), v_ru1) RETURNING id INTO u_1;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, red_id, servidor_id) VALUES (v_uu, '[TX] u2', 'switch', v_ru1, u_1) RETURNING id INTO u_2;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, red_id, servidor_id, referencia, medio) VALUES (v_us2, '[TX] u3', 'camara', v_ru2, u_2, ' Norte ', 'cable') RETURNING id INTO u_3;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, servidor_id) VALUES (v_uu, '[TX] u4', 'ap', u_2) RETURNING id INTO u_4;
+      SELECT string_agg(nombre, ' | ' ORDER BY id) INTO v_txt FROM public.equipos_radioenlace WHERE id IN (u_1, u_2, u_3, u_4);
+      r := r || jsonb_build_object('t', 'U2 la red va entre paréntesis con la referencia; la del servidor, solo si es distinta',
+        'ok', v_txt = 'Router ([TX] Red U1) en [TX] Torre U | Switch ([TX] Red U1) en [TX] Torre U conectado a Router | Cámara ([TX] Red U2 · Norte) en [TX] Poste U conectada a Switch ([TX] Red U1) en [TX] Torre U | AP en [TX] Torre U conectado a Switch ([TX] Red U1)', 'det', v_txt);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'U2 la red va entre paréntesis con la referencia; la del servidor, solo si es distinta', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.equipos_radioenlace SET red_id = v_ru2 WHERE id = u_2;
+      SELECT nombre INTO v_t1 FROM public.equipos_radioenlace WHERE id = u_2;
+      SELECT nombre INTO v_t2 FROM public.equipos_radioenlace WHERE id = u_3;
+      r := r || jsonb_build_object('t', 'U3 cambiar la red de un equipo pone al día su nombre y el de sus clientes',
+        'ok', v_t1 = 'Switch ([TX] Red U2) en [TX] Torre U conectado a Router ([TX] Red U1)' AND v_t2 = 'Cámara ([TX] Red U2 · Norte) en [TX] Poste U conectada a Switch en [TX] Torre U', 'det', v_t1 || ' / ' || v_t2);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'U3 cambiar la red de un equipo pone al día su nombre y el de sus clientes', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.redes SET nombre = '[TX] Red U2b' WHERE id = v_ru2;
+      SELECT nombre INTO v_t1 FROM public.equipos_radioenlace WHERE id = u_3;
+      SELECT nombre INTO v_t2 FROM public.equipos_radioenlace WHERE id = u_4;
+      r := r || jsonb_build_object('t', 'U4 renombrar una red pone al día los nombres',
+        'ok', v_t1 = 'Cámara ([TX] Red U2b · Norte) en [TX] Poste U conectada a Switch en [TX] Torre U' AND v_t2 = 'AP en [TX] Torre U conectado a Switch ([TX] Red U2b)', 'det', v_t1 || ' / ' || v_t2);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'U4 renombrar una red pone al día los nombres', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, red_id, servidor_id, referencia, medio) VALUES (v_us2, '[TX] u5', 'camara', v_ru2, u_2, 'Norte', 'cable') RETURNING id INTO u_5;
+      SELECT nombre INTO v_t1 FROM public.equipos_radioenlace WHERE id = u_5;
+      UPDATE public.equipos_radioenlace SET red_id = NULL WHERE id = u_5;
+      SELECT nombre INTO v_t2 FROM public.equipos_radioenlace WHERE id = u_5;
+      r := r || jsonb_build_object('t', 'U5 con la misma red se numera «(2)»; sin red ya no choca y se nombra la red del servidor',
+        'ok', v_t1 = 'Cámara ([TX] Red U2b · Norte) en [TX] Poste U conectada a Switch en [TX] Torre U (2)' AND v_t2 = 'Cámara (Norte) en [TX] Poste U conectada a Switch ([TX] Red U2b) en [TX] Torre U', 'det', v_t1 || ' / ' || v_t2);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'U5 con la misma red se numera «(2)»; sin red ya no choca y se nombra la red del servidor', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      DELETE FROM public.redes WHERE id = v_ru1;
+      SELECT nombre INTO v_t1 FROM public.equipos_radioenlace WHERE id = u_1;
+      SELECT nombre INTO v_t2 FROM public.equipos_radioenlace WHERE id = u_2;
+      r := r || jsonb_build_object('t', 'U6 borrar una red deja los nombres sin ella (aunque la FK la quita desde un trigger interno)',
+        'ok', v_t1 = 'Router en [TX] Torre U' AND v_t2 = 'Switch ([TX] Red U2b) en [TX] Torre U conectado a Router', 'det', v_t1 || ' / ' || v_t2);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'U6 borrar una red deja los nombres sin ella (aunque la FK la quita desde un trigger interno)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    PERFORM set_config('role', 'postgres', true);
+    SELECT count(*) INTO v_n FROM public.equipos_radioenlace WHERE tipo_equipo IS NOT NULL AND nombre <> (SELECT x FROM (SELECT public.f_nombre_base_equipo(id) AS x) b) AND nombre NOT LIKE '% (_)';
+    r := r || jsonb_build_object('t', 'U7 con la red en el nombre, todos los equipos con tipo siguen con su nombre automático guardado', 'ok', v_n = 0, 'det', format('distintos %s', v_n));
   END IF;
 
   -- ================= G. GRANT explícito (sin él, la API responde "permission denied") =================

@@ -1288,3 +1288,80 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
 .inventario-tecnologico-mapa-filtro-grupo[hidden],
 .inventario-tecnologico-mapa-piscinas-control[hidden],
 .inventario-tecnologico-btn[hidden]{display:none !important;}
+
+/* ---------- v8: selector de Servidor (búsqueda, filtros con casillas, orden) ---------- */
+.inventario-tecnologico-serv .inventario-tecnologico-serv-boton{min-height:46px;align-items:center;}
+.inventario-tecnologico-serv-boton-texto{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+.inventario-tecnologico-serv-boton-nombre{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere;font-weight:600;}
+.inventario-tecnologico-serv-boton-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--ink-muted);}
+.inventario-tecnologico-serv-icono-equipo{color:var(--accent-ink);}
+.inventario-tecnologico-serv-icono-activo{color:#5B4B8A;}
+.inventario-tecnologico-serv-icono-raiz{color:#3E7D4F;}
+.inventario-tecnologico-serv-panel{padding:10px;min-width:280px;background:linear-gradient(170deg, #EEF6FB 0%, var(--surface) 120px);border-color:var(--accent-soft-2);}
+.inventario-tecnologico-serv-herramientas{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;}
+.inventario-tecnologico-field .inventario-tecnologico-serv-filtro{flex:1 1 220px;width:auto;min-width:0;padding:7px 9px;}
+.inventario-tecnologico-field .inventario-tecnologico-serv-filtro:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+.inventario-tecnologico-field .inventario-tecnologico-serv-orden{display:inline-flex;align-items:center;gap:6px;flex:none;font-size:12px;font-weight:600;color:var(--ink-muted);}
+.inventario-tecnologico-field .inventario-tecnologico-serv-orden select{width:auto;padding:6px 8px;font-size:12.5px;font-weight:400;}
+.inventario-tecnologico-serv-facetas{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;margin-bottom:8px;}
+.inventario-tecnologico-serv-facetas[hidden]{display:none;}
+.inventario-tecnologico-serv-faceta{position:relative;}
+.inventario-tecnologico-serv-faceta > summary{
+  list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:14px;
+  border:1px solid var(--border-strong);background:var(--surface);font-size:12px;font-weight:600;color:var(--ink);user-select:none;
+}
+.inventario-tecnologico-serv-faceta > summary::-webkit-details-marker{display:none;}
+.inventario-tecnologico-serv-faceta > summary::after{content:"";width:6px;height:6px;border-right:2px solid var(--ink-muted);border-bottom:2px solid var(--ink-muted);transform:translateY(-2px) rotate(45deg);margin-left:2px;}
+.inventario-tecnologico-serv-faceta[open] > summary::after{transform:translateY(1px) rotate(-135deg);}
+.inventario-tecnologico-serv-faceta > summary:hover{border-color:var(--accent);}
+.inventario-tecnologico-serv-faceta > summary:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+.inventario-tecnologico-serv-faceta-estado{font-weight:400;color:var(--ink-muted);}
+.inventario-tecnologico-serv-faceta-activa > summary{background:var(--accent-soft);border-color:var(--accent-soft-2);color:var(--accent-ink);}
+.inventario-tecnologico-serv-faceta-activa .inventario-tecnologico-serv-faceta-estado{color:var(--accent-ink);font-weight:700;}
+.inventario-tecnologico-serv-faceta-cuerpo{
+  position:absolute;top:calc(100% + 4px);left:0;z-index:5;min-width:230px;max-width:300px;padding:8px;
+  background:var(--surface);border:1px solid var(--accent-soft-2);border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);
+}
+.inventario-tecnologico-field .inventario-tecnologico-serv-faceta-cuerpo label.inventario-tecnologico-filter-opt{font-size:12.5px;font-weight:400;color:var(--ink);}
+.inventario-tecnologico-field .inventario-tecnologico-serv-faceta-cuerpo input[type=checkbox]{width:15px;height:15px;padding:0;margin:0;flex:none;accent-color:var(--accent);}
+.inventario-tecnologico-serv-faceta-misma .inventario-tecnologico-filter-opt-label{font-weight:600;}
+.inventario-tecnologico-serv-cuenta{font-size:11.5px;color:var(--ink-muted);margin:0 2px 4px;}
+.inventario-tecnologico-serv-lista{max-height:300px;border-top:1px solid var(--border);padding-top:4px;}
+.inventario-tecnologico-serv-grupo{list-style:none;padding:8px 8px 4px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-muted);}
+.inventario-tecnologico-serv-grupo .inventario-tecnologico-mapa-muted{text-transform:none;letter-spacing:0;font-weight:400;}
+.inventario-tecnologico-serv-op{align-items:center;gap:10px;padding:7px 8px;}
+.inventario-tecnologico-serv-op-icono{flex:none;display:inline-flex;width:18px;justify-content:center;}
+.inventario-tecnologico-serv-op-texto{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+.inventario-tecnologico-serv-op-nombre{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere;}
+.inventario-tecnologico-serv-op-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--ink-muted);font-weight:400;}
+.inventario-tecnologico-serv-op-marcas{flex:none;display:inline-flex;gap:4px;align-items:center;max-width:45%;flex-wrap:wrap;justify-content:flex-end;}
+.inventario-tecnologico-serv-op-marcas .inventario-tecnologico-mapa-red-chip{margin-right:0;}
+.inventario-tecnologico-serv-marca{font-size:10.5px;font-weight:700;line-height:16px;padding:0 7px;border-radius:10px;white-space:nowrap;}
+.inventario-tecnologico-serv-marca-misma{background:#E4EEF3;color:#1F5F70;}
+.inventario-tecnologico-serv-marca-nuevo{background:#EFEAF7;color:#5B4B8A;}
+.inventario-tecnologico-serv-op-ninguno .inventario-tecnologico-serv-op-nombre{font-style:italic;color:var(--ink-muted);}
+.inventario-tecnologico-serv-op[aria-selected="true"] .inventario-tecnologico-serv-op-nombre{font-weight:600;color:var(--accent-ink);font-style:normal;}
+.inventario-tecnologico-serv-op mark{background:#FDE7C8;color:inherit;border-radius:2px;padding:0 1px;}
+.inventario-tecnologico-serv-vacio-ayuda{margin-top:4px;color:var(--ink-muted);}
+.inventario-tecnologico-serv-teclas{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:10.5px;color:var(--ink-faint);}
+.inventario-tecnologico-serv-limpiar{border-radius:14px;padding:3px 10px;font-size:12px;}
+.inventario-tecnologico-mapa-medio-sugerido{color:#1F5F70;font-weight:600;}
+/* Las columnas de los formularios no se ensanchan por una opción larga de un
+   select (en el celular empujaba el formulario fuera de la pantalla). */
+.inventario-tecnologico-form-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+.inventario-tecnologico-form-grid.inventario-tecnologico-cols-1{grid-template-columns:minmax(0,1fr);}
+.inventario-tecnologico-form-grid > .inventario-tecnologico-field{min-width:0;}
+@media (max-width:720px){
+  .inventario-tecnologico-form-grid{grid-template-columns:minmax(0,1fr);}
+}
+@media (hover:none) and (pointer:coarse){
+  .inventario-tecnologico-serv-teclas{display:none;}
+}
+@media (max-width:600px){
+  .inventario-tecnologico-serv-op-marcas{display:none;}
+  .inventario-tecnologico-serv-faceta-cuerpo{position:static;margin-top:4px;max-width:none;}
+  .inventario-tecnologico-serv-faceta[open]{flex-basis:100%;}
+}
+@media (prefers-reduced-motion:reduce){
+  .inventario-tecnologico-serv-faceta > summary::after{transition:none;}
+}

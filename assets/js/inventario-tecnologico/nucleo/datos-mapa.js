@@ -22,7 +22,10 @@
 // Migración 008: medio de cada enlace (cable, fibra, inalámbrico) y nombres
 // guardados al día (los recalcula la base). Se detecta pidiendo la columna
 // "medio" (m.red008.disponible). Migración 009: piscinas de la camaronera
-// (polígonos) para la capa "Piscinas" (m.piscinas009.disponible).
+// (polígonos) para la capa "Piscinas" (m.piscinas009.disponible). Migración
+// 010: la red entra en el nombre automático; se detecta llamando a
+// version_nombres_equipos() (m.nombres010.disponible). Sin ella la app arma
+// los nombres sin la red, igual que la base.
 import { sb } from "./config.js";
 import { cargarActivos } from "./datos.js";
 import { state } from "./estado.js";
@@ -59,6 +62,7 @@ export function crearEstadoMapa(){
     red008: { disponible: false },                 // columna equipos_radioenlace.medio (008)
     piscinas: [],                                  // piscinas de la camaronera (009)
     piscinas009: { disponible: false, error: null },
+    nombres010: { disponible: false },             // la red va en el nombre automático (010)
     foco: null,           // { ubicacionId, activoId } pendiente de aplicar al abrir el mapa (p. ej. "Ver en mapa")
     plano: null,          // capa "Plano" (migración 006): normalizarPlano(fila) + error (null si se leyó bien)
   };
@@ -74,7 +78,7 @@ const opcional = consulta=>Promise.resolve(consulta).then(r=>r, err=>({ data: nu
 
 export async function refrescarDatosMapa(){
   const m = estadoMapa();
-  const [t, u, e, r, h, te, rd, at, me, pi] = await Promise.all([
+  const [t, u, e, r, h, te, rd, at, me, pi, vn] = await Promise.all([
     sb.from("tipos_ubicacion").select("*").order("orden"),
     sb.from("ubicaciones").select("*").order("nombre"),
     sb.from("equipos_radioenlace").select("*").order("nombre"),
@@ -85,6 +89,7 @@ export async function refrescarDatosMapa(){
     opcional(sb.from("atajos_simulacion").select("*").order("orden").order("nombre")),
     opcional(sb.from("equipos_radioenlace").select("id, medio").limit(1)),
     opcional(sb.from("piscinas").select("*").order("orden").order("nombre")),
+    opcional(sb.rpc("version_nombres_equipos")),
   ]);
   const error = t.error || u.error || e.error || r.error || h.error;
   if(error){ m.error = error; throw error; }
@@ -100,7 +105,8 @@ export async function refrescarDatosMapa(){
   m.red008 = { disponible: !me.error };
   m.piscinas009 = { disponible: !pi.error, error: pi.error || null };
   m.piscinas = pi.error ? [] : (pi.data || []);
-  aplicarNombres(m.equipos, { ubicaciones: m.ubicaciones, tipos: m.tiposEquipo });
+  m.nombres010 = { disponible: !vn.error && Number(vn.data) >= 2 };
+  aplicarNombres(m.equipos, { ubicaciones: m.ubicaciones, tipos: m.tiposEquipo, redes: m.redes, conRed: m.nombres010.disponible });
   m.equipos.sort((a, b)=>String(a.nombre).localeCompare(String(b.nombre), "es"));
   m.cargado = true;
   m.error = null;
@@ -164,6 +170,16 @@ export function hayMedio(){ return !!(estadoMapa().red008 || {}).disponible; }
 export function hayPiscinas(){ return !!(estadoMapa().piscinas009 || {}).disponible; }
 
 export function cargarPiscinas(){ return estadoMapa().piscinas || []; }
+
+// true si la migración 010 está corrida (la red entra en el nombre automático).
+export function hayNombresConRed(){ return !!(estadoMapa().nombres010 || {}).disponible; }
+
+// Lo que necesitan nombreParaGuardar / nombresAutomaticos (mapa-nombres.js)
+// para armar los nombres igual que la base.
+export function datosNombres(equipos = estadoMapa().equipos){
+  const m = estadoMapa();
+  return { equipos, ubicaciones: m.ubicaciones, tipos: m.tiposEquipo, redes: m.redes, conRed: hayNombresConRed() };
+}
 
 // Índices calculados sobre lo ya cargado + los activos del listado. Es barato
 // (decenas de ubicaciones, ~100 activos), así que se recalcula cuando se pide

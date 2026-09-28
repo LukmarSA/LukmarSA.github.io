@@ -1,6 +1,6 @@
 // Pruebas unitarias de la lógica pura del mapa (nucleo/geo.js,
 // nucleo/mapa-logica.js, nucleo/mapa-jerarquia.js, nucleo/plano-mapa.js y
-// nucleo/mapa-nombres.js, nucleo/piscinas.js). No necesitan navegador
+// nucleo/mapa-nombres.js, nucleo/piscinas.js, nucleo/selector-servidor.js). No necesitan navegador
 // ni Supabase.
 //   node mapa-unit.mjs        (o: npm run test:mapa)
 process.env.TZ = "America/Guayaquil"; // para probar el caso "después de las 19:00" de hoyLocalISO
@@ -13,6 +13,7 @@ import * as J from "../assets/js/inventario-tecnologico/nucleo/mapa-jerarquia.js
 import * as PL from "../assets/js/inventario-tecnologico/nucleo/plano-mapa.js";
 import * as N from "../assets/js/inventario-tecnologico/nucleo/mapa-nombres.js";
 import * as PI from "../assets/js/inventario-tecnologico/nucleo/piscinas.js";
+import * as SS from "../assets/js/inventario-tecnologico/nucleo/selector-servidor.js";
 
 let ok = 0, total = 0;
 const fallas = [];
@@ -811,6 +812,151 @@ prueba("piscinas: caja de varias piscinas", ()=>{
   assert.deepEqual(caja, [[-2.36, -79.73], [-2.3, -79.69]]);
   assert.equal(PI.cajaPiscinas([]), null);
 });
+// ---------------------------------------------------------------- v8: la red en el nombre (010)
+const REDES_N = [{ id:1, nombre:"Red Oficina", color:"#004DAB" }, { id:2, nombre:" Red  Cámaras ", color:"#EC741D" }];
+const ctxRed = equipos=>({ equipos, ubicaciones: UB_RED, tipos: TIPOS_RED, redes: REDES_N, conRed: true });
+prueba("010: la red va entre paréntesis con la referencia («Red · Referencia»); la del servidor solo si es distinta", ()=>{
+  const equipos = [
+    eqN(1, 3, "router", null, { red_id:1 }),
+    eqN(2, 3, "switch", 1, { red_id:1 }),                                // misma red que su servidor: no se repite
+    eqN(3, 1, "camara", 2, { red_id:2, referencia:" Norte ", medio:"cable" }), // otra red: se nombra la del servidor
+    eqN(4, 3, "ap", 2),                                                  // sin red: se nombra la del servidor
+    eqN(5, 2, "ptp", 4, { red_id:1 }),                                   // servidor sin red: nada que nombrar
+  ];
+  const n = N.nombresAutomaticos(ctxRed(equipos));
+  assert.equal(n.get(1), "Router (Red Oficina) en Oficina");
+  assert.equal(n.get(2), "Switch (Red Oficina) en Oficina conectado a Router");
+  assert.equal(n.get(3), "Cámara (Red  Cámaras · Norte) en Torre K conectada a Switch (Red Oficina) en Oficina");
+  assert.equal(n.get(4), "AP en Oficina conectado a Switch (Red Oficina)");
+  assert.equal(n.get(5), "Punto a Punto (Red Oficina) en Torre L enlazado a AP en Oficina");
+});
+prueba("010: sin la migración (conRed = false) la red no entra en el nombre, como en la base", ()=>{
+  const equipos = [eqN(1, 3, "router", null, { red_id:1 }), eqN(2, 3, "switch", 1, { red_id:2 })];
+  const n = N.nombresAutomaticos({ ...ctxRed(equipos), conRed: false });
+  assert.equal(n.get(1), "Router en Oficina");
+  assert.equal(n.get(2), "Switch en Oficina conectado a Router");
+});
+prueba("010: una red que ya no existe no se nombra; un servidor sin tipo sigue con su nombre guardado", ()=>{
+  const equipos = [eqN(1, 3, null, null, { red_id:2, nombre:"Radio viejo" }), eqN(2, 3, "switch", 1, { red_id:99 })];
+  const n = N.nombresAutomaticos(ctxRed(equipos));
+  assert.equal(n.get(2), "Switch en Oficina conectado a Radio viejo");
+});
+prueba("010: con la misma red se numera «(2)»; con otra red ya no chocan", ()=>{
+  const equipos = [eqN(1, 1, "camara", null, { red_id:1 }), eqN(2, 1, "camara", null, { red_id:1 }), eqN(3, 1, "camara", null, { red_id:2 })];
+  const n = N.nombresAutomaticos(ctxRed(equipos));
+  assert.equal(n.get(1), "Cámara (Red Oficina) en Torre K");
+  assert.equal(n.get(2), "Cámara (Red Oficina) en Torre K (2)");
+  assert.equal(n.get(3), "Cámara (Red  Cámaras) en Torre K");
+  assert.equal(N.nombreParaGuardar({ ubicacion_id:1, tipo_equipo:"camara", red_id:2 }, ctxRed(equipos), 3), "Cámara (Red  Cámaras) en Torre K");
+  assert.equal(N.textoParentesis(["  ", null, " Sur "]), " (Sur)");
+  assert.equal(N.textoParentesis([]), "");
+});
+
+// ---------------------------------------------------------------- v8: selector de servidor
+const UB_S = [
+  { id:1, nombre:"Torre principal", lat:-2.351129, lng:-79.724676 },
+  { id:2, nombre:"Data Center", lat:-2.350922, lng:-79.724339 },
+  { id:3, nombre:"Intensivo", lat:-2.342065, lng:-79.726569 },
+  { id:4, nombre:"Bodega", lat:-2.352943, lng:-79.725584 },
+];
+const UB_S_MAP = new Map(UB_S.map(u=>[u.id, u]));
+const TIPOS_S = [...TIPOS_RED, { valor:"nvr", etiqueta:"NVR", genero:"m", activo:false }];
+const EQ_S = [
+  { id:10, ubicacion_id:1, nombre:"Punto a Punto (Apuntando al Intensivo) en Torre principal", tipo_equipo:"ptp", red_id:1, modelo:"Cambium PTP 550" },
+  { id:11, ubicacion_id:1, nombre:"Switch en Torre principal", tipo_equipo:"switch", red_id:null },
+  { id:12, ubicacion_id:3, nombre:"Estación (Red Oficina) en Intensivo", tipo_equipo:"estacion", red_id:1, activo_id:7 },
+  { id:13, ubicacion_id:4, nombre:"PTP viejo", tipo_equipo:null, red_id:null },
+];
+const ACT_S = [
+  { id:134, tipo:"Router", marca:"MikroTik", modelo:"RB4011", propiedad:"lukmar" }, // ubicado en el Data Center: se ofrece
+  { id:135, tipo:"router", marca:null, modelo:null },     // sin ubicación: no
+  { id:136, tipo:"Laptop", marca:"Dell", modelo:"5440" },  // no es de red: no
+  { id:7, tipo:"Estación", marca:null, modelo:null },     // ya es un equipo (12): no
+  { id:138, tipo:"NVR", marca:null, modelo:null },        // tipo inactivo: no
+  { id:139, tipo:"Cámara", marca:"Hik", modelo:null },    // excluido a propósito (es el activo del propio equipo): no
+];
+const VIG_S = new Map([[134, { ubicacion_id:2 }], [136, { ubicacion_id:2 }], [7, { ubicacion_id:3 }], [138, { ubicacion_id:2 }], [139, { ubicacion_id:2 }]]);
+const opcionesS = (extra = {})=>SS.opcionesServidor({
+  candidatos: EQ_S, ubicacionId: 1, ubicacionPorId: UB_S_MAP, tiposEquipo: TIPOS_S, redes: REDES_N,
+  conActivos: true, activos: ACT_S, vigentePorActivo: VIG_S, equipoPorActivo: new Map([[7, EQ_S[2]]]),
+  excluirActivos: [139], tagActivo: a=>`LKM-${a.id}`, ...extra,
+});
+prueba("selector: tipo de red de un activo por etiqueta o valor, sin tildes ni mayúsculas (y no uno inactivo)", ()=>{
+  assert.equal(SS.tipoEquipoDeActivo("Router", TIPOS_S), "router");
+  assert.equal(SS.tipoEquipoDeActivo(" ESTACION ", TIPOS_S), "estacion");
+  assert.equal(SS.tipoEquipoDeActivo("punto a punto", TIPOS_S), "ptp");
+  assert.equal(SS.tipoEquipoDeActivo("NVR", TIPOS_S), null);
+  assert.equal(SS.tipoEquipoDeActivo("Laptop", TIPOS_S), null);
+  assert.equal(SS.tipoEquipoDeActivo("", TIPOS_S), null);
+});
+prueba("selector: ofrece los equipos candidatos y los activos ubicados de un tipo de red que todavía no son equipos", ()=>{
+  const ops = opcionesS();
+  assert.deepEqual(ops.map(o=>o.clave), ["10", "11", "12", "13", "a:134"]);
+  const r = ops.find(o=>o.clave === "a:134");
+  assert.equal(r.origen, "activo"); assert.equal(r.nombre, "Router en Data Center"); assert.equal(r.tipo, "router");
+  assert.equal(r.ubicacionNombre, "Data Center"); assert.equal(r.tag, "LKM-134"); assert.equal(r.modelo, "MikroTik RB4011");
+  assert.equal(r.misma, false); cerca(r.distanciaKm, 0.044, 0.01, "Data Center a unos 44 m");
+  const s = ops.find(o=>o.clave === "11");
+  assert.equal(s.misma, true); assert.equal(s.distanciaKm, 0);
+  assert.equal(ops.find(o=>o.clave === "10").redNombre, "Red Oficina");
+  assert.equal(opcionesS({ conActivos: false }).length, 4, "sin activos (formulario de respaldo)");
+  assert.equal(opcionesS({ nombreNuevo: ({ tipo, ubicacion })=>`${tipo}@${ubicacion.id}` }).find(o=>o.origen === "activo").nombre, "router@2");
+});
+prueba("selector: búsqueda sin tildes, por varias palabras y por tag o modelo", ()=>{
+  const ops = opcionesS();
+  assert.deepEqual(SS.filtrarServidores(ops, { texto:"router data" }).map(o=>o.clave), ["a:134"]);
+  assert.deepEqual(SS.filtrarServidores(ops, { texto:"ESTACION" }).map(o=>o.clave), ["12"]);
+  assert.deepEqual(SS.filtrarServidores(ops, { texto:"lkm-134" }).map(o=>o.clave), ["a:134"]);
+  assert.deepEqual(SS.filtrarServidores(ops, { texto:"cambium" }).map(o=>o.clave), ["10"]);
+  assert.equal(SS.filtrarServidores(ops, { texto:"   " }).length, 5);
+  assert.equal(SS.filtrarServidores(ops, { texto:"zzz" }).length, 0);
+});
+prueba("selector: filtros por ubicación, tipo, red y origen (null = todos, vacío = ninguno)", ()=>{
+  const ops = opcionesS();
+  assert.deepEqual(SS.filtrarServidores(ops, { filtros:{ ubicacion: new Set(["1"]) } }).map(o=>o.clave), ["10", "11"]);
+  assert.deepEqual(SS.filtrarServidores(ops, { filtros:{ tipo: new Set(["router", "sin"]) } }).map(o=>o.clave), ["13", "a:134"]);
+  assert.deepEqual(SS.filtrarServidores(ops, { filtros:{ red: new Set(["1"]) } }).map(o=>o.clave), ["10", "12"]);
+  assert.deepEqual(SS.filtrarServidores(ops, { filtros:{ origen: new Set(["activo"]) } }).map(o=>o.clave), ["a:134"]);
+  assert.equal(SS.filtrarServidores(ops, { filtros:{ ubicacion: new Set() } }).length, 0);
+  assert.equal(SS.filtrarServidores(ops, { filtros:{ ubicacion: null } }).length, 5);
+});
+prueba("selector: facetas con cuentas que respetan la búsqueda y las demás facetas (como los filtros de la tabla)", ()=>{
+  const ops = opcionesS();
+  const f = SS.facetasServidor(ops);
+  assert.deepEqual(Object.keys(f), ["ubicacion", "tipo", "red", "origen"]);
+  assert.deepEqual(f.ubicacion.map(v=>`${v.etiqueta}:${v.n}`), ["Torre principal:2", "Bodega:1", "Data Center:1", "Intensivo:1"], "la propia ubicación primero");
+  assert.equal(f.tipo[f.tipo.length - 1].valor, "sin", "«Sin tipo» al final");
+  assert.deepEqual(f.origen.map(v=>v.valor), ["equipo", "activo"]);
+  const g = SS.facetasServidor(ops, { filtros:{ ubicacion: new Set(["1"]) } });
+  assert.equal(g.ubicacion.find(v=>v.valor === "2").n, 1, "su propia faceta no se filtra a sí misma");
+  assert.equal(g.tipo.find(v=>v.valor === "router").n, 0, "las demás sí");
+  const h = SS.facetasServidor(ops, { texto:"torre" });
+  assert.equal(h.ubicacion.find(v=>v.valor === "1").n, 2);
+  assert.equal(h.ubicacion.find(v=>v.valor === "2").n, 0);
+  assert.ok(!("origen" in SS.facetasServidor(opcionesS({ conActivos: false }))), "una faceta con un solo valor no se muestra");
+});
+prueba("selector: orden más cerca primero (misma ubicación arriba), por nombre, ubicación y tipo", ()=>{
+  const ops = opcionesS();
+  assert.deepEqual(SS.ordenarServidores(ops, "cerca").map(o=>o.clave), ["10", "11", "a:134", "13", "12"]);
+  assert.deepEqual(SS.ordenarServidores(ops, "az").map(o=>o.clave), ["12", "13", "10", "a:134", "11"]);
+  assert.deepEqual(SS.ordenarServidores(ops, "za").map(o=>o.clave), ["11", "a:134", "10", "13", "12"]);
+  assert.deepEqual(SS.ordenarServidores(ops, "ubicacion").map(o=>o.clave), ["13", "a:134", "12", "10", "11"]);
+  assert.deepEqual(SS.ordenarServidores(ops, "tipo").map(o=>o.tipoEtiqueta), ["Estación", "Punto a Punto", "Router", "Switch", null]);
+  assert.deepEqual(SS.ordenarServidores(ops, "otro").map(o=>o.clave), SS.ordenarServidores(ops, "cerca").map(o=>o.clave), "orden desconocido = por defecto");
+  assert.ok(SS.esOrdenServidor("za") && !SS.esOrdenServidor("x"));
+});
+prueba("selector: sugiere cable cuando el servidor está en otra ubicación y un extremo no hace radio", ()=>{
+  assert.equal(SS.medioSugerido({ clienteTipo:"ptp", servidorTipo:"router", misma:false }), "cable");
+  assert.equal(SS.medioSugerido({ clienteTipo:"camara", servidorTipo:"switch", misma:false }), "cable");
+  assert.equal(SS.medioSugerido({ clienteTipo:null, servidorTipo:"router", misma:false }), "cable");
+  assert.equal(SS.medioSugerido({ clienteTipo:"estacion", servidorTipo:"ptp", misma:false }), null, "radio con radio: automático");
+  assert.equal(SS.medioSugerido({ clienteTipo:null, servidorTipo:null, misma:false }), null, "sin tipos no se sabe");
+  assert.equal(SS.medioSugerido({ clienteTipo:"ptp", servidorTipo:"router", misma:true }), null, "en la misma ubicación el automático ya es cable");
+  assert.equal(SS.motivoMedioSugerido({ clienteTipo:"ptp", servidorTipo:"router" }, TIPOS_S), "Router no hace radioenlaces");
+  assert.equal(SS.motivoMedioSugerido({ clienteTipo:"camara", servidorTipo:"ptp" }, TIPOS_S), "Cámara no hace radioenlaces");
+  assert.equal(SS.haceRadio(null), null);
+});
+
 prueba("errores de la 008/009 traducidos", ()=>{
   assert.match(L.traducirErrorMapa({ code:"23514", message:'violates check constraint "equipos_radioenlace_medio_valido"' }), /cable, fibra/);
   assert.match(L.traducirErrorMapa({ code:"23505", message:'duplicate key value violates unique constraint "piscinas_nombre_unico"' }), /Ya hay una piscina/);

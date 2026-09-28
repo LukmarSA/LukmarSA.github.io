@@ -18,7 +18,9 @@
 // De la 008 (fixture.m008): la columna "medio" y los nombres guardados al día
 // (la base los recalcula después de cada cambio, como el trigger). De la 009:
 // la tabla de piscinas (se lee con ver_mapa, la escribe el admin, nombre único
-// y forma válida).
+// y forma válida). De la 010 (fixture.m010): la red entre paréntesis en el
+// nombre (la del servidor, solo si es distinta), recálculo al cambiar o borrar
+// una red y version_nombres_equipos() = 2.
 // Las reglas de la base en sí se prueban contra Supabase de verdad
 // (db/pruebas/mapa_pruebas_reglas_rls.sql), no aquí.
 (function(){
@@ -34,6 +36,7 @@
   const hay007 = !!(fixture.tablas && "tipos_equipo_red" in fixture.tablas);
   const hay008 = !!fixture.m008;
   const hay009 = !!(fixture.tablas && "piscinas" in fixture.tablas);
+  const hay010 = !!fixture.m010;
 
   const tabla = t=>(DB[t] ||= []);
   const siguienteId = t=>tabla(t).reduce((m, r)=>Math.max(m, Number(r.id) || 0), 0) + 1;
@@ -100,19 +103,24 @@
     const tipos = new Map(tabla("tipos_equipo_red").map(t=>[t.valor, t]));
     const porId = new Map(eqs.map(e=>[e.id, e]));
     const clave = t=>String(t ?? "").normalize("NFC").trim().toLowerCase().replace(/\s+/g, " ");
-    const ref = r=>{ const x = String(r ?? "").trim(); return x ? ` (${x})` : ""; };
+    const redes = new Map(tabla("redes").map(r=>[r.id, r]));
+    // « (Red · Referencia)» (010) o « (Referencia)».
+    const par = (red, ref)=>{ const p = [red, ref].map(x=>String(x ?? "").trim()).filter(Boolean); return p.length ? ` (${p.join(" · ")})` : ""; };
     const base = e=>{
       const t = e.tipo_equipo ? tipos.get(e.tipo_equipo) : null;
       if(!t) return null;
       const u = ubic.get(e.ubicacion_id);
-      let n = `${t.etiqueta}${ref(e.referencia)} en ${u ? u.nombre : "?"}`;
+      const r = hay010 && !vacio(e.red_id) ? redes.get(e.red_id) || null : null;
+      let n = `${t.etiqueta}${par(r && r.nombre, e.referencia)} en ${u ? u.nombre : "?"}`;
       const sv = vacio(e.servidor_id) ? null : porId.get(e.servidor_id);
       if(sv){
         const misma = sv.ubicacion_id === e.ubicacion_id;
         const medio = ["cable", "fibra", "inalambrico"].includes(e.medio) ? e.medio : (misma ? "cable" : "inalambrico");
         const ts = sv.tipo_equipo ? tipos.get(sv.tipo_equipo) : null;
+        const rs = hay010 && ts && !vacio(sv.red_id) ? redes.get(sv.red_id) || null : null;
+        const otra = rs && (!r || rs.id !== r.id) ? rs.nombre : null;
         const us = ubic.get(sv.ubicacion_id);
-        n += ` ${medio === "inalambrico" ? "enlazad" : "conectad"}${t.genero === "f" ? "a" : "o"} a ${ts ? `${ts.etiqueta}${ref(sv.referencia)}` : sv.nombre}${misma ? "" : ` en ${us ? us.nombre : "?"}`}`;
+        n += ` ${medio === "inalambrico" ? "enlazad" : "conectad"}${t.genero === "f" ? "a" : "o"} a ${ts ? `${ts.etiqueta}${par(otra, sv.referencia)}` : sv.nombre}${misma ? "" : ` en ${us ? us.nombre : "?"}`}`;
       }
       return n;
     };
@@ -300,7 +308,7 @@
               if(!vacio(r.servidor_id) && r.servidor_id !== servidorAntes) DB.enlaces_respaldo = tabla("enlaces_respaldo").filter(x=>!(x.equipo_id === r.id && x.servidor_alternativo_id === r.servidor_id));
             }
           });
-          if(["equipos_radioenlace", "ubicaciones", "tipos_equipo_red"].includes(this.t)) recalcularNombres();
+          if(["equipos_radioenlace", "ubicaciones", "tipos_equipo_red"].includes(this.t) || (hay010 && this.t === "redes")) recalcularNombres();
           escrituras.push({ tabla: this.t, op: "update", filas: copia(resultado), parche: copia(this.datos) });
         } else if(this.op === "delete"){
           resultado = ESCRITURA_SOLO_ADMIN.includes(this.t) && !esAdmin() ? [] : this.filas();
@@ -316,7 +324,7 @@
             for(const e of tabla("equipos_radioenlace")) if(ids.includes(e.red_id)) e.red_id = null;
           }
           DB[this.t] = tabla(this.t).filter(r=>!resultado.includes(r));
-          if(this.t === "equipos_radioenlace") recalcularNombres();
+          if(this.t === "equipos_radioenlace" || (hay010 && this.t === "redes")) recalcularNombres();
           escrituras.push({ tabla: this.t, op: "delete", filas: copia(resultado) });
         } else if(this.op === "upsert"){
           resultado = this.datos.map(f=>{
@@ -347,6 +355,9 @@
       rpc: async (nombre, args)=>{
         if(fallas[`rpc:${nombre}`]) return { data: null, error: fallas[`rpc:${nombre}`] };
         // Solo lectura (migración 004): no se anota como escritura.
+        if(nombre === "version_nombres_equipos"){
+          return hay010 ? { data: 2, error: null } : { data: null, error: { code: "PGRST202", message: "Could not find the function public.version_nombres_equipos without parameters in the schema cache" } };
+        }
         if(nombre === "equipo_radio_de_activo"){
           const e = (puede("ver_listado") || puede("ver_mapa")) ? tabla("equipos_radioenlace").find(x=>x.activo_id === args.p_activo_id) : null;
           return { data: e ? [{ id: e.id, nombre: e.nombre, ubicacion_id: e.ubicacion_id }] : [], error: null };

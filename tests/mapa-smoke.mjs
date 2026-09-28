@@ -143,7 +143,10 @@ const PISCINAS_POLIGONOS = [
   { id:3, nombre:"L08", sector:"L", hectareas:null, puntos:cuadradoAlrededor([-2.2650, -79.9110], 1.1), fuente:"imagen", revisar:true, notas:null, orden:30, activa:true },
 ];
 
-function fixture({ rol = "administrador", permitidas = [], fallas = {}, red007 = false, red008 = false, piscinas = false } = {}){
+// v8: un Data Center junto a la Oficina con un Router del inventario ubicado
+// ahí que todavía no es equipo de red (y otro Router sin ubicación).
+const DATA_CENTER = { id:5, nombre:"Data Center", tipo:"oficina", lat:-2.1896, lng:-79.8894, direccion:null, notas:null, fotos:[], activa:true };
+function fixture({ rol = "administrador", permitidas = [], fallas = {}, red007 = false, red008 = false, red010 = false, servidor = false, piscinas = false } = {}){
   const uid = rol === "administrador" ? "u-admin" : "u-usuario";
   const permisos = [];
   for(const r of ["registrador", "visitante"]){
@@ -154,6 +157,13 @@ function fixture({ rol = "administrador", permitidas = [], fallas = {}, red007 =
   }
   const conExtras = tablas=>{
     if(red008) for(const e of tablas.equipos_radioenlace) e.medio = null;
+    if(servidor){
+      tablas.ubicaciones.push({ ...DATA_CENTER });
+      tablas.tipos_activo.push({ nombre:"Router", icono_svg:SVG16, color:"#3E7D4F", campos_pertinentes:["serie","mac_ethernet"], orden:40, activo:true });
+      tablas.activos.push({ id:4, propiedad:"lukmar", tipo:"Router", marca:"MikroTik", modelo:"RB4011", serie:"SN-R4", estado:"uso", fotos:[] });
+      tablas.activos.push({ id:5, propiedad:"lukmar", tipo:"Router", marca:"TP-Link", modelo:"ER605", serie:"SN-R5", estado:"disponible", fotos:[] });
+      tablas.historial_ubicacion.push({ id:1002, activo_id:4, ubicacion_id:5, desde:"2026-09-25", hasta:null, notas:null });
+    }
     if(piscinas) tablas.piscinas = PISCINAS_POLIGONOS.map(p=>JSON.parse(JSON.stringify(p)));
     return tablas;
   };
@@ -161,6 +171,7 @@ function fixture({ rol = "administrador", permitidas = [], fallas = {}, red007 =
     hoy: HOY,
     fallas,
     m008: red008,
+    m010: red010,
     sesion: { user: { id: uid, email: `${rol}@lukmar.local` } },
     tablas: conExtras((red007 ? conRed007 : x=>x)({
       perfiles: [{ id:"u-admin", rol:"administrador", nombre_completo:"Admin Pruebas" }, { id:"u-usuario", rol, nombre_completo:"Usuario Pruebas" }],
@@ -287,6 +298,13 @@ async function esperarCuenta(page, sel, n, detalle = ""){
 async function confirmar(page){
   await page.waitForSelector("#inventario-tecnologico-btn-confirmar-si");
   await page.click("#inventario-tecnologico-btn-confirmar-si");
+}
+// Selector de servidor (v8): abre el panel y hace clic en la opción.
+async function elegirServidor(page, valor, id = "inventario-tecnologico-equipo-servidor"){
+  await page.click(`#${id}-boton`);
+  await page.waitForSelector(`#${id}-panel:not([hidden])`);
+  await page.click(`#${id}-lista [data-clave="${valor}"]`);
+  await page.waitForSelector(`#${id}-panel[hidden]`, { state: "attached" });
 }
 async function esperarSinModal(page){ await page.waitForFunction(()=>!document.querySelector("#inventario-tecnologico-modal-host .inventario-tecnologico-modal")); }
 async function toast(page, re){ await page.waitForFunction(re=>new RegExp(re).test(document.querySelector(".inventario-tecnologico-toast-stack")?.innerText || ""), re.source, { timeout: 4000 }); }
@@ -499,15 +517,17 @@ async function escenarioAdmin(browser, base){
   // ---------------- Formularios de administrador: equipo con servidor, respaldos
   await irAUbicacionDesdePanel(page, 4);
   await page.click(`${SEL.panel} [data-accion="nuevo-equipo"]`);
-  await page.waitForSelector("#inventario-tecnologico-equipo-servidor");
+  await page.waitForSelector("#inventario-tecnologico-equipo-servidor-boton");
   await page.fill("#inventario-tecnologico-equipo-nombre", "Cámara Bodega");
-  await page.selectOption("#inventario-tecnologico-equipo-servidor", "40");
+  await elegirServidor(page, "40");
   await verificar("equipo nuevo: el servidor en la misma ubicación se ofrece primero y se explica como cable", async ()=>{
-    const grupos = await page.locator("#inventario-tecnologico-equipo-servidor optgroup").evaluateAll(g=>g.map(x=>x.label));
-    exigir(/^Bodega Sur — misma ubicación/.test(grupos[0]), grupos.join(" | "));
+    await page.click("#inventario-tecnologico-equipo-servidor-boton");
+    const primeras = await page.locator("#inventario-tecnologico-equipo-servidor-lista [role=option]").evaluateAll(l=>l.slice(0, 2).map(x=>x.dataset.clave + ":" + x.innerText.replace(/\s+/g, " ")));
+    await page.keyboard.press("Escape");
+    exigir(primeras[0].startsWith(":Ninguno") && /^40:.*misma ubicación/.test(primeras[1]), primeras.join(" | "));
     exigir(/Por cable/.test(await texto(page, "#inventario-tecnologico-equipo-servidor-calculo")), await texto(page, "#inventario-tecnologico-equipo-servidor-calculo"));
   });
-  await page.selectOption("#inventario-tecnologico-equipo-servidor", "21");
+  await elegirServidor(page, "21");
   await verificar("… y uno en otra ubicación muestra distancia y azimut", async ()=>{
     exigir(/Radioenlace con «AP Santa Ana».*km · azimut desde aquí/.test(await texto(page, "#inventario-tecnologico-equipo-servidor-calculo")), await texto(page, "#inventario-tecnologico-equipo-servidor-calculo"));
   });
@@ -525,7 +545,7 @@ async function escenarioAdmin(browser, base){
 
   await seleccionarEquipoDesdeSuUbicacion(page, 1, 10);
   await page.click(`${SEL.panel} [data-accion="editar-equipo"][data-id="10"]`);
-  await page.waitForSelector("#inventario-tecnologico-equipo-servidor");
+  await page.waitForSelector("#inventario-tecnologico-equipo-servidor-boton");
   await verificar("editar equipo: no ofrece como servidor a él mismo ni a nada de su subárbol (armaría un ciclo)", async ()=>{
     const valores = await page.locator("#inventario-tecnologico-equipo-servidor option").evaluateAll(o=>o.map(x=>x.value));
     for(const prohibido of ["10", "11", "12", "20", "21", "32", "40", "101", String(idCamara)]) exigir(!valores.includes(prohibido), `ofrece ${prohibido}: ${valores.join(",")}`);
@@ -543,13 +563,13 @@ async function escenarioAdmin(browser, base){
 
   await seleccionarEquipoDesdeSuUbicacion(page, 3, 32);
   await page.click(`${SEL.panel} [data-accion="nuevo-respaldo"][data-id="32"]`);
-  await page.waitForSelector("#inventario-tecnologico-respaldo-servidor");
+  await page.waitForSelector("#inventario-tecnologico-respaldo-servidor-boton");
   await verificar("formulario de respaldo: no ofrece al propio equipo ni a su servidor actual; prioridad sugerida 1", async ()=>{
     const valores = await page.locator("#inventario-tecnologico-respaldo-servidor option").evaluateAll(o=>o.map(x=>x.value));
     exigir(!valores.includes("32") && !valores.includes("21") && valores.includes("11"), valores.join(","));
     exigir((await page.inputValue("#inventario-tecnologico-respaldo-prioridad")) === "1", "prioridad sugerida");
   });
-  await page.selectOption("#inventario-tecnologico-respaldo-servidor", "11");
+  await elegirServidor(page, "11", "inventario-tecnologico-respaldo-servidor");
   await page.fill("#inventario-tecnologico-respaldo-prioridad", "0");
   await page.click("#inventario-tecnologico-respaldo-guardar");
   await verificar("prioridad 0 se rechaza antes de ir a la base", async ()=>{
@@ -573,8 +593,8 @@ async function escenarioAdmin(browser, base){
     exigir((await db(page, "enlaces_respaldo")).find(x=>x.id === idResp).prioridad === 2, "prioridad");
   });
   await page.click(`${SEL.panel} [data-accion="editar-equipo"][data-id="32"]`);
-  await page.waitForSelector("#inventario-tecnologico-equipo-servidor");
-  await page.selectOption("#inventario-tecnologico-equipo-servidor", "11");
+  await page.waitForSelector("#inventario-tecnologico-equipo-servidor-boton");
+  await elegirServidor(page, "11");
   await page.click("#inventario-tecnologico-equipo-guardar");
   await verificar("usar un respaldo como servidor principal: sale de la lista de respaldos (y se avisa)", async ()=>{
     await esperarSinModal(page);
@@ -1225,7 +1245,7 @@ async function escenarioRed(browser, base){
   await verificar("el nombre se arma en vivo con el tipo, el servidor y la referencia", async ()=>{
     await page.selectOption("#inventario-tecnologico-equipo-tipo", "camara");
     exigir((await texto(page, '[data-error="tipo_equipo"]')) === "", "sigue el aviso de que falta el tipo");
-    await page.selectOption("#inventario-tecnologico-equipo-servidor", "50");
+    await elegirServidor(page, "50");
     exigir((await texto(page, "#inventario-tecnologico-equipo-nombre-auto")) === "Cámara en Torre Cerro Azul conectada a Switch", await texto(page, "#inventario-tecnologico-equipo-nombre-auto"));
     await page.fill("#inventario-tecnologico-equipo-referencia", "Este");
     exigir((await texto(page, "#inventario-tecnologico-equipo-nombre-auto")) === "Cámara (Este) en Torre Cerro Azul conectada a Switch", await texto(page, "#inventario-tecnologico-equipo-nombre-auto"));
@@ -1292,11 +1312,23 @@ async function escenarioMedio(browser, base){
   await page.waitForSelector("#inventario-tecnologico-equipo-medio", { state: "attached" });
   await verificar("008: el formulario pide el medio solo si hay servidor, y dice qué hace «Automático»", async ()=>{
     exigir(await page.locator("#inventario-tecnologico-equipo-medio-campo").isHidden(), "se ve sin servidor");
-    await page.selectOption("#inventario-tecnologico-equipo-tipo", "camara");
-    await page.selectOption("#inventario-tecnologico-equipo-servidor", "50");
+    await page.selectOption("#inventario-tecnologico-equipo-tipo", "estacion");
+    await elegirServidor(page, "21");
     exigir(!(await page.locator("#inventario-tecnologico-equipo-medio-campo").isHidden()), "no apareció con servidor");
     exigir(/Automático: inalámbrico \(otra ubicación\)/.test(await texto(page, "#inventario-tecnologico-equipo-medio-ayuda")), await texto(page, "#inventario-tecnologico-equipo-medio-ayuda"));
-    exigir((await texto(page, "#inventario-tecnologico-equipo-nombre-auto")) === "Cámara en Bodega Sur enlazada a Switch en Torre Cerro Azul", await texto(page, "#inventario-tecnologico-equipo-nombre-auto"));
+    exigir((await texto(page, "#inventario-tecnologico-equipo-nombre-auto")) === "Estación en Bodega Sur enlazada a AP en Torre Santa Ana", await texto(page, "#inventario-tecnologico-equipo-nombre-auto"));
+  });
+  await verificar("v8: si un extremo no hace radio (Cámara, Switch) y el servidor está en otra ubicación, el medio se pone en «Cable»; si vuelve a ser radio con radio, vuelve a «Automático»", async ()=>{
+    await page.selectOption("#inventario-tecnologico-equipo-tipo", "camara");
+    exigir(await page.inputValue("#inventario-tecnologico-equipo-medio") === "cable", "al elegir Cámara: " + await page.inputValue("#inventario-tecnologico-equipo-medio"));
+    exigir(/Puesto en «Cable»: Cámara no hace radioenlaces/.test(await texto(page, "#inventario-tecnologico-equipo-medio-ayuda")), await texto(page, "#inventario-tecnologico-equipo-medio-ayuda"));
+    await page.selectOption("#inventario-tecnologico-equipo-tipo", "estacion");
+    exigir(await page.inputValue("#inventario-tecnologico-equipo-medio") === "", "no volvió a Automático");
+    await page.selectOption("#inventario-tecnologico-equipo-tipo", "camara");
+    await elegirServidor(page, "50");
+    exigir(await page.inputValue("#inventario-tecnologico-equipo-medio") === "cable", "con el Switch");
+    exigir(/Puesto en «Cable»: Switch no hace radioenlaces/.test(await texto(page, "#inventario-tecnologico-equipo-medio-ayuda")), await texto(page, "#inventario-tecnologico-equipo-medio-ayuda"));
+    exigir((await texto(page, "#inventario-tecnologico-equipo-nombre-auto")) === "Cámara en Bodega Sur conectada a Switch en Torre Cerro Azul", await texto(page, "#inventario-tecnologico-equipo-nombre-auto"));
   });
   await verificar("008: con fibra el nombre dice «conectada a … en …» y el cálculo explica la línea de fibra", async ()=>{
     await page.selectOption("#inventario-tecnologico-equipo-medio", "fibra");
@@ -1354,7 +1386,7 @@ async function escenarioMedio(browser, base){
     await s7.page.waitForSelector("#inventario-tecnologico-equipo-tipo");
     exigir(await cuenta(s7.page, "#inventario-tecnologico-equipo-medio") === 0, "está el campo medio");
     await s7.page.selectOption("#inventario-tecnologico-equipo-tipo", "camara");
-    await s7.page.selectOption("#inventario-tecnologico-equipo-servidor", "50");
+    await elegirServidor(s7.page, "50");
     await s7.page.click("#inventario-tecnologico-equipo-guardar");
     await esperarSinModal(s7.page);
     const f = (await ESCRITURAS_EQUIPOS(s7.page)).find(e=>e.op === "insert").filas[0];
@@ -1636,6 +1668,237 @@ async function escenarioPiscinas(browser, base){
   await v.context.close();
 }
 
+// ------------------------------------------------------------------ v8: selector de servidor y la red en el nombre (010)
+const SERV = "#inventario-tecnologico-equipo-servidor";
+const opcionesVisibles = page=>page.locator(`${SERV}-lista [role=option]`).evaluateAll(l=>l.map(x=>x.dataset.clave));
+async function escenarioServidor(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixture({ red007: true, red008: true, red010: true, servidor: true }));
+  await irAlMapa(page);
+  await verificar("010: la red va entre paréntesis en el nombre (la del servidor, solo si es distinta)", async ()=>{
+    await irAUbicacionDesdePanel(page, 1);
+    const t = await texto(page, SEL.panel);
+    exigir(t.includes("Switch (Red Cámaras) conectado a Punto a Punto (Red Administrativa)"), "switch: " + t.slice(0, 400));
+    exigir(t.includes("Cámara (Red Cámaras · Norte) conectada a Switch"), "cámara");
+  });
+  await irAUbicacionDesdePanel(page, 3);
+  await page.click(`${SEL.panel} [data-accion="nuevo-equipo"][data-id="3"]`);
+  await page.waitForSelector(`${SERV}-boton`);
+  await verificar("selector: el rótulo «Servidor» apunta al botón; botón y panel con sus roles ARIA", async ()=>{
+    exigir(await page.getAttribute(`label[for="inventario-tecnologico-equipo-servidor-boton"]`, "for") === "inventario-tecnologico-equipo-servidor-boton", "el rótulo no apunta al botón");
+    exigir(await page.getAttribute(`${SERV}-boton`, "aria-haspopup") === "dialog" && await page.getAttribute(`${SERV}-boton`, "aria-expanded") === "false", "botón");
+    exigir(await page.locator(SERV).isHidden(), "el select original sigue a la vista");
+    exigir(/Ninguno: es una raíz/.test(await texto(page, `${SERV}-boton`)), "sin servidor al empezar");
+  });
+  await verificar("selector: se abre con el teclado, enfoca la búsqueda y anuncia cuántos hay", async ()=>{
+    await page.focus(`${SERV}-boton`);
+    await page.keyboard.press("ArrowDown");
+    await page.waitForSelector(`${SERV}-panel:not([hidden])`);
+    exigir(await page.evaluate(()=>document.activeElement.id) === "inventario-tecnologico-equipo-servidor-filtro", "el foco no está en la búsqueda");
+    exigir(await page.getAttribute(`${SERV}-boton`, "aria-expanded") === "true", "aria-expanded");
+    exigir(await page.getAttribute(`${SERV}-panel`, "role") === "dialog", "el panel no es diálogo");
+    exigir(await page.getAttribute(`${SERV}-filtro`, "role") === "combobox" && await page.getAttribute(`${SERV}-filtro`, "aria-controls") === "inventario-tecnologico-equipo-servidor-lista", "combobox");
+    exigir(/^\d+ de \d+ posibles servidores$/.test(await texto(page, `${SERV}-cuenta`)), await texto(page, `${SERV}-cuenta`));
+    exigir(await page.getAttribute(`${SERV}-cuenta`, "aria-live") === "polite", "sin aria-live");
+  });
+  await verificar("selector: «más cerca primero» — ninguno, lo de la misma ubicación y después por distancia; el activo del Data Center en su grupo", async ()=>{
+    const claves = await opcionesVisibles(page);
+    exigir(claves[0] === "" && ["30", "31", "32"].every(c=>claves.slice(1, 4).includes(c)), claves.join(","));
+    exigir(claves[claves.length - 1] === "a:4" && !claves.includes("a:5"), "el Router ubicado va al final y el que no tiene ubicación no está: " + claves.join(","));
+    const grupos = await page.locator(`${SERV}-lista .inventario-tecnologico-serv-grupo`).allInnerTexts();
+    exigir(grupos.length === 2 && /activos del inventario/i.test(grupos[1]) && /se registran al guardar/i.test(grupos[1]), grupos.join(" | "));
+    exigir(/misma ubicación/.test(await page.locator(`${SERV}-lista [data-clave="30"]`).innerText()), "sin la marca de misma ubicación");
+  });
+  await verificar("selector: búsqueda sin tildes y por varias palabras, con lo buscado resaltado", async ()=>{
+    await page.fill(`${SERV}-filtro`, "router data");
+    exigir(JSON.stringify(await opcionesVisibles(page)) === '["a:4"]', JSON.stringify(await opcionesVisibles(page)));
+    exigir(await cuenta(page, `${SERV}-lista mark`) >= 2, "no resalta");
+    await page.fill(`${SERV}-filtro`, "camara");
+    const conCamara = (await opcionesVisibles(page)).sort();
+    exigir(JSON.stringify(conCamara) === '["50","51","52"]', "«camara» sin tilde (tipo o red «Cámaras»): " + JSON.stringify(conCamara));
+    await page.fill(`${SERV}-filtro`, "zzz");
+    exigir((await opcionesVisibles(page)).length === 0 && /Ningún equipo coincide/.test(await texto(page, `${SERV}-panel .inventario-tecnologico-serv-vacio`)), "sin mensaje de vacío");
+    exigir(/asigna el activo del inventario a su ubicación/.test(await texto(page, `${SERV}-panel .inventario-tecnologico-serv-vacio`)), "sin la ayuda");
+    await page.fill(`${SERV}-filtro`, "");
+  });
+  await verificar("selector: filtro de ubicación con casillas y cuentas — Ninguno, doble clic deja solo una, «Quitar filtros»", async ()=>{
+    await page.click(`${SERV}-panel [data-faceta="ubicacion"] > summary`);
+    exigir(await page.locator(`${SERV}-panel [data-faceta="ubicacion"]`).evaluate(d=>d.open), "no se abrió");
+    const cuentaDC = await texto(page, `${SERV}-panel [data-faceta="ubicacion"] [data-cuenta="5"]`);
+    exigir(cuentaDC === "1", "cuenta del Data Center: " + cuentaDC);
+    await page.screenshot({ path: path.join(CAPTURAS, "30-servidor-filtros.png") });
+    await page.click(`${SERV}-panel [data-faceta-ninguno="ubicacion"]`);
+    exigir((await opcionesVisibles(page)).length === 0, "Ninguno no vació la lista");
+    exigir(/ninguna/.test(await texto(page, `${SERV}-panel [data-estado="ubicacion"]`)), "resumen");
+    await page.dblclick(`${SERV}-panel [data-faceta-opt="ubicacion"][data-valor="5"]`);
+    exigir(JSON.stringify(await opcionesVisibles(page)) === '["a:4"]', JSON.stringify(await opcionesVisibles(page)));
+    exigir(/1 de \d+/.test(await texto(page, `${SERV}-panel [data-estado="ubicacion"]`)) && /con filtros/.test(await texto(page, `${SERV}-cuenta`)), "resumen/cuenta con filtros");
+    // Esc pliega el filtro (no cierra el panel) y un clic fuera de un filtro desplegado también lo pliega.
+    await page.keyboard.press("Escape");
+    exigir(!(await page.locator(`${SERV}-panel [data-faceta="ubicacion"]`).evaluate(d=>d.open)) && !(await page.locator(`${SERV}-panel`).isHidden()), "Esc no plegó solo el filtro");
+    exigir(await page.evaluate(()=>document.activeElement.matches('[data-faceta="ubicacion"] > summary')), "el foco no volvió al filtro");
+    await page.click(`${SERV}-panel [data-faceta-limpiar]`);
+    exigir((await opcionesVisibles(page)).length > 5, "no volvieron todos");
+    exigir(await page.locator(`${SERV}-panel [data-faceta-limpiar]`).isHidden(), "«Quitar filtros» sigue a la vista");
+  });
+  await verificar("selector: filtro de origen (equipos de red / activos del inventario)", async ()=>{
+    await page.click(`${SERV}-panel [data-faceta="ubicacion"] > summary`);
+    await page.click(`${SERV}-panel [data-faceta="origen"] > summary`);
+    exigir(!(await page.locator(`${SERV}-panel [data-faceta="ubicacion"]`).evaluate(d=>d.open)), "se abren dos filtros a la vez");
+    await page.uncheck(`${SERV}-panel input[data-faceta-casilla="origen"][value="equipo"]`);
+    exigir(JSON.stringify(await opcionesVisibles(page)) === '["a:4"]', "con filtros «Ninguno» no se muestra: " + JSON.stringify(await opcionesVisibles(page)));
+    await page.check(`${SERV}-panel input[data-faceta-casilla="origen"][value="equipo"]`);
+    await page.click(`${SERV}-cuenta`); // clic fuera: se pliega
+    exigir(!(await page.locator(`${SERV}-panel [data-faceta="origen"]`).evaluate(d=>d.open)), "no se plegó al hacer clic fuera");
+  });
+  await verificar("selector: el orden se cambia y se recuerda (Z–A)", async ()=>{
+    await page.selectOption(`${SERV}-orden`, "za");
+    const nombres = await page.locator(`${SERV}-lista [role=option]:not([data-clave=""]):not([data-clave^="a:"]) .inventario-tecnologico-serv-op-nombre`).allInnerTexts();
+    const ordenados = [...nombres].sort((a, b)=>b.localeCompare(a, "es", { sensitivity: "base", numeric: true }));
+    exigir(JSON.stringify(nombres) === JSON.stringify(ordenados), nombres.slice(0, 4).join(" | "));
+    exigir(await page.evaluate(()=>localStorage.getItem("inventario-tecnologico-orden-servidor")) === "za", "no se guardó");
+  });
+  await verificar("selector: Esc cierra solo el panel (el formulario sigue abierto) y devuelve el foco al botón", async ()=>{
+    await page.focus(`${SERV}-filtro`);
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(`${SERV}-panel[hidden]`, { state: "attached" });
+    exigir(await cuenta(page, "#inventario-tecnologico-modal-host .inventario-tecnologico-modal") === 1, "se cerró el formulario");
+    exigir(await page.evaluate(()=>document.activeElement.id) === "inventario-tecnologico-equipo-servidor-boton", "el foco no volvió al botón");
+  });
+  await verificar("selector: escribir sobre el botón abre la búsqueda; flechas + Enter eligen el Router del Data Center", async ()=>{
+    await page.keyboard.type("data c");
+    await page.waitForSelector(`${SERV}-panel:not([hidden])`);
+    exigir(await page.inputValue(`${SERV}-filtro`) === "data c", "la búsqueda no empezó con lo escrito: " + await page.inputValue(`${SERV}-filtro`));
+    exigir(await page.evaluate(s=>document.getElementById(s).getAttribute("aria-activedescendant"), "inventario-tecnologico-equipo-servidor-filtro") === "inventario-tecnologico-equipo-servidor-op-0", "activa");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(`${SERV}-panel[hidden]`, { state: "attached" });
+    exigir(await page.inputValue(SERV) === "a:4", "no quedó elegido: " + await page.inputValue(SERV));
+    const b = await texto(page, `${SERV}-boton`);
+    exigir(/Router en Data Center/.test(b) && /activo LKM-004/.test(b) && /se registra al guardar/.test(b), b);
+  });
+  await verificar("con un Router de otra ubicación el medio se pone en «Cable» (un Router no hace radioenlaces) y el nombre lo sigue", async ()=>{
+    exigir(await page.inputValue("#inventario-tecnologico-equipo-medio") === "cable", "medio: " + await page.inputValue("#inventario-tecnologico-equipo-medio"));
+    exigir(/Puesto en «Cable».*Router no hace radioenlaces/.test(await texto(page, "#inventario-tecnologico-equipo-medio-ayuda")), await texto(page, "#inventario-tecnologico-equipo-medio-ayuda"));
+    await page.selectOption("#inventario-tecnologico-equipo-tipo", "ptp");
+    await page.fill("#inventario-tecnologico-equipo-referencia", "Hacia CA");
+    await page.selectOption("#inventario-tecnologico-equipo-red", "1");
+    const n = await texto(page, "#inventario-tecnologico-equipo-nombre-auto");
+    exigir(n === "Punto a Punto (Red Administrativa · Hacia CA) en Oficina Centro conectado a Router en Data Center", n);
+    exigir(/Por cable hasta «Router en Data Center».*se registra como equipo de red de «Data Center»/.test(await texto(page, `${SERV}-calculo`)), await texto(page, `${SERV}-calculo`));
+    await page.screenshot({ path: path.join(CAPTURAS, "31-servidor-elegido.png") });
+  });
+  await verificar("guardar: primero se registra el Router del Data Center (con su activo) y después el equipo queda colgado de él por cable", async ()=>{
+    await page.click("#inventario-tecnologico-equipo-guardar");
+    await esperarSinModal(page);
+    const ins = (await ESCRITURAS_EQUIPOS(page)).filter(e=>e.op === "insert");
+    exigir(ins.length === 2, `${ins.length} altas`);
+    const router = ins[0].filas[0], ptp = ins[1].filas[0];
+    exigir(router.ubicacion_id === 5 && router.tipo_equipo === "router" && router.activo_id === 4 && router.servidor_id === null && router.nombre === "Router en Data Center", JSON.stringify(router));
+    exigir(ptp.servidor_id === router.id && ptp.medio === "cable" && ptp.red_id === 1 && ptp.nombre === "Punto a Punto (Red Administrativa · Hacia CA) en Oficina Centro conectado a Router en Data Center", JSON.stringify(ptp));
+    await toast(page, /quedó registrado como equipo de red/);
+    await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+    await esperarCuenta(page, `path.inventario-tecnologico-mapa-linea-cable[data-cliente-id="${ptp.id}"]`, 1, "línea de cable Data Center → Oficina");
+  });
+  await verificar("al volver a editarlo, su servidor es el Router ya registrado y ese activo ya no se ofrece como nuevo", async ()=>{
+    const ptp = (await db(page, "equipos_radioenlace")).find(e=>e.referencia === "Hacia CA");
+    const router = (await db(page, "equipos_radioenlace")).find(e=>e.activo_id === 4);
+    await irAUbicacionDesdePanel(page, 3);
+    await page.click(SEL.equipo(ptp.id));
+    await page.click(`${SEL.panel} [data-accion="editar-equipo"][data-id="${ptp.id}"]`);
+    await page.waitForSelector(`${SERV}-boton`);
+    exigir(await page.inputValue(SERV) === String(router.id), "servidor: " + await page.inputValue(SERV));
+    const valores = await page.locator(`${SERV} option`).evaluateAll(o=>o.map(x=>x.value));
+    exigir(!valores.includes("a:4"), valores.join(","));
+    await page.click("#inventario-tecnologico-modal-host .inventario-tecnologico-modal-footer .inventario-tecnologico-modal-close");
+    await esperarSinModal(page);
+  });
+  await verificar("010: renombrar una red pone al día los nombres (en la base y en el panel)", async ()=>{
+    await page.click("#inventario-tecnologico-mapa-redes-tipos");
+    await page.waitForSelector("#inventario-tecnologico-red-nueva-nombre");
+    const fila = page.locator('#inventario-tecnologico-modal-host [data-red-id="1"]');
+    await fila.locator('input[type="text"]').fill("Red Admin");
+    await fila.locator("button", { hasText: "Guardar" }).click();
+    await toast(page, /Red|red/);
+    await page.click("#inventario-tecnologico-modal-host .inventario-tecnologico-modal-footer .inventario-tecnologico-modal-close");
+    await esperarSinModal(page);
+    const ptp = (await db(page, "equipos_radioenlace")).find(e=>e.referencia === "Hacia CA");
+    exigir(ptp.nombre === "Punto a Punto (Red Admin · Hacia CA) en Oficina Centro conectado a Router en Data Center", ptp.nombre);
+    await irAUbicacionDesdePanel(page, 3);
+    exigir((await texto(page, SEL.panel)).includes("Punto a Punto (Red Admin · Hacia CA) conectado a Router en Data Center"), "el panel no lo muestra");
+  });
+  await verificar("respaldo: el mismo selector (sin «Ninguno»), con búsqueda, y se guarda el elegido", async ()=>{
+    await irAUbicacionDesdePanel(page, 3);
+    await page.click(SEL.equipo(32));
+    await page.click(`${SEL.panel} [data-accion="nuevo-respaldo"][data-id="32"]`);
+    await page.waitForSelector("#inventario-tecnologico-respaldo-servidor-boton");
+    exigir(/Elige un equipo/.test(await texto(page, "#inventario-tecnologico-respaldo-servidor-boton")), "placeholder");
+    await page.click("#inventario-tecnologico-respaldo-servidor-boton");
+    const claves = await page.locator("#inventario-tecnologico-respaldo-servidor-lista [role=option]").evaluateAll(l=>l.map(x=>x.dataset.clave));
+    exigir(!claves.includes("") && !claves.some(c=>c.startsWith("a:")) && !claves.includes("32") && !claves.includes("21"), claves.join(","));
+    await page.fill("#inventario-tecnologico-respaldo-servidor-filtro", "epmp");
+    await page.keyboard.press("Enter");
+    await page.waitForSelector("#inventario-tecnologico-respaldo-servidor-panel[hidden]", { state: "attached" });
+    await page.click("#inventario-tecnologico-respaldo-guardar");
+    await esperarSinModal(page);
+    const r = (await db(page, "enlaces_respaldo")).find(x=>x.equipo_id === 32);
+    exigir(r && r.servidor_alternativo_id === 11, JSON.stringify(r));
+  });
+  await verificar("sin errores de JavaScript (servidor)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+
+  // Sin la 010: la base arma los nombres sin la red y la app también.
+  const s8 = await abrirApp(browser, base, fixture({ red007: true, red008: true, servidor: true }));
+  await irAlMapa(s8.page);
+  await verificar("sin la 010: los nombres no llevan la red (igual que en la base)", async ()=>{
+    await irAUbicacionDesdePanel(s8.page, 1);
+    const t = await texto(s8.page, SEL.panel);
+    exigir(t.includes("Switch conectado a Punto a Punto") && !t.includes("(Red Cámaras)"), t.slice(0, 300));
+  });
+  await verificar("sin errores de JavaScript (sin la 010)", async ()=>{ exigir(s8.errores.length === 0, s8.errores.join(" | ")); });
+  await s8.context.close();
+
+  // En el celular: el panel cabe en la pantalla, sin scroll horizontal, y el
+  // filtro desplegado no se sale por el borde.
+  const cel = await abrirApp(browser, base, fixture({ red007: true, red008: true, red010: true, servidor: true }), { viewport: { width: 390, height: 844 } });
+  await irAlMapa(cel.page);
+  await irAUbicacionDesdePanel(cel.page, 3);
+  await cel.page.click(`${SEL.panel} [data-accion="nuevo-equipo"][data-id="3"]`);
+  await cel.page.waitForSelector(`${SERV}-boton`);
+  await verificar("celular (390 px): el selector de servidor cabe en la pantalla, sin scroll horizontal, y se elige con el dedo", async ()=>{
+    await cel.page.click(`${SERV}-boton`);
+    await cel.page.waitForSelector(`${SERV}-panel:not([hidden])`);
+    const fuera = async sel=>{ const b = await cel.page.locator(sel).boundingBox(); return b && b.x >= 0 && b.x + b.width <= 390 + 0.5 ? "" : JSON.stringify(b); };
+    await cel.page.waitForTimeout(300); // que termine la animación de entrada
+    await cel.page.screenshot({ path: path.join(CAPTURAS, "32-servidor-celular.png") });
+    const p = await fuera(`${SERV}-panel`);
+    if(p && process.env.DEPURAR) console.log(await cel.page.evaluate(()=>{
+      const out = [];
+      const body = document.querySelector("#inventario-tecnologico-modal-host .inventario-tecnologico-modal-body");
+      out.push(`body scrollLeft=${body.scrollLeft} scrollWidth=${body.scrollWidth} clientWidth=${body.clientWidth}`);
+      for(const el of body.querySelectorAll("*")){
+        const r = el.getBoundingClientRect();
+        if(r.width && (r.right > 391 || r.left < -1) && ![...el.children].some(c=>{ const q = c.getBoundingClientRect(); return q.width && (q.right > 391 || q.left < -1); }))
+          out.push(`${el.tagName}.${[...el.classList].join(".")}#${el.id} left=${r.left.toFixed(1)} right=${r.right.toFixed(1)} w=${r.width.toFixed(1)} sw=${el.scrollWidth}`);
+      }
+      return out.slice(0, 40).join("\n");
+    }));
+    exigir(!p, "el panel se sale por el borde: " + p);
+    await cel.page.click(`${SERV}-panel [data-faceta="ubicacion"] > summary`);
+    await cel.page.screenshot({ path: path.join(CAPTURAS, "33-servidor-celular-filtro.png") });
+    const f = await fuera(`${SERV}-panel [data-faceta="ubicacion"] .inventario-tecnologico-serv-faceta-cuerpo`);
+    exigir(!f, "el filtro desplegado se sale por el borde: " + f);
+    const anchoModal = await cel.page.evaluate(()=>{ const m = document.querySelector("#inventario-tecnologico-modal-host .inventario-tecnologico-modal"); return [document.documentElement.scrollWidth, m ? m.scrollWidth - m.clientWidth : 0]; });
+    exigir(anchoModal[0] <= 390 && anchoModal[1] <= 0, "scroll horizontal: " + anchoModal.join(","));
+    await cel.page.click(`${SERV}-panel [data-faceta="ubicacion"] > summary`);
+    const alto = (await cel.page.locator(`${SERV}-lista [data-clave="a:4"]`).boundingBox()).height;
+    exigir(alto >= 44, `opción de ${alto} px (mínimo 44 para el dedo)`);
+    await cel.page.locator(`${SERV}-lista [data-clave="a:4"]`).tap().catch(()=>cel.page.click(`${SERV}-lista [data-clave="a:4"]`));
+    await cel.page.waitForSelector(`${SERV}-panel[hidden]`, { state: "attached" });
+    exigir(await cel.page.inputValue(SERV) === "a:4", "no quedó elegido");
+  });
+  await verificar("sin errores de JavaScript (servidor en el celular)", async ()=>{ exigir(cel.errores.length === 0, cel.errores.join(" | ")); });
+  await cel.context.close();
+}
+
 // ------------------------------------------------------------------ inventario: modal «Nuevo activo»
 // Tipo con búsqueda y orden, campos según el tipo (con transición), «+» en
 // un submodal que no borra lo escrito, y que al guardar no viajen los campos
@@ -1846,7 +2109,7 @@ const base = `http://127.0.0.1:${srv.address().port}`;
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 try{
   // SOLO=plano (u otro nombre) corre un solo escenario, para depurar.
-  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, activo: escenarioActivo };
+  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, activo: escenarioActivo };
   for(const [nombre, fn] of Object.entries(escenarios)) if(!process.env.SOLO || process.env.SOLO === nombre) await fn(browser, base);
 }finally{
   await browser.close();

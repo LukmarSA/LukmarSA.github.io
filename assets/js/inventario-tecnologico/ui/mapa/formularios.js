@@ -3,7 +3,7 @@
 // (abrirModal/cerrarModal) y, al guardar, avisan con mostrarToast y devuelven
 // el control con alGuardar.
 import { cargarActivos } from "../../nucleo/datos.js";
-import { cargarAtajos, cargarEquiposRadioenlace, cargarPiscinas, cargarRedes, cargarRespaldos, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, estadoMapa, hayMedio, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
+import { cargarAtajos, cargarEquiposRadioenlace, cargarPiscinas, cargarRedes, cargarRespaldos, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, datosNombres, estadoMapa, hayMedio, hayNombresConRed, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
 import { GENEROS, nombreParaGuardar, nombresAutomaticos } from "../../nucleo/mapa-nombres.js";
 import { azimutGrados, distanciaKm, fmtAzimut, fmtCoordenadas, fmtDistancia, parsearCoordenadas } from "../../nucleo/geo.js";
 import { esc, fmtFecha, fmtTag } from "../../nucleo/helpers.js";
@@ -12,6 +12,8 @@ import { MEDIOS, candidatosRespaldo, candidatosServidor, describirConexion, esMe
 import { opcionesVigentes } from "../../nucleo/opciones-configurables.js";
 import { esAdmin } from "../../nucleo/permisos.js";
 import { cuadradoAlrededor, sectorDeNombre } from "../../nucleo/piscinas.js";
+import { medioSugerido, motivoMedioSugerido, opcionesServidor } from "../../nucleo/selector-servidor.js";
+import { montarSelectorServidor } from "./selector-servidor.js";
 import { ErrorValidacion, asignarActivosAUbicacion, asignarEnLote, crearAtajo, crearPiscina, editarPiscina, eliminarPiscina, crearEquipo, crearRed, crearRespaldo, crearTipoEquipo, crearTipoUbicacion, crearUbicacion, editarAtajo, editarEquipo, editarRed, editarRespaldo, editarTipoEquipo, editarUbicacion, eliminarAtajo, eliminarRed } from "../../negocio/operaciones-mapa.js";
 import { urlFoto } from "../../negocio/operaciones.js";
 import { abrirModal, cerrarModal, mostrarToast } from "../render-raiz.js";
@@ -51,25 +53,6 @@ function opcionesUbicacion(seleccionada, { excluir = null } = {}){
   const tipos = cargarTiposUbicacion();
   const lista = ordenarUbicaciones(cargarUbicaciones().filter(u=>(u.activa !== false || u.id === seleccionada) && u.id !== excluir), tipos);
   return lista.map(u=>`<option value="${u.id}" ${u.id === seleccionada ? "selected" : ""}>${esc(u.nombre)} (${esc(infoTipoUbicacion(tipos, u.tipo).etiqueta)})${u.activa === false ? " — archivada" : ""}</option>`).join("");
-}
-
-// <optgroup> por ubicación con los equipos dados. La ubicación "local" (la del
-// equipo) va primero: un servidor ahí es una conexión por cable.
-function opcionesEquiposPorUbicacion(equipos, seleccionado, ubicacionLocal){
-  const indices = indicesMapa();
-  const tipos = cargarTiposUbicacion();
-  const porUbicacion = new Map();
-  for(const e of equipos){
-    if(!porUbicacion.has(e.ubicacion_id)) porUbicacion.set(e.ubicacion_id, []);
-    porUbicacion.get(e.ubicacion_id).push(e);
-  }
-  const ubics = ordenarUbicaciones([...porUbicacion.keys()].map(id=>indices.ubicacionPorId.get(id)).filter(Boolean), tipos)
-    .sort((a, b)=>(a.id === ubicacionLocal ? -1 : 0) - (b.id === ubicacionLocal ? -1 : 0));
-  return ubics.map(u=>{
-    const lista = porUbicacion.get(u.id).sort((a, b)=>String(a.nombre).localeCompare(String(b.nombre), "es"));
-    const local = u.id === ubicacionLocal;
-    return `<optgroup label="${esc(u.nombre)}${local ? " — misma ubicación (por cable)" : ""}">${lista.map(e=>`<option value="${e.id}" ${e.id === seleccionado ? "selected" : ""}>${esc(e.nombre)}${e.modelo ? ` — ${esc(e.modelo)}` : ""}</option>`).join("")}</optgroup>`;
-  }).join("");
 }
 
 // d = { servidor, ubicacionServidor, medio, mismaUbicacion, distanciaKm, azimutIda, azimutVuelta }
@@ -301,8 +284,9 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
     return etiquetaActivo(a) + (u ? ` — en ${u.nombre}` : "");
   };
   let activoElegido = actual ? actual.activo_id : null;
-  const red = redMapa();
-  const posiblesServidores = candidatosServidor(red, id);
+  // Se recalculan si al guardar se registra un activo como servidor (v8).
+  let red = redMapa();
+  let indicesVivos = indices;
   const servidorActual = actual && actual.servidor_id !== null && actual.servidor_id !== undefined ? actual.servidor_id : null;
   const clientesActuales = id ? (red.clientes.get(id) || []).length : 0;
 
@@ -425,41 +409,91 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
         : origen ? `${fmtTag(a)} ya está en «${destino.nombre}».` : `Al guardar, ${fmtTag(a)} quedará ubicado en «${destino.nombre}».`;
     };
     // Servidor: sin él es una raíz. Se ofrecen todos menos el propio equipo y
-    // los que dependen de él (armarían un ciclo; la base también lo rechaza).
+    // los que dependen de él (armarían un ciclo; la base también lo rechaza),
+    // más los activos del inventario ya ubicados cuyo tipo es de red (p. ej. el
+    // Router del Data Center): se registran como equipo de red al guardar.
+    // Selector con búsqueda, filtros y orden (ui/mapa/selector-servidor.js).
     const selServ = $(`#${P}equipo-servidor`);
     const calculoServ = $(`#${P}equipo-servidor-calculo`);
-    let servidorElegido = servidorActual;
-    const pintarServidores = ()=>{
-      selServ.innerHTML = `<option value="" ${servidorElegido === null ? "selected" : ""}>— Ninguno: es una raíz (entrada de internet) —</option>`
-        + opcionesEquiposPorUbicacion(posiblesServidores, servidorElegido, Number(selUbic.value));
-    };
+    const selTipo = $(`#${P}equipo-tipo`);
+    const selRedEquipo = $(`#${P}equipo-red`);
+    const nombreNuevoServidor = ({ tipo, ubicacion })=>nombreParaGuardar({ ubicacion_id: ubicacion.id, tipo_equipo: tipo, referencia: null, red_id: null, servidor_id: null }, datosNombres(), null)
+      || `${(cargarTiposEquipo().find(x=>x.valor === tipo) || {}).etiqueta || tipo} en ${ubicacion.nombre}`;
+    const selector = montarSelectorServidor(selServ, {
+      id: `${P}equipo-servidor`,
+      obtener: ()=>({ opciones: opcionesServidor({
+        candidatos: candidatosServidor(red, id), ubicacionId: Number(selUbic.value), ubicacionPorId: indicesVivos.ubicacionPorId,
+        tiposEquipo: conRed ? cargarTiposEquipo() : [], redes: conRed ? cargarRedes() : [],
+        conActivos: conRed, activos: cargarActivos().activos, vigentePorActivo: indicesVivos.vigentePorActivo, equipoPorActivo: indicesVivos.equipoPorActivo,
+        excluirActivos: [activoElegido], nombreNuevo: nombreNuevoServidor, tagActivo: fmtTag,
+      }) }),
+      ninguno: { texto: "Ninguno: es una raíz (entrada de internet)", meta: "No recibe la conexión de otro equipo de la red" },
+      etiquetaDialogo: "Elegir el servidor del equipo",
+      textoVacio: "Ningún equipo coincide con la búsqueda o los filtros.",
+      ayudaVacio: conRed ? "¿No está? Regístralo en su ubicación («+ Equipo» en su panel), o asigna el activo del inventario a su ubicación y aparecerá aquí." : "",
+    });
+    if(servidorActual !== null) selector.elegir(String(servidorActual));
+    const etiquetaServ = raiz.querySelector(`label[for="${P}equipo-servidor"]`);
+    if(etiquetaServ) etiquetaServ.htmlFor = `${P}equipo-servidor-boton`;
     const selMedio = $(`#${P}equipo-medio`);
     const campoMedioEl = $(`#${P}equipo-medio-campo`);
     const ayudaMedio = $(`#${P}equipo-medio-ayuda`);
+    const tipoCliente = ()=>selTipo ? (selTipo.value || null) : (actual && actual.tipo_equipo || null);
+    // Si el servidor está en otra ubicación y un extremo no hace radio (un
+    // Router, un Switch…), "Automático" diría inalámbrico: se propone Cable.
+    // Solo al cambiar algo (no al abrir) y sin pisar un medio elegido a mano.
+    let medioPuestoPorSugerencia = false;
+    const aplicarSugerenciaMedio = ()=>{
+      if(!selMedio) return;
+      const op = selector.elegida();
+      const sug = op ? medioSugerido({ clienteTipo: tipoCliente(), servidorTipo: op.tipo, misma: op.ubicacionId === Number(selUbic.value) }) : null;
+      if(sug && (selMedio.value === "" || medioPuestoPorSugerencia)){ selMedio.value = sug; medioPuestoPorSugerencia = true; }
+      else if(!sug && medioPuestoPorSugerencia){ selMedio.value = ""; medioPuestoPorSugerencia = false; }
+    };
     const pintarCalculoServ = ()=>{
-      const sid = selServ.value ? Number(selServ.value) : null;
-      if(campoMedioEl) campoMedioEl.hidden = sid === null;
-      if(sid === null){ calculoServ.textContent = clientesActuales ? `Queda como raíz. Sus ${clientesActuales} cliente(s) siguen colgando de él.` : "Queda como raíz: punto de entrada de internet."; return; }
-      const s2 = indices.equipoPorId.get(sid);
-      const uA = indices.ubicacionPorId.get(Number(selUbic.value));
-      const uS = s2 ? indices.ubicacionPorId.get(s2.ubicacion_id) : null;
-      if(!s2 || !uA || !uS){ calculoServ.textContent = ""; return; }
+      const op = selector.elegida();
+      if(campoMedioEl) campoMedioEl.hidden = !op;
+      if(!op){ calculoServ.textContent = clientesActuales ? `Queda como raíz. Sus ${clientesActuales} cliente(s) siguen colgando de él.` : "Queda como raíz: punto de entrada de internet."; return; }
+      const uA = indicesVivos.ubicacionPorId.get(Number(selUbic.value));
+      const uS = indicesVivos.ubicacionPorId.get(op.ubicacionId);
+      if(!uA || !uS){ calculoServ.textContent = ""; return; }
       const misma = uA.id === uS.id;
       const auto = misma ? "cable" : "inalambrico";
       const medio = selMedio && esMedio(selMedio.value) ? selMedio.value : auto;
-      if(ayudaMedio) ayudaMedio.textContent = selMedio && selMedio.value ? "" : `Automático: ${misma ? "cable (misma ubicación)" : "inalámbrico (otra ubicación)"}.`;
-      calculoServ.textContent = textoConexion({ servidor: s2, ubicacionServidor: uS, medio, mismaUbicacion: misma, distanciaKm: distanciaKm(uA, uS), azimutIda: azimutGrados(uA, uS), azimutVuelta: azimutGrados(uS, uA) });
+      if(ayudaMedio){
+        if(medioPuestoPorSugerencia && selMedio && selMedio.value){
+          const motivo = motivoMedioSugerido({ clienteTipo: tipoCliente(), servidorTipo: op.tipo }, cargarTiposEquipo());
+          ayudaMedio.innerHTML = `<span class="${P}mapa-medio-sugerido">Puesto en «${esc((MEDIOS.find(m=>m.id === selMedio.value) || {}).etiqueta || selMedio.value)}»</span>${motivo ? `: ${esc(motivo)}` : ""}. Cámbialo si la conexión es otra.`;
+        }else ayudaMedio.textContent = selMedio && selMedio.value ? "" : `Automático: ${misma ? "cable (misma ubicación)" : "inalámbrico (otra ubicación)"}.`;
+      }
+      let texto = textoConexion({ servidor: { nombre: op.nombre }, ubicacionServidor: uS, medio, mismaUbicacion: misma, distanciaKm: distanciaKm(uA, uS), azimutIda: azimutGrados(uA, uS), azimutVuelta: azimutGrados(uS, uA) });
+      if(op.origen === "activo") texto += ` Al guardar, el activo ${op.tag || ""} se registra como equipo de red de «${uS.nombre}» y queda como servidor.`;
+      calculoServ.textContent = texto;
     };
-    pintarServidores();
     pintarCalculoServ();
-    selServ.addEventListener("change", ()=>{ servidorElegido = selServ.value ? Number(selServ.value) : null; pintarCalculoServ(); pintarNombre(); });
+    selServ.addEventListener("change", ()=>{ aplicarSugerenciaMedio(); pintarCalculoServ(); pintarNombre(); });
 
-    // Nombre automático (007), en vivo.
-    const selTipo = $(`#${P}equipo-tipo`);
+    // Nombre automático (007; con la red desde la 010), en vivo.
     const inputRef = $(`#${P}equipo-referencia`);
     const salidaNombre = $(`#${P}equipo-nombre-auto`);
-    const filaNombre = ()=>({ ubicacion_id: Number(selUbic.value), tipo_equipo: selTipo ? selTipo.value || null : null, referencia: inputRef ? inputRef.value : null, servidor_id: selServ.value ? Number(selServ.value) : null, medio: selMedio ? selMedio.value || null : null });
-    const nombreAuto = ()=>nombreParaGuardar(filaNombre(), { equipos: cargarEquiposRadioenlace(), ubicaciones: cargarUbicaciones(), tipos: cargarTiposEquipo() }, id);
+    const filaNombre = ()=>{
+      const op = selector.elegida();
+      return {
+        ubicacion_id: Number(selUbic.value), tipo_equipo: selTipo ? selTipo.value || null : null, referencia: inputRef ? inputRef.value : null,
+        red_id: selRedEquipo && selRedEquipo.value ? Number(selRedEquipo.value) : null,
+        servidor_id: op ? (op.origen === "activo" ? -1 : op.id) : null, medio: selMedio ? selMedio.value || null : null,
+      };
+    };
+    // Un activo elegido como servidor todavía no es equipo: para armar el
+    // nombre se lo suma como uno provisional (id -1) con el nombre que tendrá.
+    const equiposParaNombre = ()=>{
+      const op = selector.elegida();
+      const base = cargarEquiposRadioenlace();
+      return op && op.origen === "activo"
+        ? [...base, { id: -1, ubicacion_id: op.ubicacionId, tipo_equipo: op.tipo, referencia: null, red_id: null, nombre: op.nombre, nombre_guardado: op.nombre, servidor_id: null }]
+        : base;
+    };
+    const nombreAuto = ()=>nombreParaGuardar(filaNombre(), datosNombres(equiposParaNombre()), id);
     function pintarNombre(){
       if(!salidaNombre) return;
       // Elegido el tipo, se borra el aviso de "falta el tipo" de un intento anterior.
@@ -469,25 +503,52 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
       salidaNombre.textContent = n || "Elige el tipo de equipo para armar el nombre.";
       salidaNombre.classList.toggle(`${P}mapa-nombre-auto-vacio`, !n);
     }
-    if(selTipo) selTipo.addEventListener("change", pintarNombre);
+    if(selTipo) selTipo.addEventListener("change", ()=>{ aplicarSugerenciaMedio(); pintarCalculoServ(); pintarNombre(); });
     if(inputRef) inputRef.addEventListener("input", pintarNombre);
-    if(selMedio) selMedio.addEventListener("change", ()=>{ pintarCalculoServ(); pintarNombre(); });
+    if(selRedEquipo) selRedEquipo.addEventListener("change", pintarNombre);
+    if(selMedio) selMedio.addEventListener("change", ()=>{ medioPuestoPorSugerencia = false; pintarCalculoServ(); pintarNombre(); });
     pintarNombre();
 
     pintarCandidatos();
     pintarAviso();
     filtro.addEventListener("input", pintarCandidatos);
-    selUbic.addEventListener("change", ()=>{ pintarAviso(); pintarServidores(); pintarCalculoServ(); pintarNombre(); });
+    selUbic.addEventListener("change", ()=>{ pintarAviso(); selector.refrescar(); aplicarSugerenciaMedio(); pintarCalculoServ(); pintarNombre(); });
     sel.addEventListener("change", ()=>{
       activoElegido = sel.value ? Number(sel.value) : null;
       const modelo = $(`#${P}equipo-modelo`);
       const a = activoElegido !== null ? indices.activoPorId.get(activoElegido) : null;
       if(a && !modelo.value.trim()) modelo.value = [a.marca, a.modelo].filter(Boolean).join(" ");
       pintarAviso();
+      // El activo vinculado a este equipo no puede ser también su servidor.
+      selector.refrescar(); pintarCalculoServ(); pintarNombre();
     });
 
     $(`#${P}equipo-guardar`).addEventListener("click", async e=>{
       mostrarErrores(raiz, {}, "");
+      const boton = e.currentTarget;
+      if(conRed && !selTipo.value){ mostrarErrores(raiz, { tipo_equipo: "Elige el tipo de equipo: con él se arma el nombre." }, ""); selTipo.focus(); return; }
+      // Servidor elegido entre los activos del inventario: primero se lo
+      // registra como equipo de red en su ubicación (raíz, con su activo).
+      const opServ = selector.elegida();
+      let registrado = null;
+      if(opServ && opServ.origen === "activo"){
+        try{
+          registrado = await conBotonOcupado(boton, "Registrando el servidor…", ()=>crearEquipo({
+            ubicacion_id: opServ.ubicacionId, nombre: opServ.nombre, modelo: opServ.modelo, activo_id: opServ.activoId, notas: null, servidor_id: null,
+            tipo_equipo: opServ.tipo, referencia: null, red_id: null, ...(conMedio ? { medio: null } : {}),
+          }));
+        }catch(err){
+          mostrarErrores(raiz, { servidor_id: `No se pudo registrar «${opServ.nombre}» como equipo de red: ${err.message}` }, "");
+          return;
+        }
+        // Desde aquí ya es un equipo de red: si lo que sigue falla, queda elegido como tal.
+        red = redMapa();
+        indicesVivos = indicesMapa();
+        selector.refrescar();
+        selector.elegir(String(registrado));
+        pintarCalculoServ();
+        pintarNombre();
+      }
       const campos = {
         ubicacion_id: Number(selUbic.value),
         nombre: conRed ? (nombreAuto() || "") : $(`#${P}equipo-nombre`).value,
@@ -501,17 +562,17 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
       if(conRed){
         campos.tipo_equipo = selTipo.value || null;
         campos.referencia = inputRef.value;
-        campos.red_id = $(`#${P}equipo-red`).value ? Number($(`#${P}equipo-red`).value) : null;
-        if(!campos.tipo_equipo){ mostrarErrores(raiz, { tipo_equipo: "Elige el tipo de equipo: con él se arma el nombre." }, ""); selTipo.focus(); return; }
+        campos.red_id = selRedEquipo.value ? Number(selRedEquipo.value) : null;
       }
       if(conMedio) campos.medio = campos.servidor_id === null ? null : (selMedio.value || null);
       // Si el servidor elegido era uno de sus respaldos, la base lo quita de los respaldos.
       const promovido = id && campos.servidor_id !== null && campos.servidor_id !== servidorActual
         && cargarRespaldos().some(r=>r.equipo_id === id && r.servidor_alternativo_id === campos.servidor_id);
       try{
-        const nuevoId = await conBotonOcupado(e.currentTarget, "Guardando…", ()=>id ? editarEquipo(id, campos).then(()=>id) : crearEquipo(campos));
+        const nuevoId = await conBotonOcupado(boton, "Guardando…", ()=>id ? editarEquipo(id, campos).then(()=>id) : crearEquipo(campos));
         cerrarModal();
         mostrarToast(id ? "Equipo actualizado." : `Equipo «${campos.nombre.trim()}» creado.`, "success");
+        if(registrado !== null) mostrarToast(`«${opServ.nombre}» quedó registrado como equipo de red y es su servidor.`, "info");
         if(promovido) mostrarToast("Ese servidor era uno de sus respaldos: pasó a ser el principal y salió de la lista de respaldos.", "info");
         if(alGuardar) alGuardar(nuevoId);
       }catch(err){
@@ -533,7 +594,8 @@ export function abrirFormRespaldo({ id = null, equipoId = null } = {}, { alGuard
   if(!equipo){ mostrarToast("No se encontró el equipo. Recarga el mapa.", "error"); return; }
   const u = red.ubicacionPorId.get(equipo.ubicacion_id);
   const principal = equipo.servidor_id !== null && equipo.servidor_id !== undefined ? red.equipoPorId.get(equipo.servidor_id) : null;
-  const opciones = opcionesEquiposPorUbicacion(candidatosRespaldo(red, eqId, id), actual ? actual.servidor_alternativo_id : null, equipo.ubicacion_id);
+  const candidatosResp = candidatosRespaldo(red, eqId, id);
+  const opciones = candidatosResp.length > 0;
   const prioridad = actual ? actual.prioridad : siguientePrioridad(red, eqId);
 
   const html = `<div class="${P}modal">
@@ -548,7 +610,7 @@ export function abrirFormRespaldo({ id = null, equipoId = null } = {}, { alGuard
         <div class="${P}field ${P}span-2">
           <label for="${P}respaldo-servidor">Servidor de respaldo</label>
           ${opciones
-            ? `<select id="${P}respaldo-servidor"><option value="">— Elige un equipo —</option>${opciones}</select>`
+            ? `<select id="${P}respaldo-servidor"></select>`
             : `<div class="${P}alert ${P}alert-info">No hay otros equipos que puedan ser respaldo (ya están todos registrados, o solo existe su servidor actual).</div>`}
           <div class="${P}hint" id="${P}respaldo-calculo"></div>
           <div class="${P}field-error" data-error="servidor_alternativo_id"></div>
@@ -576,6 +638,20 @@ export function abrirFormRespaldo({ id = null, equipoId = null } = {}, { alGuard
     const $ = sel=>raiz.querySelector(sel);
     const sel = $(`#${P}respaldo-servidor`);
     const calculo = $(`#${P}respaldo-calculo`);
+    if(sel){
+      const conRed = hayRedFinca();
+      const selectorResp = montarSelectorServidor(sel, {
+        id: `${P}respaldo-servidor`,
+        obtener: ()=>({ opciones: opcionesServidor({ candidatos: candidatosResp, ubicacionId: equipo.ubicacion_id, ubicacionPorId: red.ubicacionPorId, tiposEquipo: conRed ? cargarTiposEquipo() : [], redes: conRed ? cargarRedes() : [] }) }),
+        placeholder: "— Elige un equipo —",
+        etiquetaDialogo: "Elegir el servidor de respaldo",
+        etiquetaLista: "Posibles servidores de respaldo",
+        textoVacio: "Ningún equipo coincide con la búsqueda o los filtros.",
+      });
+      if(actual) selectorResp.elegir(String(actual.servidor_alternativo_id));
+      const etiqueta = raiz.querySelector(`label[for="${P}respaldo-servidor"]`);
+      if(etiqueta) etiqueta.htmlFor = `${P}respaldo-servidor-boton`;
+    }
     const pintarCalculo = ()=>{ calculo.textContent = sel && sel.value ? textoConexion(describirConexion(red, eqId, Number(sel.value))) : ""; };
     if(sel){ sel.addEventListener("change", pintarCalculo); pintarCalculo(); }
     $(`#${P}respaldo-guardar`).addEventListener("click", async e=>{
@@ -1105,11 +1181,13 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
       const partes = [`<strong>${plural(n, "equipo elegido", "equipos elegidos")}</strong>`];
       if("red_id" in c) partes.push(c.red_id === null ? "quedarán sin red" : `pasarán a la red «${esc(redPorId.get(c.red_id).nombre)}»`);
       let lista = "";
-      if("tipo_equipo" in c){
-        partes.push(`serán «${esc(tipoPorValor.get(c.tipo_equipo).etiqueta)}»`);
+      if("tipo_equipo" in c) partes.push(`serán «${esc(tipoPorValor.get(c.tipo_equipo).etiqueta)}»`);
+      // Con la 010 la red también está en el nombre.
+      if("tipo_equipo" in c || ("red_id" in c && hayNombresConRed())){
         // Cómo quedan los nombres automáticos (los de los demás también pueden correrse en la numeración).
-        const copia = equipos.map(e=>({ ...e, nombre: e.nombre_guardado ?? e.nombre, ...(elegidos.has(e.id) ? { tipo_equipo: c.tipo_equipo } : {}) }));
-        const nuevos = nombresAutomaticos({ equipos: copia, ubicaciones, tipos });
+        const cambio = { ...("tipo_equipo" in c ? { tipo_equipo: c.tipo_equipo } : {}), ...("red_id" in c ? { red_id: c.red_id } : {}) };
+        const copia = equipos.map(e=>({ ...e, nombre: e.nombre_guardado ?? e.nombre, ...(elegidos.has(e.id) ? cambio : {}) }));
+        const nuevos = nombresAutomaticos(datosNombres(copia));
         const cambian = equipos.filter(e=>nuevos.get(e.id) !== e.nombre);
         lista = cambian.length ? `<div class="${P}mapa-muted">Nombres que cambian:</div><ul class="${P}lote-nombres">${cambian.slice(0, 8).map(e=>`<li><span class="${P}lote-antes">${esc(e.nombre)}</span> → <strong>${esc(nuevos.get(e.id))}</strong></li>`).join("")}${cambian.length > 8 ? `<li class="${P}mapa-muted">y ${cambian.length - 8} más</li>` : ""}</ul>` : `<div class="${P}mapa-muted">Ningún nombre cambia.</div>`;
       }
