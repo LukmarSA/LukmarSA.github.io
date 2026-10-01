@@ -6,7 +6,9 @@
 // permisos por rol, los casos de falla (tablas faltantes, unpkg caído) y la
 // capa Plano con su herramienta de ajuste (mover, agrandar, guardar, cancelar)
 // y, del inventario, el modal «Nuevo activo» (tipo con búsqueda, campos según
-// el tipo, submodales de «+»).
+// el tipo, submodales de «+»). v10: los campos configurables (con y sin la
+// migración 012: tabla, detalle, formulario, Configuración, Excel, acta) y la
+// edición de tipos de activo y de ubicación (ícono de la burbuja).
 //
 // Uso (desde tests/):  npm install   (una vez; trae playwright y leaflet)
 //                      npx playwright install chromium   (si no hay navegador)
@@ -19,6 +21,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
+import JSZip from "jszip";
 import { distanciaKm, fmtDistancia } from "../assets/js/inventario-tecnologico/nucleo/geo.js";
 import { PLANO_POR_DEFECTO } from "../assets/js/inventario-tecnologico/nucleo/plano-mapa.js";
 import { cuadradoAlrededor } from "../assets/js/inventario-tecnologico/nucleo/piscinas.js";
@@ -232,7 +235,10 @@ function fixture({ rol = "administrador", permitidas = [], fallas = {}, red007 =
   };
 }
 
-async function abrirApp(browser, base, fx, { leafletFalla = false, viewport = { width: 1400, height: 900 } } = {}){
+// JSZip de verdad (el mismo 3.10.1 de cdnjs, desde node_modules) para las
+// pruebas que exportan el Excel; las demás usan uno vacío, como siempre.
+const JSZIP_MIN = path.join(AQUI, "node_modules", "jszip", "dist", "jszip.min.js");
+async function abrirApp(browser, base, fx, { leafletFalla = false, viewport = { width: 1400, height: 900 }, jszipReal = false } = {}){
   const context = await browser.newContext({ viewport, locale: "es-EC", timezoneId: "America/Guayaquil" });
   const page = await context.newPage();
   const errores = [];
@@ -240,7 +246,10 @@ async function abrirApp(browser, base, fx, { leafletFalla = false, viewport = { 
   if(process.env.DEPURAR) page.on("console", m=>{ if(/DEPURAR/.test(m.text())) console.log("   [consola]", m.text()); });
   page.on("console", m=>{ if(m.type() === "error" && !/Failed to load resource/.test(m.text())) errores.push("console: " + m.text()); });
   await page.route("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2", r=>r.fulfill({ contentType: "text/javascript", body: `window.__FIXTURE__ = ${JSON.stringify(fx)};\n${STUB}` }));
-  await page.route("https://cdnjs.cloudflare.com/**", r=>r.fulfill({ contentType: "text/javascript", body: "window.JSZip = function(){};" }));
+  await page.route("https://cdnjs.cloudflare.com/**", r=>{
+    if(jszipReal && /\/jszip\/3\.10\.1\/jszip\.min\.js$/.test(r.request().url())) return r.fulfill({ contentType: "text/javascript", body: fs.readFileSync(JSZIP_MIN) });
+    return r.fulfill({ contentType: "text/javascript", body: "window.JSZip = function(){};" });
+  });
   await page.route(/fonts\.(googleapis|gstatic)\.com/, r=>r.fulfill({ contentType: "text/css", body: "" }));
   // Leaflet: se sirve el archivo EXACTO del paquete npm leaflet@1.9.4, así el
   // navegador valida el atributo integrity (SRI) contra los mismos bytes que unpkg.
@@ -2435,13 +2444,546 @@ async function escenarioActivo(browser, base){
   await context.close();
 }
 
+// ------------------------------------------------------------------ v10: campos configurables (012)
+// Con la 012 en el stub: la tabla campos_activo (los 9 de siempre y campos
+// nuevos), activos.personalizados, obligatorios y únicos, renombrar tipos e
+// ícono de los tipos de ubicación. Sin ella (escenario «sin012»): todo como en
+// el v9 y sin errores; además, «Editar» y «Desactivar» de Configuración
+// buscan por nombre/valor (en la base real esas tablas no tienen id).
+const CAMPOS_FIJOS_012 = [
+  ["serie", "Serie", "texto", null, "serie"], ["so", "Sistema operativo", "texto", null, "sistema_operativo"],
+  ["ram_gb", "RAM", "numero", "GB", "ram_gb"], ["disco_gb", "Almacenamiento", "numero", "GB", "disco_gb"],
+  ["procesador", "Procesador", "texto", null, "procesador"], ["mac_wifi", "MAC WiFi", "texto", null, "mac_wifi"],
+  ["mac_ethernet", "MAC Ethernet", "texto", null, "mac_ethernet"], ["color", "Color", "texto", null, "color"],
+  ["longitud_m", "Longitud", "numero", "m", "longitud_m"],
+].map(([clave, etiqueta, tipo_dato, unidad, columna], i)=>({ id: i + 1, clave, etiqueta, tipo_dato, unidad, opciones: [], fijo: true, columna, unico: false, en_acta: false, orden: (i + 1) * 10, activo: true }));
+const ICONO_TORRE = '<svg viewBox="0 0 16 16"><path d="M8 1L15 15H1z"/></svg>';
+function fixtureCampos(){
+  const fx = fixture({ red007: true });
+  const campo = (id, clave, etiqueta, tipo_dato, extra = {})=>({ id, clave, etiqueta, tipo_dato, unidad: null, opciones: [], fijo: false, columna: null, unico: false, en_acta: false, orden: id * 10, activo: true, ...extra });
+  fx.tablas.campos_activo = [
+    ...CAMPOS_FIJOS_012.map(c=>({ ...c })),
+    campo(10, "imei", "IMEI", "texto", { unico: true, en_acta: true }),
+    campo(11, "operadora", "Operadora", "lista", { opciones: [{ valor: "claro", etiqueta: "Claro", activo: true }, { valor: "movistar", etiqueta: "Movistar", activo: true }, { valor: "cnt", etiqueta: "CNT", activo: false }] }),
+    campo(12, "capacidad", "Capacidad", "numero", { unidad: "VA" }),
+    campo(13, "garantia_hasta", "Garantía hasta", "fecha"),
+    campo(14, "propio", "¿Propio?", "si_no"),
+    campo(15, "codigo_antiguo", "Código antiguo", "texto", { activo: false }),
+  ];
+  for(const t of fx.tablas.tipos_activo) t.campos_obligatorios = [];
+  fx.tablas.tipos_activo.push(
+    { nombre: "Celular", icono_svg: SVG16, color: "#3E7D4F", campos_pertinentes: ["serie", "imei", "operadora", "garantia_hasta"], campos_obligatorios: ["imei"], orden: 40, activo: true },
+    { nombre: "UPS", icono_svg: SVG16, color: "#A6710B", campos_pertinentes: ["serie", "capacidad", "propio", "codigo_antiguo"], campos_obligatorios: [], orden: 50, activo: true },
+    { nombre: "Router", icono_svg: SVG16, color: "#3E7D4F", campos_pertinentes: ["serie", "mac_ethernet"], campos_obligatorios: [], orden: 60, activo: true },
+  );
+  for(const a of fx.tablas.activos) a.personalizados = {};
+  fx.tablas.activos.push(
+    { id: 6, propiedad: "lukmar", tipo: "Celular", marca: "Samsung", modelo: "Galaxy A54", serie: "SN-C6", estado: "uso", fotos: [], personalizados: { imei: "351234567890123", operadora: "claro" } },
+    { id: 7, propiedad: "lukmar", tipo: "UPS", marca: "APC", modelo: "BX1100", serie: "SN-U7", estado: "disponible", fotos: [], personalizados: { capacidad: 1100, propio: true, codigo_antiguo: "UPS-VIEJO-01" } },
+    { id: 8, propiedad: "lukmar", tipo: "UPS", marca: "CDP", modelo: "R-UPR508", serie: "SN-U8", estado: "disponible", fotos: [], personalizados: { capacidad: 500 } },
+  );
+  for(const t of fx.tablas.tipos_ubicacion) t.icono_svg = null;
+  return fx;
+}
+const escrituras = (page, tabla, op = null)=>page.evaluate(([t, o])=>window.__ESCRITURAS__.filter(e=>e.tabla === t && (!o || e.op === o)), [tabla, op]);
+const idsTabla = page=>page.evaluate(()=>[...document.querySelectorAll("#inventario-tecnologico-tbody-activos tr[data-id]")].map(tr=>Number(tr.dataset.id)));
+const celdaCampo = (page, id, clave)=>page.evaluate(([id, clave])=>{
+  const tr = document.querySelector(`#inventario-tecnologico-tbody-activos tr[data-id="${id}"]`);
+  const td = tr && [...tr.children].find(td=>td.classList.contains(`inventario-tecnologico-col-campo:${clave}`));
+  return td ? td.innerText.trim() : null;
+}, [id, clave]);
+const cerrarModales = page=>page.evaluate(async ()=>{ (await import("/assets/js/inventario-tecnologico/ui/render-raiz.js")).cerrarModal(); });
+const abrirFormDe = (page, id)=>page.evaluate(async id=>{ (await import("/assets/js/inventario-tecnologico/ui/detalle/form-activo.js")).abrirFormActivo(id); }, id);
+const valoresDetalle = page=>page.evaluate(()=>Object.fromEntries([...document.querySelectorAll("[data-kv-campo]")].map(el=>[el.dataset.kvCampo, el.querySelector(".inventario-tecnologico-v").innerText.trim()])));
+const mismosElementos = (a, b)=>JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+async function esperarFilas(page, n){
+  try{ await page.waitForFunction(n=>document.querySelectorAll("#inventario-tecnologico-tbody-activos tr[data-id]").length === n, n, { timeout: 4000 }); }
+  catch(e){ throw new Error(`se esperaban ${n} filas: ${JSON.stringify(await idsTabla(page))}`); }
+}
+async function irAOpciones(page){
+  await page.click(SEL.tab("config"));
+  await page.click('[data-subtab="opciones"]');
+  await page.waitForSelector('[data-toggle-tipo="Laptop"]');
+}
+// Descarga el Excel del listado y lo abre con el JSZip de Node.
+async function descargarExcel(page){
+  const [descarga] = await Promise.all([page.waitForEvent("download", { timeout: 10000 }), page.click("#inventario-tecnologico-btn-exportar")]);
+  const zip = await JSZip.loadAsync(fs.readFileSync(await descarga.path()));
+  const hoja = await zip.file("xl/worksheets/sheet1.xml").async("string");
+  const tabla = await zip.file("xl/tables/table1.xml").async("string");
+  // XML bien formado (lo lee el mismo navegador).
+  const errXml = await page.evaluate(xs=>xs.map(x=>new DOMParser().parseFromString(x, "application/xml").querySelector("parsererror")?.textContent || "").filter(Boolean), [hoja, tabla]);
+  if(errXml.length) throw new Error("XML mal formado: " + errXml[0].slice(0, 200));
+  const celda = ref=>{ const m = hoja.match(new RegExp(`<c r="${ref}"[^>]*>(?:<is><t[^>]*>([^<]*)</t></is>)?`)); return m ? (m[1] ?? "") : null; };
+  const filaDe = tag=>{ const m = hoja.match(new RegExp(`<c r="A(\\d+)"[^>]*><is><t[^>]*>${tag}</t>`)); return m ? Number(m[1]) : null; };
+  return { hoja, tabla, celda, filaDe };
+}
+
+async function escenarioCampos(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixtureCampos(), { jszipReal: true });
+
+  // ---------- tabla de activos
+  await verificar("012: el gestor de columnas ofrece los campos nuevos activos (con su unidad), no el desactivado", async ()=>{
+    await page.click("#inventario-tecnologico-btn-columnas");
+    await page.waitForSelector("#inventario-tecnologico-lista-cols");
+    const claves = await page.evaluate(()=>[...document.querySelectorAll("[data-col-toggle]")].map(x=>x.dataset.colToggle));
+    for(const k of ["campo:imei", "campo:operadora", "campo:capacidad", "campo:garantia_hasta", "campo:propio"]) exigir(claves.includes(k), `falta ${k}: ${claves.join(",")}`);
+    exigir(!claves.includes("campo:codigo_antiguo"), "ofrece el campo desactivado");
+    exigir((await texto(page, '[data-col-opt="campo:capacidad"]')).trim() === "Capacidad (VA)", await texto(page, '[data-col-opt="campo:capacidad"]'));
+  });
+  await verificar("columnas IMEI y Capacidad: sus valores (con unidad) y «n/a» en los tipos que no las usan", async ()=>{
+    await page.check('[data-col-toggle="campo:imei"]');
+    await page.check('[data-col-toggle="campo:capacidad"]');
+    await cerrarModales(page);
+    const th = await page.evaluate(()=>[...document.querySelectorAll("thead .inventario-tecnologico-th-label-text")].map(x=>x.textContent));
+    exigir(th.includes("IMEI") && th.includes("Capacidad (VA)"), th.join("|"));
+    exigir(await celdaCampo(page, 6, "imei") === "351234567890123", String(await celdaCampo(page, 6, "imei")));
+    exigir(await celdaCampo(page, 7, "capacidad") === "1100 VA", String(await celdaCampo(page, 7, "capacidad")));
+    exigir(await celdaCampo(page, 1, "capacidad") === "n/a", String(await celdaCampo(page, 1, "capacidad")));
+  });
+  await verificar("el filtro de la columna IMEI y la búsqueda general encuentran por los campos nuevos (también por la opción de una lista)", async ()=>{
+    await page.fill('[data-col-texto="campo:imei"]', "35123");
+    await esperarFilas(page, 1);
+    exigir(JSON.stringify(await idsTabla(page)) === "[6]", JSON.stringify(await idsTabla(page)));
+    await page.fill('[data-col-texto="campo:imei"]', "");
+    await esperarFilas(page, 6);
+    await page.fill("#inventario-tecnologico-f-texto", "claro");
+    await esperarFilas(page, 1);
+    exigir(JSON.stringify(await idsTabla(page)) === "[6]", JSON.stringify(await idsTabla(page)));
+    await page.fill("#inventario-tecnologico-f-texto", "");
+    await esperarFilas(page, 6);
+  });
+  await verificar("ordenar por Capacidad: de menor a mayor y al revés", async ()=>{
+    const ups = async ()=>JSON.stringify((await idsTabla(page)).filter(id=>id === 7 || id === 8));
+    await page.click('[data-sort="campo:capacidad"]');
+    exigir(await ups() === "[8,7]", JSON.stringify(await idsTabla(page)));
+    await page.click('[data-sort="campo:capacidad"]');
+    exigir(await ups() === "[7,8]", JSON.stringify(await idsTabla(page)));
+    await page.click('[data-sort="id"]');
+    exigir(JSON.stringify(await idsTabla(page)) === "[1,2,3,6,7,8]", "no volvió al orden por tag: " + JSON.stringify(await idsTabla(page)));
+  });
+  await verificar("detalle: los campos del tipo con su formato (lista → la opción, sí/no → Sí), sin el desactivado", async ()=>{
+    await page.click('#inventario-tecnologico-tbody-activos tr[data-id="7"] .inventario-tecnologico-tag');
+    await page.waitForSelector('[data-kv-campo="capacidad"]');
+    const kv = await valoresDetalle(page);
+    exigir(kv.capacidad === "1100 VA" && kv.propio === "Sí" && kv.serie === "SN-U7", JSON.stringify(kv));
+    exigir(!("codigo_antiguo" in kv), "muestra el campo desactivado");
+    await cerrarModales(page);
+    await page.click('#inventario-tecnologico-tbody-activos tr[data-id="6"] .inventario-tecnologico-tag');
+    await page.waitForSelector('[data-kv-campo="imei"]');
+    const kv6 = await valoresDetalle(page);
+    exigir(Object.keys(kv6).join(",") === "serie,imei,operadora,garantia_hasta", Object.keys(kv6).join(","));
+    exigir(kv6.imei === "351234567890123" && kv6.operadora === "Claro" && kv6.garantia_hasta === "—", JSON.stringify(kv6));
+    await cerrarModales(page);
+  });
+
+  // ---------- formulario del activo
+  await page.click("#inventario-tecnologico-btn-nuevo");
+  await page.waitForSelector("#inventario-tecnologico-form-activo");
+  await verificar("nuevo activo: el «✎» de Tipo está apagado hasta elegir uno", async ()=>{
+    exigir(await page.locator("#inventario-tecnologico-btn-editar-tipo").isDisabled(), "✎ encendido sin tipo");
+  });
+  await verificar("tipo Celular: sus campos en el orden global, IMEI obligatorio (asterisco) y la lista sin la opción inactiva", async ()=>{
+    await elegirTipo(page, "celu");
+    const v = await camposVisiblesForm(page);
+    exigir(v === "celular,garantia_hasta,imei,operadora,serie", v);
+    const orden = await page.evaluate(()=>[...document.querySelectorAll("#inventario-tecnologico-fa-grid [data-campo]")].filter(el=>!el.hidden).map(el=>el.dataset.campo).join(","));
+    exigir(orden === "serie,imei,operadora,garantia_hasta", orden);
+    exigir(await page.locator('[data-campo="imei"] .inventario-tecnologico-fa-obligatorio').isVisible(), "sin asterisco en IMEI");
+    exigir(await page.getAttribute("#inventario-tecnologico-fa-c-imei", "aria-required") === "true", "sin aria-required");
+    exigir(await page.locator('[data-campo="serie"] .inventario-tecnologico-fa-obligatorio').isHidden(), "asterisco en Serie");
+    const ops = await page.evaluate(()=>[...document.querySelectorAll("#inventario-tecnologico-fa-c-operadora option")].map(o=>o.value).join(","));
+    exigir(ops === ",claro,movistar", ops);
+    exigir(!(await page.locator("#inventario-tecnologico-btn-editar-tipo").isDisabled()), "✎ sigue apagado");
+  });
+  await page.fill(FA("marca"), "Xiaomi");
+  await page.fill(FA("modelo"), "Redmi Note 13");
+  await page.fill(FA("serie"), "SN-C9");
+  await verificar("guardar sin IMEI: avisa que es obligatorio, va al campo y no guarda nada", async ()=>{
+    await page.click("#inventario-tecnologico-btn-guardar-activo");
+    await toast(page, /Falta «IMEI»: es obligatorio para Celular/);
+    exigir((await escrituras(page, "activos", "insert")).length === 0, "se guardó");
+    exigir(await page.evaluate(()=>document.activeElement?.id) === "inventario-tecnologico-fa-c-imei", "el foco no fue al IMEI");
+  });
+  await verificar("IMEI repetido (con espacios de más): «ya hay otro activo» con su tag, y no se guarda", async ()=>{
+    await page.fill("#inventario-tecnologico-fa-c-imei", " 351234567890123 ");
+    await page.click("#inventario-tecnologico-btn-guardar-activo");
+    await toast(page, /Ya hay otro activo con ese «IMEI»: LKM-006/);
+    exigir((await escrituras(page, "activos", "insert")).length === 0, "se guardó");
+  });
+  await verificar("guardar bien: los campos nuevos van en personalizados (sin los vacíos)", async ()=>{
+    await page.fill("#inventario-tecnologico-fa-c-imei", "359876543210987");
+    await page.selectOption("#inventario-tecnologico-fa-c-operadora", "movistar");
+    await page.click("#inventario-tecnologico-btn-guardar-activo");
+    await page.waitForFunction(()=>window.__ESCRITURAS__.some(e=>e.tabla === "activos" && e.op === "insert"));
+    const fila = (await escrituras(page, "activos", "insert"))[0].filas[0];
+    exigir(JSON.stringify(fila.personalizados) === '{"imei":"359876543210987","operadora":"movistar"}', JSON.stringify(fila.personalizados));
+    exigir(fila.serie === "SN-C9" && fila.tipo === "Celular", JSON.stringify(fila));
+  });
+  await cerrarModales(page);
+
+  await verificar("editar un UPS: sus campos con lo guardado (número, sí/no) y la unidad en la etiqueta; el desactivado no está", async ()=>{
+    await abrirFormDe(page, 7);
+    await page.waitForSelector("#inventario-tecnologico-form-activo");
+    exigir(await camposVisiblesForm(page) === "capacidad,propio,serie", await camposVisiblesForm(page));
+    exigir(await page.inputValue("#inventario-tecnologico-fa-c-capacidad") === "1100", await page.inputValue("#inventario-tecnologico-fa-c-capacidad"));
+    exigir(await page.inputValue("#inventario-tecnologico-fa-c-propio") === "si", await page.inputValue("#inventario-tecnologico-fa-c-propio"));
+    exigir(await page.locator("#inventario-tecnologico-fa-c-codigo_antiguo").count() === 0, "se ve el campo desactivado");
+    exigir((await texto(page, 'label[for="inventario-tecnologico-fa-c-capacidad"]')).includes("Capacidad (VA)"), "sin unidad en la etiqueta");
+  });
+  await verificar("un número mal escrito se rechaza con un mensaje claro", async ()=>{
+    await page.fill("#inventario-tecnologico-fa-c-capacidad", "mil");
+    await page.click("#inventario-tecnologico-btn-guardar-activo");
+    await toast(page, /«Capacidad» tiene que ser un número/);
+    exigir((await escrituras(page, "activos", "update")).length === 0, "se guardó");
+  });
+  await verificar("guardar: «1.500,5» queda como número, vaciar un campo lo quita y el desactivado se conserva", async ()=>{
+    await page.fill("#inventario-tecnologico-fa-c-capacidad", "1.500,5");
+    await page.selectOption("#inventario-tecnologico-fa-c-propio", "");
+    await page.click("#inventario-tecnologico-btn-guardar-activo");
+    await page.waitForFunction(()=>window.__ESCRITURAS__.some(e=>e.tabla === "activos" && e.op === "update"));
+    const parche = (await escrituras(page, "activos", "update"))[0].parche;
+    exigir(JSON.stringify(parche.personalizados) === '{"capacidad":1500.5,"propio":null}', JSON.stringify(parche.personalizados));
+    const enBase = (await db(page, "activos")).find(a=>a.id === 7).personalizados;
+    exigir(JSON.stringify(enBase) === '{"capacidad":1500.5,"codigo_antiguo":"UPS-VIEJO-01"}', JSON.stringify(enBase));
+    await page.waitForSelector('[data-kv-campo="capacidad"]');
+    const kv = await valoresDetalle(page);
+    exigir(kv.capacidad === "1500.5 VA" && kv.propio === "—", JSON.stringify(kv));
+  });
+  await cerrarModales(page);
+
+  await verificar("acta: el IMEI (marcado «en el acta») va en la descripción del equipo; la operadora no", async ()=>{
+    const d = await page.evaluate(async ()=>{
+      const { descripcionItemActa } = await import("/assets/js/inventario-tecnologico/ui/detalle/acta.js");
+      const { cargarActivos } = await import("/assets/js/inventario-tecnologico/nucleo/datos.js");
+      return descripcionItemActa(cargarActivos().activos.find(a=>a.id === 6));
+    });
+    exigir(d === "Celular Samsung — Modelo: Galaxy A54 — Número de serie: SN-C6 — IMEI: 351234567890123", d);
+  });
+  await verificar("Excel: los campos nuevos van como columnas al final de la Tabla (encabezado con unidad y sus valores)", async ()=>{
+    const x = await descargarExcel(page);
+    const enc = ["X9", "Y9", "Z9", "AA9", "AB9"].map(x.celda);
+    exigir(enc.join("|") === "IMEI|Operadora|Capacidad (VA)|Garantía hasta|¿Propio?", enc.join("|"));
+    exigir(/<tableColumns count="28">/.test(x.tabla), (x.tabla.match(/<tableColumns count="\d+">/) || [""])[0]);
+    exigir(x.tabla.includes('<tableColumn id="24" name="IMEI"/>') && x.tabla.includes('<tableColumn id="28" name="¿Propio?"/>'), "faltan columnas en la Tabla");
+    exigir(x.tabla.includes('ref="A9:AB16"') && x.hoja.includes('<dimension ref="A1:AB16"/>'), (x.tabla.match(/ref="[^"]*"/g) || []).join(","));
+    const f6 = x.filaDe("LKM-006"), f7 = x.filaDe("LKM-007"), f1 = x.filaDe("LKM-001"), f9 = x.filaDe("LKM-009");
+    exigir(x.celda(`X${f6}`) === "351234567890123" && x.celda(`Y${f6}`) === "Claro", `LKM-006: ${x.celda(`X${f6}`)} / ${x.celda(`Y${f6}`)}`);
+    exigir(x.celda(`Z${f7}`) === "1500.5" && x.celda(`X${f1}`) === "" && x.celda(`Y${f9}`) === "Movistar", `Z${f7}=${x.celda(`Z${f7}`)} X${f1}=${x.celda(`X${f1}`)} Y${f9}=${x.celda(`Y${f9}`)}`);
+    // Anchos de columna: rangos ordenados y sin encimarse (si no, Excel repara el archivo).
+    const cols = [...x.hoja.matchAll(/<col\b[^>]*\bmin="(\d+)"[^>]*\bmax="(\d+)"/g)].map(m=>[Number(m[1]), Number(m[2])]);
+    exigir(cols.every(([mi, ma], i)=>mi <= ma && (i === 0 || mi > cols[i - 1][1])), JSON.stringify(cols));
+    exigir(cols.some(([mi, ma])=>mi === 24 && ma === 28), "sin ancho para las columnas nuevas");
+  });
+
+  // ---------- Configuración → Tipos y opciones
+  await irAOpciones(page);
+  await verificar("Configuración → Campos: los 9 de siempre (sin «Desactivar») y los nuevos, en su orden", async ()=>{
+    const filas = await page.evaluate(()=>[...document.querySelectorAll("[data-fila-campo]")].map(tr=>tr.dataset.filaCampo));
+    exigir(filas.join(",") === "serie,so,ram_gb,disco_gb,procesador,mac_wifi,mac_ethernet,color,longitud_m,imei,operadora,capacidad,garantia_hasta,propio,codigo_antiguo", filas.join(","));
+    exigir(await page.locator('[data-toggle-campo="serie"]').count() === 0, "un campo de siempre se puede desactivar");
+    exigir((await page.locator('[data-toggle-campo="codigo_antiguo"]').innerText()) === "Activar", "el desactivado no dice «Activar»");
+    exigir(await page.locator('[data-mover-campo="serie"][data-dir="arriba"]').isDisabled() && await page.locator('[data-mover-campo="codigo_antiguo"][data-dir="abajo"]').isDisabled(), "flechas de los extremos encendidas");
+  });
+  await page.screenshot({ path: path.join(CAPTURAS, "40-config-campos.png"), fullPage: true });
+  await verificar("crear un campo de lista: clave desde el nombre, opciones con su valor interno, al final del orden", async ()=>{
+    await page.click("#inventario-tecnologico-btn-nuevo-campo-cfg");
+    await page.waitForSelector("#inventario-tecnologico-cc-etiqueta");
+    await page.fill("#inventario-tecnologico-cc-etiqueta", "Plan de datos");
+    await page.selectOption("#inventario-tecnologico-cc-tipo", "lista");
+    const opciones = page.locator("#inventario-tecnologico-cc-opciones [data-opcion-etiqueta]");
+    await opciones.nth(0).fill("Básico");
+    await opciones.nth(1).fill("Ilimitado");
+    await page.screenshot({ path: path.join(CAPTURAS, "41-config-nuevo-campo.png") });
+    await page.click("#inventario-tecnologico-btn-guardar-campo-cfg");
+    await toast(page, /Campo «Plan de datos» creado/);
+    const ins = (await escrituras(page, "campos_activo", "insert")).map(e=>e.filas[0]);
+    exigir(ins.length === 1 && ins[0].clave === "plan_de_datos" && ins[0].tipo_dato === "lista" && ins[0].orden === 160, JSON.stringify(ins));
+    exigir(JSON.stringify(ins[0].opciones.map(o=>[o.valor, o.etiqueta, o.activo])) === '[["basico","Básico",true],["ilimitado","Ilimitado",true]]', JSON.stringify(ins[0].opciones));
+    await page.waitForSelector('[data-fila-campo="plan_de_datos"]');
+  });
+  await verificar("un campo con el nombre de otro (sin distinguir mayúsculas) no se crea", async ()=>{
+    await page.click("#inventario-tecnologico-btn-nuevo-campo-cfg");
+    await page.waitForSelector("#inventario-tecnologico-cc-etiqueta");
+    await page.fill("#inventario-tecnologico-cc-etiqueta", "imei");
+    await page.click("#inventario-tecnologico-btn-guardar-campo-cfg");
+    await toast(page, /No se pudo crear el campo: Ya hay un campo que se llama «imei»/);
+    exigir((await escrituras(page, "campos_activo", "insert")).length === 1, "se creó el repetido");
+    await cerrarModales(page);
+  });
+  await verificar("editar un campo de siempre: cambia la etiqueta (no el tipo de dato) y no se toca nada más", async ()=>{
+    await page.click('[data-editar-campo="serie"]');
+    await page.waitForSelector("#inventario-tecnologico-cc-etiqueta");
+    exigir(await page.locator("#inventario-tecnologico-cc-tipo").isDisabled(), "se puede cambiar el tipo de dato de un campo de siempre");
+    await page.fill("#inventario-tecnologico-cc-etiqueta", "Número de serie");
+    await page.click("#inventario-tecnologico-btn-guardar-campo-cfg");
+    await toast(page, /Campo guardado/);
+    const upd = (await escrituras(page, "campos_activo", "update")).map(e=>e.parche);
+    exigir(upd.length === 1 && upd[0].etiqueta === "Número de serie" && !("opciones" in upd[0]) && !("tipo_dato" in upd[0]) && !("unidad" in upd[0]), JSON.stringify(upd));
+  });
+  await verificar("mover un campo: «↓» en IMEI lo cambia de lugar con Operadora y el foco sigue en la flecha", async ()=>{
+    await page.click('[data-mover-campo="imei"][data-dir="abajo"]');
+    await page.waitForFunction(()=>{ const f = [...document.querySelectorAll("[data-fila-campo]")].map(tr=>tr.dataset.filaCampo); return f.indexOf("operadora") >= 0 && f.indexOf("operadora") < f.indexOf("imei"); });
+    const upd = (await escrituras(page, "campos_activo", "update")).slice(1).map(e=>[e.filas[0].clave, e.parche.orden]);
+    exigir(JSON.stringify(upd) === '[["imei",110],["operadora",100]]', JSON.stringify(upd));
+    exigir(await page.evaluate(()=>document.activeElement?.dataset?.moverCampo) === "imei", "el foco no quedó en la flecha de IMEI");
+  });
+  await verificar("desactivar un campo nuevo: queda «Activar», su columna se va y su valor se conserva", async ()=>{
+    await page.click('[data-toggle-campo="capacidad"]');
+    await toast(page, /Campo «Capacidad» desactivado/);
+    await page.waitForFunction(()=>document.querySelector('[data-toggle-campo="capacidad"]')?.textContent === "Activar");
+    exigir((await db(page, "activos")).find(a=>a.id === 8).personalizados.capacidad === 500, "se perdió el valor");
+  });
+  await verificar("editar el tipo Celular: «Celular» no se renombra; marcar Operadora como obligatoria", async ()=>{
+    await page.click('[data-editar-tipo="Celular"]');
+    await page.waitForSelector("#inventario-tecnologico-ct-nombre");
+    exigir(await page.locator("#inventario-tecnologico-ct-nombre").isDisabled(), "se puede renombrar «Celular»");
+    exigir(await page.locator('#inventario-tecnologico-ct-campos input[data-obligatorio="imei"]').isChecked(), "IMEI no aparece obligatorio");
+    exigir(await page.locator('#inventario-tecnologico-ct-campos input[data-obligatorio="ram_gb"]').isDisabled(), "«obligatorio» encendido en un campo que no usa");
+    await page.check('#inventario-tecnologico-ct-campos input[data-obligatorio="operadora"]');
+    await page.screenshot({ path: path.join(CAPTURAS, "42-config-tipo-obligatorios.png") });
+    await page.click("#inventario-tecnologico-btn-guardar-tipo-cfg");
+    await toast(page, /Tipo actualizado/);
+    const p = (await escrituras(page, "tipos_activo", "update")).at(-1);
+    exigir(p.filas[0].nombre === "Celular" && mismosElementos(p.parche.campos_obligatorios, ["imei", "operadora"]), JSON.stringify(p.parche));
+    exigir(mismosElementos(p.parche.campos_pertinentes, ["serie", "imei", "operadora", "garantia_hasta"]), JSON.stringify(p.parche.campos_pertinentes));
+  });
+  await verificar("renombrar el tipo UPS: la función de la 012 lo cambia en sus activos y se conservan los campos desactivados del tipo", async ()=>{
+    await page.click('[data-editar-tipo="UPS"]');
+    await page.waitForSelector("#inventario-tecnologico-ct-nombre");
+    exigir((await texto(page, "#inventario-tecnologico-ct-nombre-ayuda")).includes("los 2 activos"), await texto(page, "#inventario-tecnologico-ct-nombre-ayuda"));
+    await page.fill("#inventario-tecnologico-ct-nombre", "UPS / Regulador");
+    await page.click("#inventario-tecnologico-btn-guardar-tipo-cfg");
+    await toast(page, /Tipo renombrado a «UPS \/ Regulador» y guardado/);
+    const rpc = await page.evaluate(()=>window.__ESCRITURAS__.filter(e=>e.rpc === "renombrar_tipo_activo"));
+    exigir(rpc.length === 1 && rpc[0].args.p_viejo === "UPS" && rpc[0].args.p_nuevo === "UPS / Regulador" && rpc[0].activos === 2, JSON.stringify(rpc));
+    const tipos = (await db(page, "activos")).filter(a=>a.id === 7 || a.id === 8).map(a=>a.tipo);
+    exigir(tipos.join("|") === "UPS / Regulador|UPS / Regulador", tipos.join("|"));
+    const p = (await escrituras(page, "tipos_activo", "update")).at(-1);
+    exigir(p.filas[0].nombre === "UPS / Regulador" && mismosElementos(p.parche.campos_pertinentes, ["serie", "propio", "capacidad", "codigo_antiguo"]), JSON.stringify(p.parche.campos_pertinentes));
+    await page.waitForSelector('[data-fila-tipo="UPS / Regulador"]');
+  });
+  await verificar("renombrar «Router» avisa que deja de coincidir con el tipo de equipo de red (y cancelar no cambia nada)", async ()=>{
+    await page.click('[data-editar-tipo="Router"]');
+    await page.waitForSelector("#inventario-tecnologico-ct-nombre");
+    await page.fill("#inventario-tecnologico-ct-nombre", "Ruteador");
+    await page.waitForSelector("#inventario-tecnologico-ct-nombre-aviso:not([hidden])");
+    const aviso = await texto(page, "#inventario-tecnologico-ct-nombre-aviso");
+    exigir(/coincide con el tipo de equipo de red «Router».*Con «Ruteador», ya no/.test(aviso), aviso);
+    await page.fill("#inventario-tecnologico-ct-nombre", "ROUTER");
+    await page.waitForSelector("#inventario-tecnologico-ct-nombre-aviso", { state: "hidden" });
+    await cerrarModales(page);
+    exigir(!(await page.evaluate(()=>window.__ESCRITURAS__.some(e=>e.rpc === "renombrar_tipo_activo" && e.args.p_viejo === "Router"))), "se renombró al cancelar");
+  });
+  await verificar("crear un tipo con un obligatorio: se guarda solo entre los campos que usa", async ()=>{
+    await page.click("#inventario-tecnologico-btn-nuevo-tipo-cfg");
+    await page.waitForSelector("#inventario-tecnologico-ct-nombre");
+    await page.fill("#inventario-tecnologico-ct-nombre", "Radio portátil");
+    for(const c of ["so", "ram_gb", "disco_gb", "procesador", "mac_wifi", "mac_ethernet"]) await page.uncheck(`#inventario-tecnologico-ct-campos input[data-usa][value="${c}"]`);
+    await page.check('#inventario-tecnologico-ct-campos input[data-obligatorio="serie"]');
+    await page.check('#inventario-tecnologico-ct-campos input[data-usa][value="imei"]');
+    await page.click("#inventario-tecnologico-btn-guardar-tipo-cfg");
+    await toast(page, /Tipo creado/);
+    const f = (await escrituras(page, "tipos_activo", "insert")).at(-1).filas[0];
+    exigir(f.nombre === "Radio portátil" && JSON.stringify(f.campos_pertinentes) === '["serie","imei"]' && JSON.stringify(f.campos_obligatorios) === '["serie"]', JSON.stringify(f));
+  });
+  await verificar("tipos de ubicación: editar «Torre» con un ícono (con script y onload) lo guarda limpio y lo muestra en su burbuja", async ()=>{
+    await page.waitForSelector('[data-fila-tipo-ubicacion="torre"]');
+    await page.click('[data-editar-tipo-ubicacion="torre"]');
+    await page.waitForSelector("#inventario-tecnologico-cu-icono");
+    await page.fill("#inventario-tecnologico-cu-icono", '<svg viewBox="0 0 16 16" onload="alert(1)"><script>alert(2)</script><path d="M8 1L15 15H1z"/></svg>');
+    await page.waitForSelector('#inventario-tecnologico-cu-vista path[d="M8 1L15 15H1z"]');
+    await page.click("#inventario-tecnologico-btn-guardar-tipo-ubicacion-cfg");
+    await toast(page, /Tipo de ubicación guardado/);
+    const p = (await escrituras(page, "tipos_ubicacion", "update")).at(-1);
+    exigir(p.filas[0].valor === "torre" && p.parche.icono_svg === ICONO_TORRE, JSON.stringify(p.parche));
+    await page.waitForSelector('[data-fila-tipo-ubicacion="torre"] path[d="M8 1L15 15H1z"]');
+  });
+  await verificar("un ícono de ubicación sin viewBox se rechaza con el motivo", async ()=>{
+    await page.click('[data-editar-tipo-ubicacion="bodega"]');
+    await page.waitForSelector("#inventario-tecnologico-cu-icono");
+    await page.fill("#inventario-tecnologico-cu-icono", '<svg width="16" height="16"><path d="M1 1h14v14H1z"/></svg>');
+    exigir(/viewBox/.test(await texto(page, "#inventario-tecnologico-cu-icono-ayuda")), "la ayuda no avisa");
+    await page.click("#inventario-tecnologico-btn-guardar-tipo-ubicacion-cfg");
+    await toast(page, /No se pudo guardar el tipo de ubicación: .*viewBox/);
+    exigir(!(await escrituras(page, "tipos_ubicacion", "update")).some(e=>e.filas.some(f=>f.valor === "bodega")), "se guardó");
+    await cerrarModales(page);
+  });
+
+  // ---------- mapa: la burbuja y el «✎» del formulario de ubicación
+  await verificar("mapa: la burbuja de las torres usa el ícono nuevo (y las demás, el dibujo de siempre)", async ()=>{
+    await irAlMapa(page);
+    await page.waitForSelector(`${SEL.marcador("Torre Cerro Azul")} path[d="M8 1L15 15H1z"]`, { timeout: 5000 });
+    exigir(await page.locator(`${SEL.marcador("Oficina Centro")} path[d="M8 1L15 15H1z"]`).count() === 0, "la oficina también lo tiene");
+  });
+  await captura(page, "43-mapa-icono-torre.png");
+  await verificar("formulario de ubicación: «✎» edita el tipo elegido sin perder lo escrito", async ()=>{
+    await page.click("#inventario-tecnologico-mapa-nueva-ubicacion");
+    await page.waitForSelector("#inventario-tecnologico-ubic-nombre");
+    await page.fill("#inventario-tecnologico-ubic-nombre", "Repetidora Norte");
+    await page.selectOption("#inventario-tecnologico-ubic-tipo", "bodega");
+    await page.click("#inventario-tecnologico-ubic-btn-editar-tipo");
+    await page.waitForSelector("#inventario-tecnologico-ubic-mini-tipo:not([hidden])");
+    exigir((await texto(page, "#inventario-tecnologico-ubic-tipo-titulo")) === "Editar el tipo «Bodega»", await texto(page, "#inventario-tecnologico-ubic-tipo-titulo"));
+    exigir(await page.inputValue("#inventario-tecnologico-ubic-tipo-etiqueta") === "Bodega", await page.inputValue("#inventario-tecnologico-ubic-tipo-etiqueta"));
+    await page.fill("#inventario-tecnologico-ubic-tipo-etiqueta", "Bodega / Galpón");
+    await page.fill("#inventario-tecnologico-ubic-tipo-icono", ICONO_TORRE);
+    await page.waitForSelector('#inventario-tecnologico-ubic-tipo-vista path[d="M8 1L15 15H1z"]');
+    await page.click("#inventario-tecnologico-ubic-tipo-crear");
+    await toast(page, /Tipo «Bodega \/ Galpón» guardado/);
+    const p = (await escrituras(page, "tipos_ubicacion", "update")).at(-1);
+    exigir(p.filas[0].valor === "bodega" && p.parche.etiqueta === "Bodega / Galpón" && p.parche.icono_svg === ICONO_TORRE, JSON.stringify(p.parche));
+    exigir(await page.inputValue("#inventario-tecnologico-ubic-nombre") === "Repetidora Norte", "se perdió lo escrito");
+    exigir(await page.inputValue("#inventario-tecnologico-ubic-tipo") === "bodega", "cambió el tipo elegido");
+    exigir((await page.locator('#inventario-tecnologico-ubic-tipo option[value="bodega"]').innerText()) === "Bodega / Galpón", "el selector no muestra la etiqueta nueva");
+    // El mapa de atrás ya se repintó: la burbuja de la bodega tiene el ícono nuevo.
+    await page.waitForSelector(`${SEL.marcador("Bodega Sur")} path[d="M8 1L15 15H1z"]`, { state: "attached", timeout: 4000 });
+    await cerrarModales(page);
+  });
+
+  // ---------- «✎» y «+ Nuevo campo» desde el formulario del activo
+  await page.click(SEL.tab("activos"));
+  await page.click("#inventario-tecnologico-btn-nuevo");
+  await page.waitForSelector("#inventario-tecnologico-form-activo");
+  await verificar("formulario del activo: la etiqueta nueva de un campo de siempre («Número de serie») llega al formulario", async ()=>{
+    await elegirTipo(page, "lapt");
+    exigir((await texto(page, 'label[for="inventario-tecnologico-fa-serie"]')).includes("Número de serie"), await texto(page, 'label[for="inventario-tecnologico-fa-serie"]'));
+  });
+  await page.fill(FA("marca"), "Lenovo");
+  await page.fill(FA("serie"), "SN-L10");
+  await verificar("«✎» de Laptop y «+ Nuevo campo» adentro: el campo aparece en el formulario sin perder lo escrito", async ()=>{
+    await page.click("#inventario-tecnologico-btn-editar-tipo");
+    await page.waitForSelector(SUBMODAL, { state: "visible" });
+    exigir((await texto(page, "#inventario-tecnologico-nt-titulo")) === "Editar el tipo «Laptop»", await texto(page, "#inventario-tecnologico-nt-titulo"));
+    await page.click("#inventario-tecnologico-nt-nuevo-campo");
+    await page.fill("#inventario-tecnologico-nt-nc-etiqueta", "Código de barras");
+    await page.check("#inventario-tecnologico-nt-nc-unico");
+    await page.screenshot({ path: path.join(CAPTURAS, "44-submodal-nuevo-campo.png") });
+    await page.click("#inventario-tecnologico-nt-nc-crear");
+    await page.waitForSelector('#inventario-tecnologico-nt-campos input[data-usa][value="codigo_de_barras"]:checked');
+    const ins = (await escrituras(page, "campos_activo", "insert")).at(-1).filas[0];
+    exigir(ins.clave === "codigo_de_barras" && ins.unico === true && ins.tipo_dato === "texto", JSON.stringify(ins));
+    await page.click("#inventario-tecnologico-btn-guardar-tipo");
+    await page.waitForSelector("#inventario-tecnologico-submodal-host", { state: "detached" });
+    await toast(page, /Tipo guardado/);
+    await esperarTransicion(page);
+    const p = (await escrituras(page, "tipos_activo", "update")).at(-1);
+    exigir(p.filas[0].nombre === "Laptop" && p.parche.campos_pertinentes.includes("codigo_de_barras"), JSON.stringify(p.parche));
+    exigir(await page.locator('#inventario-tecnologico-fa-grid [data-campo="codigo_de_barras"]').isVisible(), "el campo nuevo no se ve en el formulario");
+    exigir(await page.inputValue(FA("marca")) === "Lenovo" && await page.inputValue(FA("serie")) === "SN-L10", "se perdió lo escrito");
+  });
+  await verificar("guardar el activo con el campo recién creado", async ()=>{
+    await page.fill("#inventario-tecnologico-fa-c-codigo_de_barras", "7861234567890");
+    await page.click("#inventario-tecnologico-btn-guardar-activo");
+    await page.waitForFunction(()=>window.__ESCRITURAS__.filter(e=>e.tabla === "activos" && e.op === "insert").length === 2);
+    const fila = (await escrituras(page, "activos", "insert")).at(-1).filas[0];
+    exigir(fila.tipo === "Laptop" && fila.serie === "SN-L10" && JSON.stringify(fila.personalizados) === '{"codigo_de_barras":"7861234567890"}', JSON.stringify(fila));
+  });
+  await cerrarModales(page);
+  await verificar("sin errores de JavaScript (campos configurables)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+}
+
+async function escenarioSin012(browser, base){
+  const fx = fixture();
+  fx.tablas.tipos_activo.push({ nombre: "Celular", icono_svg: SVG16, color: "#3E7D4F", campos_pertinentes: ["serie"], orden: 40, activo: true });
+  const { context, page, errores } = await abrirApp(browser, base, fx, { jszipReal: true });
+  await verificar("sin la 012: el gestor de columnas no ofrece campos nuevos", async ()=>{
+    await page.click("#inventario-tecnologico-btn-columnas");
+    await page.waitForSelector("#inventario-tecnologico-lista-cols");
+    exigir(await page.locator('[data-col-toggle^="campo:"]').count() === 0, "ofrece columnas de campos");
+    await cerrarModales(page);
+  });
+  await verificar("sin la 012: el Excel sale con las 23 columnas de la plantilla", async ()=>{
+    const x = await descargarExcel(page);
+    exigir(/<tableColumns count="23">/.test(x.tabla) && x.tabla.includes('ref="A9:W12"') && x.celda("X9") === null, (x.tabla.match(/<tableColumns count="\d+">|ref="[^"]*"/g) || []).join(","));
+  });
+  await irAOpciones(page);
+  await verificar("sin la 012: Configuración avisa que los campos nuevos necesitan la 012 (sin botón ni tabla)", async ()=>{
+    exigir(await page.locator("#inventario-tecnologico-btn-nuevo-campo-cfg").count() === 0 && await page.locator("[data-fila-campo]").count() === 0, "hay campos configurables");
+    exigir(/hace falta aplicar la migración 012/.test(await page.locator(".inventario-tecnologico-alert-info").allInnerTexts().then(t=>t.join(" "))), "sin el aviso de la 012");
+  });
+  await verificar("«Desactivar» un tipo, una propiedad y un estado cambia justo esa fila (por nombre / valor)", async ()=>{
+    await page.click('[data-toggle-tipo="Monitor"]');
+    await toast(page, /Tipo desactivado/);
+    await page.click('[data-toggle-propiedad="eq"]');
+    await toast(page, /Propiedad desactivada/);
+    await page.click('[data-toggle-estado="disponible"]');
+    await toast(page, /Estado desactivado/);
+    const upd = (await page.evaluate(()=>window.__ESCRITURAS__.filter(e=>e.op === "update"))).map(e=>[e.tabla, e.filas.map(f=>f.nombre || f.valor).join("+"), JSON.stringify(e.parche)]);
+    exigir(JSON.stringify(upd) === JSON.stringify([["tipos_activo", "Monitor", '{"activo":false}'], ["propiedad_opciones", "eq", '{"activo":false}'], ["estado_opciones", "disponible", '{"activo":false}']]), JSON.stringify(upd));
+    exigir((await db(page, "tipos_activo")).filter(t=>t.activo === false).map(t=>t.nombre).join(",") === "Monitor", "se desactivó otro tipo");
+  });
+  await verificar("sin la 012: editar Laptop no ofrece renombrar ni «obligatorio», y no envía campos_obligatorios", async ()=>{
+    await page.click('[data-editar-tipo="Laptop"]');
+    await page.waitForSelector("#inventario-tecnologico-ct-nombre");
+    exigir(await page.locator("#inventario-tecnologico-ct-nombre").isDisabled(), "el nombre se puede cambiar");
+    exigir(/migración 012/.test(await texto(page, "#inventario-tecnologico-ct-nombre-ayuda")), "sin la ayuda de la 012");
+    exigir(await page.locator("#inventario-tecnologico-ct-campos input[data-obligatorio]").count() === 0 && await page.locator("#inventario-tecnologico-ct-nuevo-campo").count() === 0, "ofrece obligatorios o «+ Nuevo campo»");
+    await page.uncheck('#inventario-tecnologico-ct-campos input[data-usa][value="mac_wifi"]');
+    await page.click("#inventario-tecnologico-btn-guardar-tipo-cfg");
+    await toast(page, /Tipo actualizado/);
+    const p = (await escrituras(page, "tipos_activo", "update")).at(-1);
+    exigir(p.filas[0].nombre === "Laptop" && !("campos_obligatorios" in p.parche) && !p.parche.campos_pertinentes.includes("mac_wifi"), JSON.stringify(p.parche));
+  });
+  await verificar("sin la 012: los tipos de ubicación se editan (etiqueta y color) sin campo de ícono", async ()=>{
+    await page.waitForSelector('[data-fila-tipo-ubicacion="torre"]');
+    await page.click('[data-editar-tipo-ubicacion="torre"]');
+    await page.waitForSelector("#inventario-tecnologico-cu-etiqueta");
+    exigir(await page.locator("#inventario-tecnologico-cu-icono").count() === 0, "ofrece el ícono sin la 012");
+    await page.fill("#inventario-tecnologico-cu-etiqueta", "Torre de enlace");
+    await page.click("#inventario-tecnologico-btn-guardar-tipo-ubicacion-cfg");
+    await toast(page, /Tipo de ubicación guardado/);
+    const p = (await escrituras(page, "tipos_ubicacion", "update")).at(-1);
+    exigir(p.filas[0].valor === "torre" && p.parche.etiqueta === "Torre de enlace" && !("icono_svg" in p.parche), JSON.stringify(p.parche));
+  });
+  await page.click(SEL.tab("activos"));
+  await verificar("sin la 012: «✎» del formulario edita el tipo, sin «+ Nuevo campo»; el activo se guarda sin personalizados", async ()=>{
+    await page.click("#inventario-tecnologico-btn-nuevo");
+    await page.waitForSelector("#inventario-tecnologico-form-activo");
+    await elegirTipo(page, "lapt");
+    await page.click("#inventario-tecnologico-btn-editar-tipo");
+    await page.waitForSelector(SUBMODAL, { state: "visible" });
+    exigir(await page.locator("#inventario-tecnologico-nt-nuevo-campo").count() === 0 && await page.locator("#inventario-tecnologico-nt-nombre").isDisabled(), "ofrece «+ Nuevo campo» o renombrar");
+    await page.click("#inventario-tecnologico-btn-cancelar-tipo");
+    await page.waitForSelector("#inventario-tecnologico-submodal-host", { state: "detached" });
+    await page.fill(FA("marca"), "HP");
+    await page.fill(FA("serie"), "SN-HP1");
+    await page.fill(FA("ram"), "16");
+    await page.click("#inventario-tecnologico-btn-guardar-activo");
+    await page.waitForFunction(()=>window.__ESCRITURAS__.some(e=>e.tabla === "activos" && e.op === "insert"));
+    const fila = (await escrituras(page, "activos", "insert"))[0].filas[0];
+    exigir(!("personalizados" in fila) && fila.ram_gb === 16 && fila.serie === "SN-HP1", JSON.stringify(fila));
+    await cerrarModales(page);
+    await abrirFormDe(page, 2);
+    await page.waitForSelector("#inventario-tecnologico-form-activo");
+    await page.fill(FA("serie"), "SN-A2-B");
+    await page.click("#inventario-tecnologico-btn-guardar-activo");
+    await page.waitForFunction(()=>window.__ESCRITURAS__.some(e=>e.tabla === "activos" && e.op === "update"));
+    const parche = (await escrituras(page, "activos", "update"))[0].parche;
+    exigir(!("personalizados" in parche) && parche.serie === "SN-A2-B", JSON.stringify(parche));
+    await cerrarModales(page);
+  });
+  await verificar("sin la 012: el formulario de ubicación tiene «✎» pero no el campo de ícono", async ()=>{
+    await irAlMapa(page);
+    await page.click("#inventario-tecnologico-mapa-nueva-ubicacion");
+    await page.waitForSelector("#inventario-tecnologico-ubic-nombre");
+    await page.click("#inventario-tecnologico-ubic-btn-editar-tipo");
+    await page.waitForSelector("#inventario-tecnologico-ubic-mini-tipo:not([hidden])");
+    exigir(await page.locator("#inventario-tecnologico-ubic-tipo-icono").count() === 0, "ofrece el ícono sin la 012");
+    await cerrarModales(page);
+  });
+  await verificar("sin errores de JavaScript (sin la 012)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+}
+
 // ------------------------------------------------------------------ main
 const srv = await servir(RAIZ);
 const base = `http://127.0.0.1:${srv.address().port}`;
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 try{
   // SOLO=plano (u otro nombre) corre un solo escenario, para depurar.
-  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo };
+  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo, campos: escenarioCampos, sin012: escenarioSin012 };
   // SOLO=plano o SOLO=plano,torre (varios, separados por comas).
   const solo = process.env.SOLO ? process.env.SOLO.split(",").map(x=>x.trim()).filter(Boolean) : null;
   for(const [nombre, fn] of Object.entries(escenarios)) if(!solo || solo.includes(nombre)) await fn(browser, base);

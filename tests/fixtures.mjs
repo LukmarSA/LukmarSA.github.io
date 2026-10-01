@@ -12,17 +12,20 @@ export const TABLAS = {
     { rol: "operador", accion: "ver_listado", permitido: true },
     { rol: "operador", accion: "crear_activo", permitido: false },
   ],
+  // Como en Supabase (leído en vivo el 30-sep-2026): estas tres tablas NO
+  // tienen columna "id"; su clave es nombre (tipos) o valor. Con un "id" de
+  // mentira acá, las pruebas no veían que «Editar» y «Desactivar» fallaban.
   tipos_activo: [
-    { id: 1, nombre: "Laptop", color: "#3A5068", icono_svg: null, campos_pertinentes: ["serie","so","ram_gb","disco_gb","procesador"], orden: 10, activo: true },
-    { id: 2, nombre: "Monitor", color: "#8B9AAA", icono_svg: null, campos_pertinentes: [], orden: 20, activo: false },
+    { nombre: "Laptop", color: "#3A5068", icono_svg: null, campos_pertinentes: ["serie","so","ram_gb","disco_gb","procesador"], orden: 10, activo: true },
+    { nombre: "Monitor", color: "#8B9AAA", icono_svg: null, campos_pertinentes: [], orden: 20, activo: false },
   ],
   propiedad_opciones: [
-    { id: 1, valor: "lukmar", etiqueta: "Lukmar", orden: 10, activo: true },
-    { id: 2, valor: "rentado", etiqueta: "Rentado", orden: 20, activo: false },
+    { valor: "lukmar", etiqueta: "Lukmar", orden: 10, activo: true },
+    { valor: "rentado", etiqueta: "Rentado", orden: 20, activo: false },
   ],
   estado_opciones: [
-    { id: 1, valor: "operativo", etiqueta: "Operativo", color_fg: "#1A7A4C", color_bg: "#DFF3E8", orden: 10, activo: true },
-    { id: 2, valor: "danado", etiqueta: "Dañado", color_fg: "#B3432D", color_bg: "#FBE2DC", orden: 20, activo: false },
+    { valor: "operativo", etiqueta: "Operativo", color_fg: "#1A7A4C", color_bg: "#DFF3E8", orden: 10, activo: true },
+    { valor: "danado", etiqueta: "Dañado", color_fg: "#B3432D", color_bg: "#FBE2DC", orden: 20, activo: false },
   ],
   activos: [
     {
@@ -76,8 +79,29 @@ export const SESION_FAKE = { user: { id: "u-admin", email: "ana@lukmar.local" } 
 // app (select/order/eq/limit/single, insert, update().eq(), upsert) y es
 // "thenable" (implementa then) para que un simple `await sb.from(x).select()`
 // sin `.single()` también funcione, igual que con el cliente real.
+// Columnas reales (Supabase, 30-sep-2026) de las tablas que se filtran por
+// su clave: filtrar por una columna que no existe da el error 42703, igual
+// que PostgREST. (campos_obligatorios llega con la 012.)
+const COLUMNAS_REALES = {
+  tipos_activo: ["nombre","icono_svg","color","campos_pertinentes","orden","creado_en","creado_por","activo","campos_obligatorios"],
+  propiedad_opciones: ["valor","etiqueta","orden","activo","creado_en","creado_por"],
+  estado_opciones: ["valor","etiqueta","color_fg","color_bg","orden","activo","creado_en","creado_por"],
+};
+// Tablas de migraciones que pueden no estar: sin ellas en el fixture, la
+// consulta responde como PostgREST (PGRST205).
+const TABLAS_DE_MIGRACION = ["campos_activo"];
+function columnaInexistente(tabla, columna){
+  const cols = COLUMNAS_REALES[tabla];
+  return cols && !cols.includes(columna) ? { code: "42703", message: `column ${tabla}.${columna} does not exist` } : null;
+}
+
 export function crearClienteFake(tablas, sesionFake){
   function construirQuery(nombreTabla){
+    if(!(nombreTabla in tablas) && TABLAS_DE_MIGRACION.includes(nombreTabla)){
+      const error = { code: "PGRST205", message: `Could not find the table 'public.${nombreTabla}' in the schema cache` };
+      const b = { select(){ return b; }, order(){ return b; }, eq(){ return b; }, limit(){ return b; }, then(resolve){ resolve({ data: null, error }); } };
+      return b;
+    }
     let filas = (tablas[nombreTabla] || []).slice();
     let limiteN = null;
     const builder = {
@@ -102,16 +126,23 @@ export function crearClienteFake(tablas, sesionFake){
         nuevo.forEach(o=>{ (tablas[nombreTabla] ||= []).push({ id: Math.max(0,...tablas[nombreTabla].map(r=>r.id||0))+1, activo:true, ...o }); });
         return { data:null, error:null };
       },
+      // update(…).eq(…)[.select(…)]: se puede esperar con o sin select.
       update(campos){
-        const idsFiltrados = filas.map(f=>f.id);
-        return {
-          eq: async (campo, valor)=>{
-            (tablas[nombreTabla]||[]).forEach(fila=>{
-              if(idsFiltrados.includes(fila.id) && fila[campo]===valor) Object.assign(fila, campos);
-            });
-            return { data:null, error:null };
+        const filtros = [];
+        let error = null;
+        const q = {
+          eq(campo, valor){ error = error || columnaInexistente(nombreTabla, campo); filtros.push([campo, valor]); return q; },
+          select(){ return q; },
+          then(resolve, reject){
+            return Promise.resolve().then(()=>{
+              if(error) return { data:null, error };
+              const afectadas = (tablas[nombreTabla]||[]).filter(fila=>filas.includes(fila) && filtros.every(([c, v])=>fila[c]===v));
+              afectadas.forEach(fila=>Object.assign(fila, campos));
+              return { data: afectadas.map(f=>({ ...f })), error:null };
+            }).then(resolve, reject);
           },
         };
+        return q;
       },
       upsert: async ()=>({data:null, error:null}),
       delete(){ return builder; },

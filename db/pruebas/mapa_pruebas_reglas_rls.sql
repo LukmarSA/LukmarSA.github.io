@@ -1,5 +1,5 @@
 -- =====================================================================
--- Pruebas de las reglas del mapa (migraciones 002 a 004, 006 a 011) contra la base
+-- Pruebas de las reglas del mapa y de los activos (migraciones 002 a 004, 006 a 012) contra la base
 -- REAL, sin dejar rastro. Sirven antes y después de correr la 005.
 -- =====================================================================
 -- Todo corre dentro de un único bloque DO que termina con RAISE EXCEPTION:
@@ -87,6 +87,13 @@ DECLARE
   w_3      bigint;
   w_4      bigint;
   w_5      bigint;
+  x_1      integer;
+  x_2      integer;
+  x_3      integer;
+  x_baja   bigint;
+  x_n      integer;
+  x_txt    text;
+  x_js     jsonb;
 BEGIN
   IF to_regprocedure('public.equipo_radio_de_activo(integer)') IS NULL THEN
     RAISE EXCEPTION 'Falta la migración 004 (public.equipo_radio_de_activo no existe): aplícala antes de correr estas pruebas.';
@@ -849,6 +856,19 @@ BEGIN
     r := r || jsonb_build_object('t', 'S1 el recálculo de nombres solo lo llaman los triggers (sin EXECUTE para anon ni authenticated)',
       'ok', NOT has_function_privilege('anon', 'public.recalcular_nombres_equipos()', 'EXECUTE') AND NOT has_function_privilege('authenticated', 'public.recalcular_nombres_equipos()', 'EXECUTE'), 'det', '');
 
+    -- Los nombres que se esperan aquí (y en U y V) usan las etiquetas de
+    -- fábrica de la 007. En la base real se pueden haber cambiado (al 30-sep,
+    -- «PtP-E» y «PtP-R»): se ponen las de fábrica solo dentro de esta
+    -- transacción, que se revierte entera al final.
+    BEGIN
+      UPDATE public.tipos_equipo_red t SET etiqueta = f.etiqueta, genero = f.genero
+        FROM (VALUES ('router', 'Router', 'm'), ('switch', 'Switch', 'm'), ('ptp', 'Punto a Punto', 'm'), ('ap', 'AP', 'm'),
+                     ('estacion', 'Estación', 'f'), ('camara', 'Cámara', 'f'), ('nvr', 'NVR', 'm'), ('otro', 'Equipo', 'm')) AS f(valor, etiqueta, genero)
+       WHERE t.valor = f.valor AND (t.etiqueta IS DISTINCT FROM f.etiqueta OR t.genero IS DISTINCT FROM f.genero);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'S1b etiquetas de fábrica de los tipos de equipo (para comparar los nombres)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+
     PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
     PERFORM set_config('role', 'authenticated', true);
     BEGIN
@@ -1221,6 +1241,214 @@ BEGIN
       'ok', v_n = 0 AND v_m = 0, 'det', format('redes repetidas %s, nombres distintos %s', v_n, v_m));
   END IF;
 
+  -- ================= W. Migración 012: campos configurables de los activos =================
+  PERFORM set_config('role', 'postgres', true);
+  IF to_regclass('public.campos_activo') IS NULL THEN
+    r := r || jsonb_build_object('t', 'W0 migración 012 aplicada (campos_activo existe)', 'ok', false, 'det', 'falta correr db/migraciones/012_campos_configurables.sql');
+  ELSE
+    SELECT count(*) INTO x_n FROM public.campos_activo WHERE fijo;
+    r := r || jsonb_build_object('t', 'W0 migración 012: 9 campos fijos, columnas nuevas, renombrar solo para authenticated y las bajas copian personalizados',
+      'ok', x_n = 9
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'activos' AND column_name = 'personalizados' AND is_nullable = 'NO')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'tipos_activo' AND column_name = 'campos_obligatorios')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'tipos_ubicacion' AND column_name = 'icono_svg')
+        AND has_function_privilege('authenticated', 'public.renombrar_tipo_activo(text, text)', 'EXECUTE')
+        AND NOT has_function_privilege('anon', 'public.renombrar_tipo_activo(text, text)', 'EXECUTE')
+        AND position('personalizados' in pg_get_functiondef('public.f_dar_baja(integer, text)'::regprocedure)) > 0
+        AND position('personalizados' in pg_get_functiondef('public.f_restaurar_baja(bigint)'::regprocedure)) > 0,
+      'det', format('fijos %s', x_n));
+
+    -- W1: quién lee y quién escribe las definiciones
+    PERFORM set_config('request.jwt.claims', json_build_object('role', 'anon')::text, true);
+    PERFORM set_config('role', 'anon', true);
+    SELECT count(*) INTO x_n FROM public.campos_activo;
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_visit, 'role', 'authenticated')::text, true);
+    PERFORM set_config('role', 'authenticated', true);
+    BEGIN
+      INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato) VALUES ('tx_visita', '[TX] Visita', 'texto');
+      r := r || jsonb_build_object('t', 'W1 cualquiera lee los campos; el visitante no los crea (solo el administrador)', 'ok', false, 'det', 'el visitante creó un campo');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'W1 cualquiera lee los campos; el visitante no los crea (solo el administrador)', 'ok', SQLSTATE = '42501' AND x_n >= 9, 'det', format('anon lee %s; %s %s', x_n, SQLSTATE, SQLERRM));
+    END;
+
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('role', 'authenticated', true);
+    BEGIN
+      INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato, unico, en_acta, orden) VALUES ('tx_imei', '  [TX] IMEI ', 'texto', true, true, 1000);
+      INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato, unidad, orden) VALUES ('tx_capacidad', '[TX] Capacidad', 'numero', 'VA', 1010);
+      INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato, opciones, orden) VALUES ('tx_operadora', '[TX] Operadora', 'lista',
+        '[{"valor":"claro","etiqueta":"Claro","activo":true},{"valor":"cnt","etiqueta":"CNT","activo":false}]', 1020);
+      INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato, orden) VALUES ('tx_garantia', '[TX] Garantía hasta', 'fecha', 1030);
+      INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato, orden) VALUES ('tx_propio', '[TX] ¿Propio?', 'si_no', 1040);
+      SELECT etiqueta INTO x_txt FROM public.campos_activo WHERE clave = 'tx_imei';
+      r := r || jsonb_build_object('t', 'W2 el administrador crea campos de cada tipo de dato (la etiqueta queda sin espacios de más)', 'ok', x_txt = '[TX] IMEI', 'det', x_txt);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'W2 el administrador crea campos de cada tipo de dato (la etiqueta queda sin espacios de más)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+
+    -- W3: reglas de las definiciones
+    x_txt := '';
+    BEGIN INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato, fijo, columna) VALUES ('tx_fijo', '[TX] Fijo', 'texto', true, 'marca'); x_txt := x_txt || 'fijo-nuevo '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato) VALUES ('estado', '[TX] Estado', 'texto'); x_txt := x_txt || 'reservada '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato) VALUES ('tx_otro_imei', '[tx] imei', 'texto'); x_txt := x_txt || 'etiqueta-repetida '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN DELETE FROM public.campos_activo WHERE clave = 'serie'; IF FOUND THEN x_txt := x_txt || 'borro-fijo '; END IF; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.campos_activo SET tipo_dato = 'numero' WHERE clave = 'serie'; x_txt := x_txt || 'tipo-de-fijo '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.campos_activo SET activo = false WHERE clave = 'serie'; x_txt := x_txt || 'desactivo-fijo '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.campos_activo SET clave = 'tx_imei2' WHERE clave = 'tx_imei'; x_txt := x_txt || 'cambio-clave '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato, opciones) VALUES ('tx_lista_mala', '[TX] Lista mala', 'lista', '[{"valor":"a","etiqueta":"A"},{"valor":"a","etiqueta":"Otra A"}]'); x_txt := x_txt || 'opcion-repetida '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato, unico) VALUES ('tx_fecha_unica', '[TX] Fecha única', 'fecha', true); x_txt := x_txt || 'unico-en-fecha '; EXCEPTION WHEN others THEN NULL; END;
+    UPDATE public.campos_activo SET etiqueta = '[TX] Número de serie', unico = false WHERE clave = 'serie';
+    SELECT etiqueta INTO x_js FROM (SELECT to_jsonb(etiqueta) AS etiqueta FROM public.campos_activo WHERE clave = 'serie') q;
+    r := r || jsonb_build_object('t', 'W3 los fijos no se borran, ni cambian de tipo, ni se desactivan (la etiqueta sí); claves reservadas, etiquetas y opciones repetidas y «único» en una fecha se rechazan',
+      'ok', x_txt = '' AND x_js = to_jsonb('[TX] Número de serie'::text), 'det', coalesce(nullif(x_txt, ''), 'todo rechazado') || ' / ' || x_js::text);
+
+    -- W4: personalizados se mezcla (lo oculto no se pierde; null borra) y se valida por tipo de dato
+    BEGIN
+      INSERT INTO public.activos (propiedad, tipo, marca, modelo, serie, personalizados)
+        VALUES ('lukmar', 'Laptop', '[TX] W', 'A', '[TX]-W-1', '{"tx_imei": "35-111", "tx_capacidad": 1500}') RETURNING id INTO x_1;
+      UPDATE public.activos SET personalizados = '{"tx_operadora": "claro", "tx_garantia": "2027-01-31", "tx_propio": true}' WHERE id = x_1;
+      UPDATE public.activos SET personalizados = '{"tx_capacidad": null}', marca = '[TX] W2' WHERE id = x_1;
+      SELECT personalizados INTO x_js FROM public.activos WHERE id = x_1;
+      r := r || jsonb_build_object('t', 'W4 al guardar se mezcla con lo que había (lo que no llega se conserva) y un null quita el valor',
+        'ok', x_js = '{"tx_imei": "35-111", "tx_operadora": "claro", "tx_garantia": "2027-01-31", "tx_propio": true}'::jsonb, 'det', x_js::text);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'W4 al guardar se mezcla con lo que había (lo que no llega se conserva) y un null quita el valor', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    x_txt := '';
+    BEGIN UPDATE public.activos SET personalizados = '{"tx_capacidad": "mucha"}' WHERE id = x_1; x_txt := x_txt || 'numero '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.activos SET personalizados = '{"tx_operadora": "movistar"}' WHERE id = x_1; x_txt := x_txt || 'lista '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.activos SET personalizados = '{"tx_operadora": "cnt"}' WHERE id = x_1; x_txt := x_txt || 'opcion-inactiva '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.activos SET personalizados = '{"tx_garantia": "2027-02-30"}' WHERE id = x_1; x_txt := x_txt || 'fecha '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.activos SET personalizados = '{"tx_propio": "si"}' WHERE id = x_1; x_txt := x_txt || 'si_no '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.activos SET personalizados = '{"tx_no_existe": 1}' WHERE id = x_1; x_txt := x_txt || 'desconocido '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.activos SET personalizados = '{"serie": "X"}' WHERE id = x_1; x_txt := x_txt || 'fijo-en-json '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.activos SET personalizados = '[1, 2]' WHERE id = x_1; x_txt := x_txt || 'no-objeto '; EXCEPTION WHEN others THEN NULL; END;
+    r := r || jsonb_build_object('t', 'W5 cada valor nuevo se valida: número, opción activa de la lista, fecha real, sí/no, campo que existe y que no sea de siempre, objeto',
+      'ok', x_txt = '', 'det', coalesce(nullif(x_txt, ''), 'todo rechazado'));
+
+    -- W6: único (sin mayúsculas ni espacios de más; números como números), también en un fijo
+    BEGIN
+      INSERT INTO public.activos (propiedad, tipo, marca, personalizados) VALUES ('lukmar', 'Laptop', '[TX] W3', '{"tx_imei": " 35-111 "}') RETURNING id INTO x_2;
+      r := r || jsonb_build_object('t', 'W6 «único»: otro activo con el mismo valor se rechaza y el mensaje dice cuál', 'ok', false, 'det', 'se insertó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'W6 «único»: otro activo con el mismo valor se rechaza y el mensaje dice cuál', 'ok', SQLSTATE = '23505' AND SQLERRM LIKE '%[TX] IMEI%' AND SQLERRM LIKE '%-' || CASE WHEN length(x_1::text) < 3 THEN lpad(x_1::text, 3, '0') ELSE x_1::text END || ')%', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      INSERT INTO public.activos (propiedad, tipo, marca, personalizados) VALUES ('lukmar', 'Laptop', '[TX] W3', '{"tx_imei": "35-222"}') RETURNING id INTO x_2;
+      UPDATE public.activos SET marca = '[TX] W3b' WHERE id = x_2;
+      UPDATE public.activos SET personalizados = '{"tx_imei": "35-222"}' WHERE id = x_2;
+      r := r || jsonb_build_object('t', 'W7 «único» no traba otros cambios ni volver a guardar el mismo valor', 'ok', true, 'det', format('id %s', x_2));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'W7 «único» no traba otros cambios ni volver a guardar el mismo valor', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.campos_activo SET unico = true WHERE clave = 'tx_capacidad';
+      UPDATE public.activos SET personalizados = '{"tx_capacidad": 1500}' WHERE id = x_1;
+      UPDATE public.activos SET personalizados = '{"tx_capacidad": 1500.00}' WHERE id = x_2;
+      r := r || jsonb_build_object('t', 'W8 «único» en un número: 1500 y 1500.00 son el mismo valor', 'ok', false, 'det', 'se guardó el repetido');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'W8 «único» en un número: 1500 y 1500.00 son el mismo valor', 'ok', SQLSTATE = '23505', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    BEGIN
+      UPDATE public.activos SET modelo = '[TX] repetido' WHERE id IN (x_1, x_2);
+      INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato, orden) VALUES ('tx_tmp', '[TX] Tmp', 'texto', 1050);
+      UPDATE public.activos SET personalizados = '{"tx_tmp": "igual"}' WHERE id IN (x_1, x_2);
+      UPDATE public.campos_activo SET unico = true WHERE clave = 'tx_tmp';
+      r := r || jsonb_build_object('t', 'W9 no se puede marcar «único» si ya hay valores repetidos', 'ok', false, 'det', 'se marcó');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'W9 no se puede marcar «único» si ya hay valores repetidos', 'ok', SQLSTATE = '23505' AND SQLERRM LIKE '%repetido%', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    -- (Con la longitud, que casi ningún activo real tiene: marcar la serie
+    -- como única fallaría si en la base ya hay series repetidas.)
+    BEGIN
+      UPDATE public.activos SET longitud_m = 2.5 WHERE id = x_1;
+      UPDATE public.campos_activo SET unico = true WHERE clave = 'longitud_m';
+      UPDATE public.activos SET longitud_m = 2.50 WHERE id = x_2;
+      r := r || jsonb_build_object('t', 'W10 «único» también en un campo de siempre (en su columna de activos)', 'ok', false, 'det', 'se guardó la longitud repetida');
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'W10 «único» también en un campo de siempre (en su columna de activos)', 'ok', SQLSTATE = '23505' AND SQLERRM LIKE 'Ya hay otro activo con el mismo «Longitud»%', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+
+    -- W11: baja y restauración conservan los valores (sin revalidarlos)
+    BEGIN
+      UPDATE public.campos_activo SET opciones = '[{"valor":"claro","etiqueta":"Claro","activo":false},{"valor":"cnt","etiqueta":"CNT","activo":true}]' WHERE clave = 'tx_operadora';
+      PERFORM public.f_dar_baja(x_1, '[TX] baja W');
+      SELECT id, activo -> 'personalizados' INTO x_baja, x_js FROM public.bajas WHERE (activo ->> 'id')::int = x_1 ORDER BY id DESC LIMIT 1;
+      x_3 := public.f_restaurar_baja(x_baja);
+      SELECT personalizados INTO x_js FROM public.activos WHERE id = x_3;
+      r := r || jsonb_build_object('t', 'W11 dar de baja y restaurar conserva los valores de los campos nuevos (aunque una opción se haya desactivado)',
+        'ok', x_js ->> 'tx_imei' = '35-111' AND x_js ->> 'tx_operadora' = 'claro' AND (x_js ->> 'tx_propio')::boolean, 'det', coalesce(x_js::text, 'sin valores'));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'W11 dar de baja y restaurar conserva los valores de los campos nuevos (aunque una opción se haya desactivado)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+
+    -- W12: tipo de dato, opciones y borrado con valores
+    x_txt := '';
+    BEGIN UPDATE public.campos_activo SET tipo_dato = 'texto_largo' WHERE clave = 'tx_imei'; x_txt := x_txt || 'tipo-con-valores '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.campos_activo SET opciones = '[{"valor":"cnt","etiqueta":"CNT","activo":true}]' WHERE clave = 'tx_operadora'; x_txt := x_txt || 'quito-opcion-usada '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN DELETE FROM public.campos_activo WHERE clave = 'tx_imei'; IF FOUND THEN x_txt := x_txt || 'borro-con-valores '; END IF; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN
+      INSERT INTO public.campos_activo (clave, etiqueta, tipo_dato, orden) VALUES ('tx_sin_uso', '[TX] Sin uso', 'texto', 1060);
+      UPDATE public.campos_activo SET tipo_dato = 'lista', opciones = '[{"valor":"x","etiqueta":"X"}]' WHERE clave = 'tx_sin_uso';
+      DELETE FROM public.campos_activo WHERE clave = 'tx_sin_uso';
+    EXCEPTION WHEN others THEN x_txt := x_txt || 'sin-uso:' || SQLERRM || ' ';
+    END;
+    r := r || jsonb_build_object('t', 'W12 un campo con valores no cambia de tipo de dato ni se borra, ni pierde una opción que se usa; uno sin valores, sí',
+      'ok', x_txt = '', 'det', coalesce(nullif(x_txt, ''), 'como se esperaba'));
+
+    -- W13: renombrar un tipo de activo
+    BEGIN
+      INSERT INTO public.tipos_activo (nombre, icono_svg, color, campos_pertinentes, orden) VALUES ('[TX] Tipo W', '<svg viewBox="0 0 16 16" width="16" height="16"></svg>', '#004DAB', '["serie"]', 5000);
+      UPDATE public.activos SET tipo = '[TX] Tipo W' WHERE id = x_2;
+      PERFORM public.f_dar_baja(x_2, '[TX] baja W2');
+      INSERT INTO public.activos (propiedad, tipo, marca) VALUES ('lukmar', '[TX] Tipo W', '[TX] W4') RETURNING id INTO x_2;
+      x_n := public.renombrar_tipo_activo('[TX] Tipo W', '  [TX] Tipo W nuevo ');
+      SELECT count(*) INTO x_1 FROM public.activos WHERE tipo = '[TX] Tipo W nuevo';
+      SELECT count(*) INTO x_3 FROM public.bajas WHERE activo ->> 'tipo' = '[TX] Tipo W nuevo';
+      r := r || jsonb_build_object('t', 'W13 renombrar un tipo: la FK lo lleva a los activos y la función a las copias de las bajas',
+        'ok', x_n = 1 AND x_1 = 1 AND x_3 = 1 AND NOT EXISTS (SELECT 1 FROM public.tipos_activo WHERE nombre = '[TX] Tipo W'), 'det', format('devolvió %s; activos %s, bajas %s', x_n, x_1, x_3));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'W13 renombrar un tipo: la FK lo lleva a los activos y la función a las copias de las bajas', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    x_txt := '';
+    BEGIN PERFORM public.renombrar_tipo_activo('Celular', '[TX] Teléfono'); x_txt := x_txt || 'celular '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN PERFORM public.renombrar_tipo_activo('[TX] Tipo W nuevo', 'laptop'); x_txt := x_txt || 'repetido '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN PERFORM public.renombrar_tipo_activo('[TX] Tipo W nuevo', '   '); x_txt := x_txt || 'vacio '; EXCEPTION WHEN others THEN NULL; END;
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_visit, 'role', 'authenticated')::text, true);
+    BEGIN PERFORM public.renombrar_tipo_activo('[TX] Tipo W nuevo', '[TX] Otro'); x_txt := x_txt || 'visitante '; EXCEPTION WHEN others THEN NULL; END;
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    r := r || jsonb_build_object('t', 'W14 no se renombra «Celular», ni a un nombre que ya existe o vacío, ni lo hace quien no es administrador',
+      'ok', x_txt = '', 'det', coalesce(nullif(x_txt, ''), 'todo rechazado'));
+
+    -- W15: íconos: los de ubicación se guardan; con scripts o eventos, no (tampoco en los tipos de activo)
+    x_txt := '';
+    BEGIN
+      UPDATE public.tipos_ubicacion SET icono_svg = '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>' WHERE valor = 'torre';
+      IF NOT FOUND THEN x_txt := x_txt || 'no-guardo-el-bueno '; END IF;
+    EXCEPTION WHEN others THEN x_txt := x_txt || 'rechazo-el-bueno:' || SQLERRM || ' ';
+    END;
+    BEGIN UPDATE public.tipos_ubicacion SET icono_svg = '<svg viewBox="0 0 16 16" onload="alert(1)"></svg>' WHERE valor = 'torre'; x_txt := x_txt || 'onload '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.tipos_ubicacion SET icono_svg = '<svg viewBox="0 0 16 16"><script>alert(1)</script></svg>' WHERE valor = 'torre'; x_txt := x_txt || 'script '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.tipos_ubicacion SET icono_svg = 'no es un svg' WHERE valor = 'torre'; x_txt := x_txt || 'texto '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.tipos_ubicacion SET icono_svg = '<svg viewBox="0 0 16 16"><path/onload="alert(1)" d="M0 0"/></svg>' WHERE valor = 'torre'; x_txt := x_txt || 'onload-tras-barra '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.tipos_ubicacion SET icono_svg = '<svg viewBox="0 0 16 16"><path d="M0 0"onload="alert(1)"/></svg>' WHERE valor = 'torre'; x_txt := x_txt || 'onload-tras-comilla '; EXCEPTION WHEN others THEN NULL; END;
+    BEGIN UPDATE public.tipos_activo SET icono_svg = '<svg width="16" height="16"><a href="javascript:alert(1)"/></svg>' WHERE nombre = 'Laptop'; x_txt := x_txt || 'activo-javascript '; EXCEPTION WHEN others THEN NULL; END;
+    r := r || jsonb_build_object('t', 'W15 ícono de un tipo de ubicación: se guarda uno bueno; con scripts, eventos o que no es SVG, no (tampoco en los tipos de activo)',
+      'ok', x_txt = '', 'det', coalesce(nullif(x_txt, ''), 'como se esperaba'));
+
+    -- W16: obligatorios por tipo (lista de claves) y auditoría de los campos
+    BEGIN
+      UPDATE public.tipos_activo SET campos_obligatorios = '["serie", "tx_imei"]' WHERE nombre = '[TX] Tipo W nuevo';
+      BEGIN UPDATE public.tipos_activo SET campos_obligatorios = '{"serie": true}' WHERE nombre = '[TX] Tipo W nuevo'; x_txt := 'objeto-aceptado'; EXCEPTION WHEN others THEN x_txt := ''; END;
+      PERFORM set_config('role', 'postgres', true);
+      SELECT count(*) INTO x_n FROM public.auditoria WHERE accion LIKE '%_campos_activo' AND fecha >= now() - interval '1 minute';
+      r := r || jsonb_build_object('t', 'W16 los obligatorios son una lista de claves por tipo, y los cambios de campos quedan en la auditoría',
+        'ok', x_txt = '' AND x_n >= 5, 'det', format('%s filas de auditoría de campos', x_n));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'W16 los obligatorios son una lista de claves por tipo, y los cambios de campos quedan en la auditoría', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+  END IF;
+
   -- ================= G. GRANT explícito (sin él, la API responde "permission denied") =================
   PERFORM set_config('role', 'postgres', true);
   SELECT string_agg(rol || ':' || priv, ', ') INTO v_txt
@@ -1230,6 +1458,13 @@ BEGIN
   r := r || jsonb_build_object('t', 'G1 enlaces_respaldo tiene GRANT SELECT/INSERT/UPDATE/DELETE para anon y authenticated', 'ok', v_txt IS NULL, 'det', coalesce('faltan: ' || v_txt, 'completo'));
   r := r || jsonb_build_object('t', 'G2 equipo_radio_de_activo se puede llamar desde la API (EXECUTE para anon y authenticated)',
     'ok', has_function_privilege('anon', 'public.equipo_radio_de_activo(integer)', 'EXECUTE') AND has_function_privilege('authenticated', 'public.equipo_radio_de_activo(integer)', 'EXECUTE'), 'det', '');
+  IF to_regclass('public.campos_activo') IS NOT NULL THEN
+    SELECT string_agg(rol || ':' || priv, ', ') INTO v_txt
+      FROM (VALUES ('anon'), ('authenticated')) AS roles(rol)
+      CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS privs(priv)
+     WHERE NOT has_table_privilege(rol, 'public.campos_activo', priv);
+    r := r || jsonb_build_object('t', 'G3 campos_activo tiene GRANT SELECT/INSERT/UPDATE/DELETE para anon y authenticated', 'ok', v_txt IS NULL, 'det', coalesce('faltan: ' || v_txt, 'completo'));
+  END IF;
 
   -- ================= D. Auditoría =================
   SELECT count(*) INTO v_n FROM public.auditoria

@@ -14,6 +14,7 @@ import * as PL from "../assets/js/inventario-tecnologico/nucleo/plano-mapa.js";
 import * as N from "../assets/js/inventario-tecnologico/nucleo/mapa-nombres.js";
 import * as PI from "../assets/js/inventario-tecnologico/nucleo/piscinas.js";
 import * as SS from "../assets/js/inventario-tecnologico/nucleo/selector-servidor.js";
+import { htmlPin } from "../assets/js/inventario-tecnologico/ui/mapa/leaflet.js";
 
 let ok = 0, total = 0;
 const fallas = [];
@@ -140,8 +141,23 @@ prueba("resumen: cifras del panel (enlaces = radioenlaces de la jerarquía, sin 
   assert.deepEqual(r, { ubicaciones:3, archivadas:1, equipos:4, enlaces:2, activosUbicados:2, activosSinUbicacion:1 });
 });
 prueba("tipo desconocido: etiqueta = valor y color neutro", ()=>{
-  assert.deepEqual(L.infoTipoUbicacion(tipos, "repetidora"), { etiqueta:"repetidora", color:"#57697C", activo:false });
+  assert.deepEqual(L.infoTipoUbicacion(tipos, "repetidora"), { etiqueta:"repetidora", color:"#57697C", activo:false, icono:null });
   assert.equal(L.infoTipoUbicacion(tipos, "torre").color, "#EC741D");
+});
+prueba("v10: el pin dibuja el ícono del tipo a 15 px; sin ícono, el glifo de fábrica", ()=>{
+  const svg = '<svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>';
+  const con = htmlPin({ color: "#EC741D", tipo: "torre", icono: svg });
+  assert.ok(/<svg[^>]*width="15" height="15"/.test(con) && con.includes('<circle cx="8"') && con.includes('aria-hidden="true"'), con);
+  assert.ok(!con.includes('width="16"'), "quedó el tamaño original");
+  const sin = htmlPin({ color: "#EC741D", tipo: "torre" });
+  assert.ok(sin.includes('M12 10.5 8.5 21'), "no usó el glifo de la torre");
+  assert.ok(htmlPin({ color: "#57697C", tipo: "camara" }).includes('r="3.6"'), "un tipo sin glifo ni ícono sale con el punto");
+});
+prueba("v10: el tipo de ubicación trae su ícono (012), o null", ()=>{
+  const svg = '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="4"/></svg>';
+  const conIcono = tipos.map(t=>t.valor === "torre" ? { ...t, icono_svg: svg } : t);
+  assert.equal(L.infoTipoUbicacion(conIcono, "torre").icono, svg);
+  assert.equal(L.infoTipoUbicacion(conIcono, "oficina").icono, null);
 });
 
 const buscar = q=>L.buscarEnMapa(q, { indices: idx, ubicaciones, equipos, activos, tipos });

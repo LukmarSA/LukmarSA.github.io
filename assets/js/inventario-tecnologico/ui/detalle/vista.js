@@ -3,7 +3,8 @@ import { ROL_ADMIN } from "../../nucleo/config.js";
 import { cargarActivos } from "../../nucleo/datos.js";
 import { state } from "../../nucleo/estado.js";
 import { buscarActivo, esc, fmtFecha, fmtTag, fmtValorActualConPorcentaje, labelTipoDevolucion, labelTipoEntrega } from "../../nucleo/helpers.js";
-import { camposExtraParaTipo, camposNoRelevantesParaDetalle, colorTipo, iconoTipoTam, infoEstado, infoPropiedad } from "../../nucleo/opciones-configurables.js";
+import { camposDeTipo, colorTipo, iconoTipoTam, infoEstado, infoPropiedad } from "../../nucleo/opciones-configurables.js";
+import { textoValor, valorCrudo } from "../../nucleo/campos-personalizados.js";
 import { puede } from "../../nucleo/permisos.js";
 import { estaEnPortapapeles, toggleEnPortapapeles } from "./acta.js";
 import { abrirCambiarCustodio, abrirEditarTramo } from "./cambiar-custodio.js";
@@ -17,7 +18,6 @@ export function abrirDetalle(id){
   const datos = cargarActivos();
   const a = buscarActivo(datos, id);
   if(!a) return;
-  const camposNoRelevantes = camposNoRelevantesParaDetalle(a.tipo);
   const html = `
     <div class="inventario-tecnologico-modal inventario-tecnologico-modal-wide">
       <div class="inventario-tecnologico-modal-header">
@@ -41,18 +41,14 @@ export function abrirDetalle(id){
 
         <div class="inventario-tecnologico-kv-grid">
           <div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">Marca</div><div class="inventario-tecnologico-v">${esc(a.marca)||'—'}</div></div>
-          ${!camposNoRelevantes.includes("serie") ? `<div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">Serie</div><div class="inventario-tecnologico-v inventario-tecnologico-mono">${esc(a.serie)||'—'}</div></div>` : ""}
-          ${!camposNoRelevantes.includes("so") ? `<div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">Sistema operativo</div><div class="inventario-tecnologico-v">${esc(a.sistema_operativo)||'—'}</div></div>` : ""}
-          ${!camposNoRelevantes.includes("ram_gb") ? `<div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">RAM</div><div class="inventario-tecnologico-v">${a.ram_gb?a.ram_gb+' GB':'—'}</div></div>` : ""}
-          ${!camposNoRelevantes.includes("disco_gb") ? `<div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">Almacenamiento</div><div class="inventario-tecnologico-v">${a.disco_gb?a.disco_gb+' GB':'—'}</div></div>` : ""}
-          ${!camposNoRelevantes.includes("procesador") ? `<div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">Procesador</div><div class="inventario-tecnologico-v">${esc(a.procesador)||'—'}</div></div>` : ""}
+          ${camposDeTipo(a.tipo).map(d=>{
+            const t = textoValor(d, valorCrudo(a, d));
+            const clase = ["serie","mac_wifi","mac_ethernet"].includes(d.clave) ? " inventario-tecnologico-mono" : (d.tipo_dato === "texto_largo" ? " inventario-tecnologico-v-largo" : "");
+            return `<div class="inventario-tecnologico-kv" data-kv-campo="${esc(d.clave)}"><div class="inventario-tecnologico-k">${esc(d.etiqueta)}</div><div class="inventario-tecnologico-v${clase}">${esc(t)||'—'}</div></div>`;
+          }).join("")}
           <div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">Proveedor</div><div class="inventario-tecnologico-v">${esc(a.proveedor)||'—'}</div></div>
           <div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">Valor de compra</div><div class="inventario-tecnologico-v">${a.valor_compra?'$'+Number(a.valor_compra).toFixed(2):'—'}</div></div>
           <div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">Valor actual</div><div class="inventario-tecnologico-v">${fmtValorActualConPorcentaje(a) || '—'}</div></div>
-          ${camposExtraParaTipo(a.tipo).includes("color") ? `<div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">Color</div><div class="inventario-tecnologico-v">${esc(a.color)||'—'}</div></div>` : ""}
-          ${camposExtraParaTipo(a.tipo).includes("longitud_m") ? `<div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">Longitud</div><div class="inventario-tecnologico-v">${a.longitud_m?a.longitud_m+' m':'—'}</div></div>` : ""}
-          ${!camposNoRelevantes.includes("mac_wifi") ? `<div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">MAC WiFi</div><div class="inventario-tecnologico-v inventario-tecnologico-mono">${esc(a.mac_wifi)||'—'}</div></div>` : ""}
-          ${!camposNoRelevantes.includes("mac_ethernet") ? `<div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">MAC Ethernet</div><div class="inventario-tecnologico-v inventario-tecnologico-mono">${esc(a.mac_ethernet)||'—'}</div></div>` : ""}
           <div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">Fecha de adquisición</div><div class="inventario-tecnologico-v">${fmtFecha(a.fecha_adquisicion)}</div></div>
           ${a.celular ? `<div class="inventario-tecnologico-kv"><div class="inventario-tecnologico-k">Gmail asociado</div><div class="inventario-tecnologico-v inventario-tecnologico-mono">${esc(a.celular.gmail)||'—'}</div></div>` : ""}
         </div>

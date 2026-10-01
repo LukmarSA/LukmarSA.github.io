@@ -1,4 +1,6 @@
-import { cargarActivos } from "../../nucleo/datos.js";
+import { cargarActivos, cargarCamposActivo } from "../../nucleo/datos.js";
+import { partesActa } from "../../nucleo/campos-personalizados.js";
+import { configTipo } from "../../nucleo/opciones-configurables.js";
 import { buscarActivo, esc, fmtTag, hoyISO } from "../../nucleo/helpers.js";
 import { abrirModal, cerrarModal, mostrarToast, renderMain } from "../render-raiz.js";
 
@@ -33,6 +35,8 @@ export function descripcionItemActa(a){
   if(base) partes.push(base);
   if(a.modelo) partes.push(`Modelo: ${a.modelo}`);
   if(a.serie) partes.push(`Número de serie: ${a.serie}`);
+  // v10: los campos marcados «en el acta» que usa el tipo (p. ej. el IMEI).
+  partes.push(...partesActa(cargarCamposActivo(), a, configTipo(a.tipo)));
   return partes.join(" — ") || fmtTag(a);
 }
 

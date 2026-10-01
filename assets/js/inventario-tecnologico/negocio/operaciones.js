@@ -1,9 +1,15 @@
 import { sb } from "../nucleo/config.js";
-import { cargarActivos, cargarBajas, refrescarDatos } from "../nucleo/datos.js";
+import { cargarActivos, cargarBajas, hayCamposConfigurables, refrescarDatos } from "../nucleo/datos.js";
+import { personalizadosIniciales } from "../nucleo/campos-personalizados.js";
 import { buscarActivo, hoyISO } from "../nucleo/helpers.js";
 
-export async function crearActivo(campos){
+// personalizados = { <clave>: valor } de los campos nuevos (v10, migración
+// 012). Sin la 012 no se envía (la columna no existe).
+export async function crearActivo(campos, { personalizados = null } = {}){
   const esCelular = campos.tipo === "Celular" && (campos.gmail || campos.password);
+  const extra = {};
+  const iniciales = personalizadosIniciales(personalizados);
+  if(hayCamposConfigurables() && Object.keys(iniciales).length) extra.personalizados = iniciales;
   const { data, error } = await sb.from("activos").insert({
     propiedad: campos.propiedad,
     tipo: campos.tipo || null,
@@ -27,14 +33,19 @@ export async function crearActivo(campos){
     celular_gmail: esCelular ? (campos.gmail || null) : null,
     celular_password: esCelular ? (campos.password || null) : null,
     trazabilidad: { categoria:null, custodio_texto:null, numero_original:null, estado_notas:null, seccion_origen:"Alta manual (app)", fila_excel:null, id_anterior:null },
+    ...extra,
   }).select("id").single();
   if(error) throw error;
   await refrescarDatos();
   return data.id;
 }
 
-export async function editarActivoBase(id, campos){
+// personalizados: solo los campos nuevos que el tipo muestra; null = vaciar.
+// La base los mezcla con lo que ya había (012: personalizados || nuevos, sin
+// los null), así no se pierden los valores de los campos que el tipo oculta.
+export async function editarActivoBase(id, campos, { personalizados = null } = {}){
   const patch = {};
+  if(hayCamposConfigurables() && personalizados && Object.keys(personalizados).length) patch.personalizados = personalizados;
   const editables = ["propiedad","tipo","marca","modelo","serie","nombre_dispositivo",
     "mac_wifi","mac_ethernet","sistema_operativo","procesador","proveedor","fecha_adquisicion","color"];
   editables.forEach(k=>{ if(k in campos) patch[k] = campos[k] || null; });

@@ -4,9 +4,11 @@ import { render } from "../ui/render-raiz.js";
 export const state = {
   sesion: null,       // { usuario, rol, nombre_completo }
   sesionUid: null,    // uuid de auth.users — para identificar "soy yo" en Configuración → Usuarios
-  tiposActivo: [],        // filas de tipos_activo (nombre, icono_svg, color, campos_pertinentes, orden)
+  tiposActivo: [],        // filas de tipos_activo (nombre, icono_svg, color, campos_pertinentes, orden; con la 012, campos_obligatorios)
   propiedadOpciones: [],  // filas de propiedad_opciones (valor, etiqueta, orden, activo)
   estadoOpciones: [],     // filas de estado_opciones (valor, etiqueta, color_fg, color_bg, orden, activo)
+  camposActivo: null,     // v10: definiciones de los campos (campos_activo de la 012, o los 9 fijos sin ella)
+  hay012: false,          // v10: la migración 012 está aplicada (campos configurables, íconos de ubicación, renombrar tipos)
   vista: "activos",   // activos | bajas | mapa | auditoria | config
   mapa: null,         // datos y selección de la pestaña Mapa; lo crea estadoMapa() (nucleo/datos-mapa.js) al abrirla
   configSubtab: "permisos",

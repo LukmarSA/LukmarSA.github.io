@@ -18,7 +18,7 @@ export function hoyLocalISO(fecha = new Date()){ return hoyISO(fecha); }
 
 export function infoTipoUbicacion(tipos, valor){
   const t = (tipos||[]).find(x=>x.valor===valor);
-  return { etiqueta: t ? t.etiqueta : (valor || "—"), color: (t && t.color) || "#57697C", activo: !!t && t.activo !== false };
+  return { etiqueta: t ? t.etiqueta : (valor || "—"), color: (t && t.color) || "#57697C", activo: !!t && t.activo !== false, icono: (t && t.icono_svg) || null };
 }
 
 // Índices para pintar el mapa y el panel sin recorrer listas en cada clic.

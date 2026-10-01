@@ -73,6 +73,42 @@ try{
   assert(!!filaMonitor && filaMonitor.textContent.includes("Inactivo"), "Monitor (activo=false) se muestra como Inactivo");
   const filaLaptop = [...contenedorTmp.querySelectorAll("tr")].find(tr=>tr.textContent.includes("Laptop"));
   assert(!!filaLaptop && filaLaptop.textContent.includes("Activo") && !filaLaptop.textContent.includes("Inactivo"), "Laptop (activo=true) se muestra como Activo");
+
+  // v10: «Editar» y «Desactivar» usan la clave real (nombre / valor). Hasta el
+  // v9 buscaban un "id" que estas tablas no tienen: cualquier «Editar» abría
+  // el primero de la lista y guardar fallaba con «column … id does not exist».
+  const host = ()=>document.getElementById("inventario-tecnologico-modal-host");
+  contenedorTmp.querySelector('[data-editar-tipo="Monitor"]').click();
+  await esperar(20);
+  assert(host().innerHTML.includes("Editar tipo de activo «Monitor»"), "«Editar» en Monitor abre Monitor (no el primero de la lista)");
+  const inColor = document.getElementById("inventario-tecnologico-ct-color");
+  inColor.value = "#112233";
+  document.getElementById("inventario-tecnologico-btn-guardar-tipo-cfg").click();
+  await esperar(60);
+  const tMonitor = TABLAS.tipos_activo.find(t=>t.nombre === "Monitor"), tLaptop = TABLAS.tipos_activo.find(t=>t.nombre === "Laptop");
+  assert(tMonitor.color === "#112233" && tLaptop.color === "#3A5068", `guardar cambia solo Monitor (Monitor ${tMonitor.color}, Laptop ${tLaptop.color})`);
+  assert(!host().querySelector(".inventario-tecnologico-modal"), "al guardar se cierra el modal");
+  contenedorTmp.querySelector('[data-toggle-tipo="Laptop"]').click();
+  await esperar(60);
+  assert(TABLAS.tipos_activo.find(t=>t.nombre === "Laptop").activo === false && TABLAS.tipos_activo.find(t=>t.nombre === "Monitor").activo === false, "«Desactivar» en Laptop desactiva Laptop");
+  contenedorTmp.querySelector('[data-toggle-tipo="Laptop"]').click();
+  await esperar(60);
+  assert(TABLAS.tipos_activo.find(t=>t.nombre === "Laptop").activo === true, "«Activar» lo vuelve a activar");
+  contenedorTmp.querySelector('[data-editar-propiedad="rentado"]').click();
+  await esperar(20);
+  document.getElementById("inventario-tecnologico-cp-etiqueta").value = "En renta";
+  document.getElementById("inventario-tecnologico-btn-guardar-propiedad-cfg").click();
+  await esperar(60);
+  assert(TABLAS.propiedad_opciones.find(o=>o.valor === "rentado").etiqueta === "En renta" && TABLAS.propiedad_opciones.find(o=>o.valor === "lukmar").etiqueta === "Lukmar", "editar una propiedad cambia solo esa (por su valor)");
+  contenedorTmp.querySelector('[data-toggle-estado="danado"]').click();
+  await esperar(60);
+  assert(TABLAS.estado_opciones.find(o=>o.valor === "danado").activo === true && TABLAS.estado_opciones.find(o=>o.valor === "operativo").activo === true, "activar un estado cambia solo ese (por su valor)");
+  const { editarTipoActivo } = await import(`${RAIZ_APP}/nucleo/opciones-configurables.js`);
+  let errorSinClave = null;
+  try{ await editarTipoActivo(undefined, { color: "#000000", icono_svg: "", campos_pertinentes: [] }); }catch(e){ errorSinClave = e; }
+  assert(!!errorSinClave && TABLAS.tipos_activo.every(t=>t.color !== "#000000"), "sin clave no se guarda nada (antes, un filtro vacío podía tocar todas las filas)");
+  assert(contenedorTmp.innerHTML.includes("Campos de los activos") && contenedorTmp.innerHTML.includes("migración 012"), "sin la 012: la sección de campos avisa que hace falta la migración");
+  assert(contenedorTmp.innerHTML.includes("Tipos de ubicación"), "Configuración muestra también los tipos de ubicación");
   document.body.removeChild(contenedorTmp);
 
   // ---------- Historial por custodio ----------

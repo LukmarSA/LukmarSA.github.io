@@ -2,7 +2,7 @@
 // activos y mover un activo. Usan el mismo sistema de modales de la app
 // (abrirModal/cerrarModal) y, al guardar, avisan con mostrarToast y devuelven
 // el control con alGuardar.
-import { cargarActivos } from "../../nucleo/datos.js";
+import { cargarActivos, hayCamposConfigurables } from "../../nucleo/datos.js";
 import { cargarAtajos, cargarEquiposRadioenlace, cargarPiscinas, cargarRedes, cargarRespaldos, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, datosNombres, estadoMapa, hayHerenciaRed, hayMedio, hayNombresConRed, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
 import { GENEROS, nombreParaGuardar, nombresAutomaticos } from "../../nucleo/mapa-nombres.js";
 import { azimutGrados, distanciaKm, fmtAzimut, fmtCoordenadas, fmtDistancia, parsearCoordenadas } from "../../nucleo/geo.js";
@@ -14,7 +14,9 @@ import { esAdmin } from "../../nucleo/permisos.js";
 import { cuadradoAlrededor, sectorDeNombre } from "../../nucleo/piscinas.js";
 import { medioSugerido, motivoMedioSugerido, opcionesServidor } from "../../nucleo/selector-servidor.js";
 import { montarSelectorServidor } from "./selector-servidor.js";
-import { ErrorValidacion, asignarActivosAUbicacion, asignarEnLote, crearAtajo, crearPiscina, editarPiscina, eliminarPiscina, crearEquipo, crearRed, crearRespaldo, crearTipoEquipo, crearTipoUbicacion, crearUbicacion, editarAtajo, editarEquipo, editarRed, editarRespaldo, editarTipoEquipo, editarUbicacion, eliminarAtajo, eliminarRed } from "../../negocio/operaciones-mapa.js";
+import { htmlPin } from "./leaflet.js";
+import { validarSvg } from "../../nucleo/svg-seguro.js";
+import { ErrorValidacion, asignarActivosAUbicacion, asignarEnLote, crearAtajo, crearPiscina, editarPiscina, eliminarPiscina, crearEquipo, crearRed, crearRespaldo, crearTipoEquipo, crearTipoUbicacion, crearUbicacion, editarAtajo, editarEquipo, editarRed, editarRespaldo, editarTipoEquipo, editarTipoUbicacion, editarUbicacion, eliminarAtajo, eliminarRed } from "../../negocio/operaciones-mapa.js";
 import { urlFoto } from "../../negocio/operaciones.js";
 import { abrirModal, cerrarModal, mostrarToast } from "../render-raiz.js";
 
@@ -74,7 +76,7 @@ function textoConexion(d){
 // Ubicación (crear / editar). "Elegir en el mapa" cierra el modal, deja
 // hacer clic en el mapa y lo vuelve a abrir con lo ya escrito (borrador).
 // ===========================================================================
-export function abrirFormUbicacion({ id = null, borrador = null, lat = null, lng = null } = {}, { alGuardar, alElegirEnMapa } = {}){
+export function abrirFormUbicacion({ id = null, borrador = null, lat = null, lng = null } = {}, { alGuardar, alElegirEnMapa, alCambiarTipo } = {}){
   const actual = id ? cargarUbicaciones().find(u=>u.id === id) : null;
   if(id && !actual){ mostrarToast("Esa ubicación ya no existe. Recarga el mapa.", "error"); return; }
   const tipos = cargarTiposUbicacion();
@@ -106,11 +108,17 @@ export function abrirFormUbicacion({ id = null, borrador = null, lat = null, lng
           <label for="${P}ubic-tipo">Tipo</label>
           <div class="${P}mapa-select-mas">
             <select id="${P}ubic-tipo"></select>
-            ${esAdmin() ? `<button type="button" class="${P}btn ${P}btn-sm" id="${P}ubic-btn-mas-tipo" title="Nuevo tipo de ubicación" aria-label="Nuevo tipo de ubicación">+</button>` : ""}
+            ${esAdmin() ? `<button type="button" class="${P}btn ${P}btn-sm" id="${P}ubic-btn-mas-tipo" title="Nuevo tipo de ubicación" aria-label="Nuevo tipo de ubicación">+</button>
+            <button type="button" class="${P}btn ${P}btn-sm" id="${P}ubic-btn-editar-tipo" title="Editar el tipo elegido" aria-label="Editar el tipo elegido">✎</button>` : ""}
           </div>
           <div class="${P}mapa-mini-form" id="${P}ubic-mini-tipo" hidden>
-            <input type="text" id="${P}ubic-tipo-etiqueta" maxlength="40" placeholder="Nombre del tipo (ej.: Repetidora)" aria-label="Nombre del nuevo tipo">
-            <input type="color" id="${P}ubic-tipo-color" value="#5B4B8A" aria-label="Color del nuevo tipo">
+            <span class="${P}mapa-mini-titulo" id="${P}ubic-tipo-titulo">Nuevo tipo de ubicación</span>
+            <input type="text" id="${P}ubic-tipo-etiqueta" maxlength="40" placeholder="Nombre del tipo (ej.: Repetidora)" aria-label="Nombre del tipo">
+            <input type="color" id="${P}ubic-tipo-color" value="#5B4B8A" aria-label="Color del tipo">
+            ${hayCamposConfigurables() ? `<div class="${P}mapa-mini-icono">
+              <textarea id="${P}ubic-tipo-icono" class="${P}mono" rows="2" placeholder="Ícono SVG (opcional): pega el &lt;svg&gt;…&lt;/svg&gt;, con viewBox. Vacío = el dibujo de siempre." aria-label="Ícono SVG del tipo (opcional)"></textarea>
+              <span class="${P}mapa-mini-vista" id="${P}ubic-tipo-vista" aria-hidden="true" title="Así se verá en la burbuja"></span>
+            </div>` : ""}
             <button type="button" class="${P}btn ${P}btn-sm ${P}btn-primary" id="${P}ubic-tipo-crear">Crear</button>
             <button type="button" class="${P}btn ${P}btn-sm" id="${P}ubic-tipo-cancelar">Cancelar</button>
             <div class="${P}field-error" id="${P}ubic-tipo-error"></div>
@@ -223,23 +231,67 @@ export function abrirFormUbicacion({ id = null, borrador = null, lat = null, lng
       alElegirEnMapa(borradorActual);
     });
 
-    // "+" tipo de ubicación (solo admin), sin cerrar el formulario.
+    // "+" tipo de ubicación y "✎" (editar el elegido), solo admin, sin cerrar
+    // el formulario: un mismo mini formulario, en modo crear o editar.
     const mas = $(`#${P}ubic-btn-mas-tipo`);
     if(mas){
       const mini = $(`#${P}ubic-mini-tipo`);
       const errorMini = $(`#${P}ubic-tipo-error`);
-      mas.addEventListener("click", ()=>{ mini.hidden = !mini.hidden; if(!mini.hidden) $(`#${P}ubic-tipo-etiqueta`).focus(); });
-      $(`#${P}ubic-tipo-cancelar`).addEventListener("click", ()=>{ mini.hidden = true; errorMini.textContent = ""; });
-      $(`#${P}ubic-tipo-crear`).addEventListener("click", async e=>{
+      const inEtiqueta = $(`#${P}ubic-tipo-etiqueta`);
+      const inColor = $(`#${P}ubic-tipo-color`);
+      const inIcono = $(`#${P}ubic-tipo-icono`);
+      const vista = $(`#${P}ubic-tipo-vista`);
+      const botonGuardar = $(`#${P}ubic-tipo-crear`);
+      let editando = null; // valor del tipo que se edita, o null al crear
+      const pintarVista = ()=>{
+        if(!vista || !inIcono) return;
+        const v = validarSvg(inIcono.value, { exigirViewBox: true });
+        // La vista previa es el mismo pin del mapa (ui/mapa/leaflet.js).
+        vista.innerHTML = htmlPin({ color: inColor.value, tipo: editando || "", icono: v.ok && v.svg ? v.svg : null });
+        vista.classList.toggle(`${P}mapa-mini-vista-error`, !v.ok);
+        vista.title = v.ok ? "Así se verá en la burbuja" : v.error;
+      };
+      const abrir = modo=>{
         errorMini.textContent = "";
-        const etiqueta = $(`#${P}ubic-tipo-etiqueta`).value;
-        const color = $(`#${P}ubic-tipo-color`).value;
+        const t = modo === "editar" ? cargarTiposUbicacion().find(x=>x.valor === selTipo.value) : null;
+        if(modo === "editar" && !t){ mostrarToast("Elige primero un tipo.", "error"); return; }
+        editando = t ? t.valor : null;
+        $(`#${P}ubic-tipo-titulo`).textContent = t ? `Editar el tipo «${t.etiqueta}»` : "Nuevo tipo de ubicación";
+        inEtiqueta.value = t ? t.etiqueta : "";
+        inColor.value = t ? (t.color || "#57697C") : "#5B4B8A";
+        if(inIcono) inIcono.value = t && t.icono_svg ? t.icono_svg : "";
+        botonGuardar.textContent = t ? "Guardar" : "Crear";
+        mini.hidden = false;
+        pintarVista();
+        inEtiqueta.focus();
+      };
+      mas.addEventListener("click", ()=>{ if(!mini.hidden && editando === null){ mini.hidden = true; return; } abrir("crear"); });
+      const lapiz = $(`#${P}ubic-btn-editar-tipo`);
+      if(lapiz) lapiz.addEventListener("click", ()=>{ if(!mini.hidden && editando !== null && editando === selTipo.value){ mini.hidden = true; return; } abrir("editar"); });
+      if(inIcono) inIcono.addEventListener("input", pintarVista);
+      inColor.addEventListener("input", pintarVista);
+      $(`#${P}ubic-tipo-cancelar`).addEventListener("click", ()=>{ mini.hidden = true; errorMini.textContent = ""; });
+      botonGuardar.addEventListener("click", async e=>{
+        errorMini.textContent = "";
+        const etiqueta = inEtiqueta.value;
+        const color = inColor.value;
+        const icono = inIcono ? inIcono.value : undefined;
         try{
-          const valor = await conBotonOcupado(e.currentTarget, "Creando…", ()=>crearTipoUbicacion(etiqueta, color));
-          pintarTipos(valor);
+          if(editando === null){
+            const valor = await conBotonOcupado(e.currentTarget, "Creando…", ()=>crearTipoUbicacion(etiqueta, color, icono));
+            pintarTipos(valor);
+            mostrarToast(`Tipo «${etiqueta.trim()}» creado.`, "success");
+          } else {
+            const valor = editando;
+            await conBotonOcupado(e.currentTarget, "Guardando…", ()=>editarTipoUbicacion(valor, { etiqueta, color, icono_svg: icono }));
+            pintarTipos(valor);
+            mostrarToast(`Tipo «${etiqueta.trim()}» guardado.`, "success");
+          }
+          // El mapa de atrás se repinta ya (color e ícono de las burbujas de ese tipo).
+          if(alCambiarTipo) alCambiarTipo();
           mini.hidden = true;
-          $(`#${P}ubic-tipo-etiqueta`).value = "";
-          mostrarToast(`Tipo «${etiqueta.trim()}» creado.`, "success");
+          inEtiqueta.value = "";
+          if(inIcono) inIcono.value = "";
         }catch(err){
           errorMini.textContent = err.message;
         }

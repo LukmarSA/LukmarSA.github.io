@@ -9,6 +9,7 @@
 // el mismo archivo que sirve unpkg. Para actualizar Leaflet hay que cambiar
 // versión y hashes juntos (Leaflet 2.x cambió la API: no es un reemplazo directo).
 import { GROSOR_LINEAS, normalizarGrosor } from "../../nucleo/mapa-jerarquia.js";
+import { svgConTamano } from "../../nucleo/svg-seguro.js";
 
 export const LEAFLET_VERSION = "1.9.4";
 export const LEAFLET_JS = {
@@ -150,7 +151,9 @@ export function glifoTipoUbicacion(tipo){
   return GLIFOS_TIPO_UBICACION[tipo] || GLIFO_UBICACION_GENERICO;
 }
 
-export function htmlPin({ color, tipo, cantidad = 0, seleccionada = false, enlazada = false, archivada = false, atenuada = false, sinConexion = false, parcial = false, caida = false }){
+// icono = el SVG del tipo de ubicación (v10, migración 012), ya limpio al
+// cargarlo; sin él, el glifo de fábrica.
+export function htmlPin({ color, tipo, icono = null, cantidad = 0, seleccionada = false, enlazada = false, archivada = false, atenuada = false, sinConexion = false, parcial = false, caida = false }){
   const clases = ["inventario-tecnologico-mapa-pin"];
   if(seleccionada) clases.push("inventario-tecnologico-mapa-pin-seleccionada");
   if(enlazada) clases.push("inventario-tecnologico-mapa-pin-enlazada");
@@ -160,7 +163,7 @@ export function htmlPin({ color, tipo, cantidad = 0, seleccionada = false, enlaz
   else if(parcial) clases.push("inventario-tecnologico-mapa-pin-parcial");
   if(caida) clases.push("inventario-tecnologico-mapa-pin-caida");
   return `<div class="${clases.join(" ")}" style="--pin-color:${color}">`
-    + `<span class="inventario-tecnologico-mapa-pin-cuerpo"><span class="inventario-tecnologico-mapa-pin-glifo">${glifoTipoUbicacion(tipo)}</span></span>`
+    + `<span class="inventario-tecnologico-mapa-pin-cuerpo"><span class="inventario-tecnologico-mapa-pin-glifo">${icono ? svgConTamano(icono, 15) : glifoTipoUbicacion(tipo)}</span></span>`
     + (cantidad > 0 ? `<span class="inventario-tecnologico-mapa-pin-cantidad">${cantidad > 99 ? "99+" : cantidad}</span>` : "")
     + (sinConexion || parcial ? `<span class="inventario-tecnologico-mapa-pin-alerta" aria-hidden="true">!</span>` : "")
     + `</div>`;

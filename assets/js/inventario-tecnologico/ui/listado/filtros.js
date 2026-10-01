@@ -1,7 +1,8 @@
 import { cargarActivos } from "../../nucleo/datos.js";
 import { state } from "../../nucleo/estado.js";
 import { esc, fmtTag, valorActualActivo } from "../../nucleo/helpers.js";
-import { infoEstado, infoPropiedad } from "../../nucleo/opciones-configurables.js";
+import { campoPorClave, camposDeTipo, infoEstado, infoPropiedad } from "../../nucleo/opciones-configurables.js";
+import { PREFIJO_COLUMNA_CAMPO, textoValor, valorCrudo, valorParaOrdenar } from "../../nucleo/campos-personalizados.js";
 import { columnasColapsadas } from "./columnas.js";
 import { NOMBRE_COLUMNA_KPI } from "./resumen.js";
 
@@ -71,12 +72,27 @@ export function camposBusquedaGeneral(a){
   if(columnasColapsadas()){
     return [a.tipo, a.custodio ? a.custodio.nombre : "Disponible", infoEstado(a.estado).label];
   }
+  // v10: también los campos nuevos que usa el tipo del activo (un IMEI, un
+  // número de línea…). Los de siempre ya están arriba.
+  const nuevos = camposDeTipo(a.tipo).filter(d=>!d.fijo).map(d=>textoValor(d, valorCrudo(a, d)));
   return [fmtTag(a), a.marca, a.modelo, a.serie, a.nombre_dispositivo,
-    a.custodio?a.custodio.nombre:"Disponible", a.tipo, a.propiedad, a.sistema_operativo, a.proveedor, infoEstado(a.estado).label];
+    a.custodio?a.custodio.nombre:"Disponible", a.tipo, a.propiedad, a.sistema_operativo, a.proveedor, infoEstado(a.estado).label, ...nuevos];
+}
+
+// Filtros de texto de las columnas de los campos nuevos: state.filtros["campo:<clave>"].
+// Solo cuentan los de campos activos: si un campo se desactiva, su columna
+// desaparece y su filtro deja de aplicarse (no queda un filtro invisible).
+function clavesFiltroCampos(f){
+  return Object.keys(f).filter(k=>{
+    if(!k.startsWith(PREFIJO_COLUMNA_CAMPO) || typeof f[k] !== "string" || !f[k].trim()) return false;
+    const d = campoPorClave(k.slice(PREFIJO_COLUMNA_CAMPO.length));
+    return !!d && d.activo;
+  });
 }
 
 export function filtrarActivos(datos){
   const f = state.filtros;
+  const clavesCampos = clavesFiltroCampos(f);
   return datos.activos.filter(a=>{
     if(f.tipo !== null && a.tipo && !f.tipo.has(a.tipo)) return false;
     if(f.propiedad !== null && !f.propiedad.has(a.propiedad)) return false;
@@ -114,6 +130,11 @@ export function filtrarActivos(datos){
     if(f.colFechaHasta && (!a.fecha_adquisicion || a.fecha_adquisicion > f.colFechaHasta)) return false;
     if(f.colModelo && !(a.modelo||"").toLowerCase().includes(f.colModelo.toLowerCase())) return false;
     if(f.colNombre && !(a.nombre_dispositivo||"").toLowerCase().includes(f.colNombre.toLowerCase())) return false;
+    for(const k of clavesCampos){
+      const d = campoPorClave(k.slice(PREFIJO_COLUMNA_CAMPO.length));
+      if(!d) continue;
+      if(!textoValor(d, valorCrudo(a, d)).toLowerCase().includes(f[k].trim().toLowerCase())) return false;
+    }
     if(f.texto){
       const t = f.texto.toLowerCase();
       const campos = camposBusquedaGeneral(a).filter(Boolean).join(" ").toLowerCase();
@@ -125,6 +146,14 @@ export function filtrarActivos(datos){
 
 export function compararActivos(a,b,campo,dir){
   let va, vb;
+  if(String(campo).startsWith(PREFIJO_COLUMNA_CAMPO)){
+    const d = campoPorClave(String(campo).slice(PREFIJO_COLUMNA_CAMPO.length));
+    // Un campo desactivado ya no tiene columna: se ordena como sin orden elegido.
+    if(!d || !d.activo) return dir==="asc" ? a.id - b.id : b.id - a.id;
+    va = valorParaOrdenar(d, valorCrudo(a, d)); vb = valorParaOrdenar(d, valorCrudo(b, d));
+    const cmp = (typeof va === "number" && typeof vb === "number") ? (va-vb) : String(va).localeCompare(String(vb),'es',{sensitivity:'base', numeric:true});
+    return dir==="asc" ? cmp : -cmp;
+  }
   switch(campo){
     case "id": va=a.id; vb=b.id; break;
     case "tipo": va=a.tipo||""; vb=b.tipo||""; break;
@@ -172,7 +201,7 @@ export function hayFiltrosActivos(){
   const f = state.filtros;
   if(["tipo","propiedad","custodioClase","marca","estado"].some(k=>f[k]!==null)) return true;
   return ["texto","colTag","colTipo","colMarca","colCustodio","colCargo","colPropiedad",
-    "colSerie","colSo","colProveedor","colFechaDesde","colFechaHasta","colModelo","colNombre"].some(k=>f[k]);
+    "colSerie","colSo","colProveedor","colFechaDesde","colFechaHasta","colModelo","colNombre"].some(k=>f[k]) || clavesFiltroCampos(f).length > 0;
 }
 
 export function flechaOrden(campo){

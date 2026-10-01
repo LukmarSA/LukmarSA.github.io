@@ -15,6 +15,7 @@ import { abrirHistorialCustodio } from "./historial-custodio.js";
 import { abrirPendientesFirma, listaPendientesFirma } from "./pendientes-firma.js";
 import { CAMPOS_RESUMEN_GLOBAL, abrirModalKpiColumna, calcularResumenColumna, copiarAlPortapapelesTexto, descargarArchivoTexto, resumenACSV, resumenAHTML, resumenATextoWhatsApp } from "./resumen.js";
 import { mostrarToast, renderMain } from "../render-raiz.js";
+import { textoValor, valorCrudo } from "../../nucleo/campos-personalizados.js";
 
 export function renderVistaActivos(main){
   const datos = cargarActivos();
@@ -309,7 +310,14 @@ export function celdaActivo(col, a){
       ${puede("dar_baja") ? `<button class="inventario-tecnologico-btn inventario-tecnologico-btn-sm inventario-tecnologico-btn-danger" data-action="baja" data-id="${a.id}">Baja</button>`:""}
     </div>`;
     }
-    default: return "";
+    default: {
+      // v10: columna de un campo nuevo ("campo:<clave>").
+      if(col.campo){
+        const t = textoValor(col.campo, valorCrudo(a, col.campo));
+        return t ? celdaTextoRecortado(t) : '<span class="inventario-tecnologico-cell-muted">—</span>';
+      }
+      return "";
+    }
   }
 }
 

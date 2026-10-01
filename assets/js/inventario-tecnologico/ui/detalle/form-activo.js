@@ -1,12 +1,14 @@
 import { borrarFotoActivo, crearActivo, editarActivoBase, subirFotoActivo, urlFoto } from "../../negocio/operaciones.js";
-import { cargarActivos } from "../../nucleo/datos.js";
+import { cargarActivos, cargarCamposActivo } from "../../nucleo/datos.js";
 import { buscarActivo, esc, fmtTag } from "../../nucleo/helpers.js";
-import { CAMPOS_BLOQUEABLES, CAMPOS_EXTRA, LABEL_CAMPO, camposPertinentesParaTipo, crearPropiedadOpcion, crearTipoActivo, htmlOpcionesPropiedad, htmlOpcionesTipo, slugify } from "../../nucleo/opciones-configurables.js";
-import { camposParaGuardar, camposVisibles } from "../../nucleo/formulario-activo.js";
+import { camposDeTipo, configTipo, crearPropiedadOpcion, htmlOpcionesPropiedad, htmlOpcionesTipo, obligatoriosDeTipo, slugify } from "../../nucleo/opciones-configurables.js";
+import { buscarRepetido, etiquetaConUnidad, normalizarValor, ordenarCampos, parchePersonalizados, valorCrudo } from "../../nucleo/campos-personalizados.js";
+import { TIPO_CELULAR, camposParaGuardar } from "../../nucleo/formulario-activo.js";
 import { esAdmin } from "../../nucleo/permisos.js";
 import { abrirCambiarCustodio } from "./cambiar-custodio.js";
 import { montarSelectorTipo } from "./selector-tipo.js";
 import { abrirDetalle } from "./vista.js";
+import { guardarFormTipo, htmlFormTipo, montarFormTipo } from "../configuracion/form-tipo.js";
 import { abrirModal, cerrarModal, mostrarToast, renderMain } from "../render-raiz.js";
 import { abrirSubmodal, cerrarSubmodal } from "../submodal.js";
 import { transicionarVisibilidad } from "../transiciones.js";
@@ -16,8 +18,63 @@ const P = "inventario-tecnologico-";
 // Campos que se guardan siempre, sea cual sea el tipo.
 const CAMPOS_COMUNES = ["tipo","propiedad","marca","modelo","nombre_dispositivo","proveedor","fecha_adquisicion","valor_compra","vida_util_anios"];
 
+// Los campos que se eligen por tipo (v10): los 9 de siempre y los que se
+// crean en Configuración, en un solo orden. data-campo = su clave.
+// Los de siempre conservan los id de antes (fa-serie, fa-so, fa-proc…).
+const ID_FIJO = { serie:"serie", so:"so", procesador:"proc", ram_gb:"ram", disco_gb:"disco", mac_wifi:"macwifi", mac_ethernet:"maceth", color:"color", longitud_m:"longitud" };
+const MONO = new Set(["serie", "mac_wifi", "mac_ethernet"]);
+export function idCampoFormulario(d){ return d.fijo ? `${P}fa-${ID_FIJO[d.clave] || d.clave}` : `${P}fa-c-${d.clave}`; }
+
 function visiblesPara(tipo){
-  return camposVisibles({ tipo, pertinentes: camposPertinentesParaTipo(tipo), bloqueables: CAMPOS_BLOQUEABLES, extras: CAMPOS_EXTRA });
+  const v = new Set(camposDeTipo(tipo).map(d=>d.clave));
+  if(tipo === TIPO_CELULAR) v.add("celular");
+  return v;
+}
+
+function controlCampo(d, valor){
+  const id = idCampoFormulario(d);
+  const v = valor === null || valor === undefined ? "" : valor;
+  switch(d.tipo_dato){
+    case "texto_largo":
+      return `<textarea id="${id}" rows="2" maxlength="4000">${esc(v)}</textarea>`;
+    case "numero":
+      if(d.fijo) return `<input type="number" id="${id}"${d.clave === "longitud_m" ? ` step="0.1" min="0"` : ""} value="${esc(v)}">`;
+      return `<input type="text" inputmode="decimal" id="${id}" value="${esc(v)}" autocomplete="off">`;
+    case "fecha":
+      return `<input type="date" id="${id}" value="${esc(v)}">`;
+    case "si_no":
+      return `<select id="${id}"><option value="">— Sin dato —</option><option value="si" ${v === true ? "selected" : ""}>Sí</option><option value="no" ${v === false ? "selected" : ""}>No</option></select>`;
+    case "lista": {
+      const ops = d.opciones.filter(o=>o.activo || o.valor === v);
+      return `<select id="${id}"><option value="">— Selecciona —</option>${ops.map(o=>`<option value="${esc(o.valor)}" ${o.valor === v ? "selected" : ""}>${esc(o.etiqueta)}${o.activo ? "" : " (inactiva)"}</option>`).join("")}</select>`;
+    }
+    default: {
+      const mono = MONO.has(d.clave) ? ` class="${P}mono"` : "";
+      const ph = d.clave === "mac_wifi" || d.clave === "mac_ethernet" ? ` placeholder="AA:BB:CC:DD:EE:FF"` : "";
+      return `<input type="text" id="${id}"${mono}${ph} maxlength="500" value="${esc(v)}">`;
+    }
+  }
+}
+
+function htmlCampoConfigurable(d, a, visibles){
+  const ancho = d.tipo_dato === "texto_largo" ? ` ${P}span-2` : "";
+  return `<div class="${P}field${ancho}" data-campo="${esc(d.clave)}"${visibles.has(d.clave) ? "" : " hidden"}><label for="${idCampoFormulario(d)}">${esc(etiquetaConUnidad(d))}<span class="${P}fa-obligatorio" aria-hidden="true" hidden> *</span></label>${controlCampo(d, a ? valorCrudo(a, d) : null)}</div>`;
+}
+
+// Los campos activos, en su orden (los desactivados no se muestran; sus
+// valores quedan en la base).
+function camposDelFormulario(){ return ordenarCampos(cargarCamposActivo().filter(d=>d.activo)); }
+
+// Obligatorios del tipo elegido: asterisco y aria-required.
+function marcarObligatorios(form, tipo){
+  const obl = obligatoriosDeTipo(tipo);
+  form.querySelectorAll("[data-campo]").forEach(el=>{
+    const req = obl.has(el.dataset.campo);
+    const marca = el.querySelector(`.${P}fa-obligatorio`);
+    if(marca) marca.hidden = !req;
+    const control = el.querySelector("input, select, textarea");
+    if(control){ if(req) control.setAttribute("aria-required", "true"); else control.removeAttribute("aria-required"); }
+  });
 }
 
 export function abrirFormActivo(id){
@@ -92,7 +149,8 @@ export function abrirFormActivo(id){
               <label for="inventario-tecnologico-fa-tipo-boton">Tipo</label>
               <div class="inventario-tecnologico-fa-fila">
                 <select id="inventario-tecnologico-fa-tipo" style="flex:1;">${htmlOpcionesTipo(a?a.tipo:'')}</select>
-                ${esAdmin() ? `<button type="button" class="inventario-tecnologico-btn inventario-tecnologico-btn-sm" id="inventario-tecnologico-btn-nuevo-tipo" title="Crear nuevo tipo de activo" aria-label="Crear nuevo tipo de activo">+</button>` : ""}
+                ${esAdmin() ? `<button type="button" class="inventario-tecnologico-btn inventario-tecnologico-btn-sm" id="inventario-tecnologico-btn-nuevo-tipo" title="Crear nuevo tipo de activo" aria-label="Crear nuevo tipo de activo">+</button>
+                <button type="button" class="inventario-tecnologico-btn inventario-tecnologico-btn-sm" id="inventario-tecnologico-btn-editar-tipo" title="Editar el tipo elegido (nombre, ícono y campos)" aria-label="Editar el tipo elegido"${a && a.tipo ? "" : " disabled"}>✎</button>` : ""}
               </div>
             </div>
             <div class="inventario-tecnologico-field">
@@ -104,17 +162,9 @@ export function abrirFormActivo(id){
             </div>
             <div class="inventario-tecnologico-field"><label for="inventario-tecnologico-fa-marca">Marca</label><input type="text" id="inventario-tecnologico-fa-marca" value="${esc(a?a.marca:'')}"></div>
             <div class="inventario-tecnologico-field"><label for="inventario-tecnologico-fa-modelo">Modelo</label><input type="text" id="inventario-tecnologico-fa-modelo" value="${esc(a?a.modelo:'')}"></div>
-            <div class="inventario-tecnologico-field" ${cond("serie")}><label for="inventario-tecnologico-fa-serie">Serie</label><input type="text" id="inventario-tecnologico-fa-serie" class="inventario-tecnologico-mono" value="${esc(a?a.serie:'')}"></div>
             <div class="inventario-tecnologico-field"><label for="inventario-tecnologico-fa-nombre">Nombre del dispositivo</label><input type="text" id="inventario-tecnologico-fa-nombre" value="${esc(a?a.nombre_dispositivo:'')}"></div>
-            <div class="inventario-tecnologico-field" ${cond("so")}><label for="inventario-tecnologico-fa-so">Sistema operativo</label><input type="text" id="inventario-tecnologico-fa-so" value="${esc(a?a.sistema_operativo:'')}"></div>
-            <div class="inventario-tecnologico-field" ${cond("procesador")}><label for="inventario-tecnologico-fa-proc">Procesador</label><input type="text" id="inventario-tecnologico-fa-proc" value="${esc(a?a.procesador:'')}"></div>
-            <div class="inventario-tecnologico-field" ${cond("ram_gb")}><label for="inventario-tecnologico-fa-ram">RAM (GB)</label><input type="number" id="inventario-tecnologico-fa-ram" value="${a&&a.ram_gb?a.ram_gb:''}"></div>
-            <div class="inventario-tecnologico-field" ${cond("disco_gb")}><label for="inventario-tecnologico-fa-disco">Almacenamiento (GB)</label><input type="number" id="inventario-tecnologico-fa-disco" value="${a&&a.disco_gb?a.disco_gb:''}"></div>
-            <div class="inventario-tecnologico-field" ${cond("mac_wifi")}><label for="inventario-tecnologico-fa-macwifi">MAC WiFi</label><input type="text" id="inventario-tecnologico-fa-macwifi" class="inventario-tecnologico-mono" value="${esc(a?a.mac_wifi:'')}" placeholder="AA:BB:CC:DD:EE:FF"></div>
-            <div class="inventario-tecnologico-field" ${cond("mac_ethernet")}><label for="inventario-tecnologico-fa-maceth">MAC Ethernet</label><input type="text" id="inventario-tecnologico-fa-maceth" class="inventario-tecnologico-mono" value="${esc(a?a.mac_ethernet:'')}" placeholder="AA:BB:CC:DD:EE:FF"></div>
-            <div class="inventario-tecnologico-field"><label for="inventario-tecnologico-fa-proveedor">Proveedor</label><input type="text" id="inventario-tecnologico-fa-proveedor" value="${esc(a?a.proveedor:'')}"></div>
-            <div class="inventario-tecnologico-field" ${cond("color")}><label for="inventario-tecnologico-fa-color">Color</label><input type="text" id="inventario-tecnologico-fa-color" value="${esc(a?a.color:'')}"></div>
-            <div class="inventario-tecnologico-field" ${cond("longitud_m")}><label for="inventario-tecnologico-fa-longitud">Longitud (m)</label><input type="number" step="0.1" min="0" id="inventario-tecnologico-fa-longitud" value="${a&&a.longitud_m?a.longitud_m:''}"></div>
+            ${camposDelFormulario().map(d=>htmlCampoConfigurable(d, a, visibles)).join("")}
+            <div class="inventario-tecnologico-field" data-fa-ancla-comunes><label for="inventario-tecnologico-fa-proveedor">Proveedor</label><input type="text" id="inventario-tecnologico-fa-proveedor" value="${esc(a?a.proveedor:'')}"></div>
             <div class="inventario-tecnologico-field"><label for="inventario-tecnologico-fa-fecha">Fecha de adquisición</label><input type="date" id="inventario-tecnologico-fa-fecha" value="${a&&a.fecha_adquisicion?a.fecha_adquisicion:''}"></div>
             <div class="inventario-tecnologico-field"><label for="inventario-tecnologico-fa-valorcompra">Valor de compra (USD)</label><input type="number" step="0.01" min="0" id="inventario-tecnologico-fa-valorcompra" value="${a&&a.valor_compra?a.valor_compra:''}"></div>
             <div class="inventario-tecnologico-field"><label for="inventario-tecnologico-fa-vidautil">Vida útil (años)</label><input type="number" step="1" min="1" id="inventario-tecnologico-fa-vidautil" value="${a ? (a.vida_util_anios||'') : 3}"></div>
@@ -146,11 +196,38 @@ export function abrirFormActivo(id){
     // ---------- Tipo: selector con búsqueda y orden; los campos siguen al tipo ----------
     const selectTipo = document.getElementById("inventario-tecnologico-fa-tipo");
     const selector = montarSelectorTipo(selectTipo);
-    const condicionales = [...form.querySelectorAll("[data-campo]")];
-    const moviles = [...form.querySelectorAll(".inventario-tecnologico-form-grid > .inventario-tecnologico-field, .inventario-tecnologico-fa-bloque")];
+    const grilla = document.getElementById("inventario-tecnologico-fa-grid");
+    let condicionales = [...form.querySelectorAll("[data-campo]")];
+    let moviles = [...form.querySelectorAll(".inventario-tecnologico-form-grid > .inventario-tecnologico-field, .inventario-tecnologico-fa-bloque")];
+    const btnEditarTipo = document.getElementById("inventario-tecnologico-btn-editar-tipo");
+    marcarObligatorios(form, selectTipo.value);
     selectTipo.addEventListener("change", ()=>{
       visibles = visiblesPara(selectTipo.value);
+      marcarObligatorios(form, selectTipo.value);
+      if(btnEditarTipo) btnEditarTipo.disabled = !configTipo(selectTipo.value);
       transicionarVisibilidad(form, condicionales, el=>visibles.has(el.dataset.campo), { moviles });
+    });
+    // Si en el submodal del tipo se creó un campo nuevo, se repintan los
+    // campos configurables sin perder lo escrito.
+    const repintarConfigurables = ()=>{
+      const escritos = new Map();
+      grilla.querySelectorAll("[data-campo]").forEach(el=>{ const c = el.querySelector("input, select, textarea"); if(c) escritos.set(c.id, c.value); el.remove(); });
+      const ancla = grilla.querySelector("[data-fa-ancla-comunes]");
+      ancla.insertAdjacentHTML("beforebegin", camposDelFormulario().map(d=>htmlCampoConfigurable(d, a, visibles)).join(""));
+      grilla.querySelectorAll("[data-campo] input, [data-campo] select, [data-campo] textarea").forEach(c=>{ if(escritos.has(c.id)) c.value = escritos.get(c.id); });
+      condicionales = [...form.querySelectorAll("[data-campo]")];
+      moviles = [...form.querySelectorAll(".inventario-tecnologico-form-grid > .inventario-tecnologico-field, .inventario-tecnologico-fa-bloque")];
+    };
+    const trasTipo = nombre=>{
+      const defsAntes = condicionales.filter(el=>el.closest("#inventario-tecnologico-fa-grid")).length;
+      if(camposDelFormulario().length !== defsAntes) repintarConfigurables();
+      selectTipo.innerHTML = htmlOpcionesTipo(nombre);
+      selector.refrescar();
+      selectTipo.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    if(btnEditarTipo) btnEditarTipo.addEventListener("click", ()=>{
+      const t = configTipo(selectTipo.value);
+      if(t) abrirEditarTipo(btnEditarTipo, t, trasTipo);
     });
 
     // ---------- "+ Nuevo tipo" / "+ Nueva propiedad" (solo admin) ----------
@@ -158,11 +235,7 @@ export function abrirFormActivo(id){
     // reabren, así no se pierde lo que ya se llenó (marca, modelo, fotos…).
     // Al crear, el <select> correspondiente queda con la opción nueva elegida.
     const btnNuevoTipo = document.getElementById("inventario-tecnologico-btn-nuevo-tipo");
-    if(btnNuevoTipo) btnNuevoTipo.addEventListener("click", ()=>abrirNuevoTipo(btnNuevoTipo, nombre=>{
-      selectTipo.innerHTML = htmlOpcionesTipo(nombre);
-      selector.refrescar();
-      selectTipo.dispatchEvent(new Event("change", { bubbles: true }));
-    }));
+    if(btnNuevoTipo) btnNuevoTipo.addEventListener("click", ()=>abrirNuevoTipo(btnNuevoTipo, trasTipo));
     const btnNuevaPropiedad = document.getElementById("inventario-tecnologico-btn-nueva-propiedad");
     if(btnNuevaPropiedad) btnNuevaPropiedad.addEventListener("click", ()=>abrirNuevaPropiedad(btnNuevaPropiedad, etiqueta=>{
       document.getElementById("inventario-tecnologico-fa-propiedad").innerHTML = htmlOpcionesPropiedad(slugify(etiqueta));
@@ -170,40 +243,53 @@ export function abrirFormActivo(id){
 
     document.getElementById("inventario-tecnologico-btn-guardar-activo").addEventListener("click", async ()=>{
       const valor = (idCampo, recortar = true)=>{ const v = document.getElementById(`inventario-tecnologico-fa-${idCampo}`).value; return recortar ? v.trim() : v; };
+      const tipo = selectTipo.value.trim();
       const valores = {
-        tipo: selectTipo.value.trim(),
+        tipo,
         propiedad: valor("propiedad", false),
         marca: valor("marca"),
         modelo: valor("modelo"),
-        serie: valor("serie"),
         nombre_dispositivo: valor("nombre"),
-        sistema_operativo: valor("so"),
-        procesador: valor("proc"),
-        ram_gb: valor("ram", false),
-        disco_gb: valor("disco", false),
-        mac_wifi: valor("macwifi"),
-        mac_ethernet: valor("maceth"),
         proveedor: valor("proveedor"),
-        color: valor("color"),
-        longitud_m: valor("longitud", false),
         fecha_adquisicion: valor("fecha", false),
         valor_compra: valor("valorcompra", false),
         vida_util_anios: valor("vidautil", false),
         gmail: valor("gmail"),
         password: valor("password"),
       };
+      // Los campos del tipo (los de siempre y los nuevos): se validan según su
+      // tipo de dato, los obligatorios no pueden quedar vacíos y los únicos
+      // no pueden repetir el valor de otro activo (la base también lo exige).
+      const defsVisibles = camposDeTipo(tipo);
+      const obligatorios = obligatoriosDeTipo(tipo);
+      const valoresCampos = {};
+      for(const d of defsVisibles){
+        const el = document.getElementById(idCampoFormulario(d));
+        if(!el) continue;
+        const r = normalizarValor(d, el.value, { valorActual: a ? valorCrudo(a, d) : null });
+        const fallar = msg=>{ mostrarToast(msg, "error"); el.focus(); };
+        if(!r.ok){ fallar(r.error); return; }
+        if(r.valor === null && obligatorios.has(d.clave)){ fallar(`Falta «${d.etiqueta}»: es obligatorio para ${tipo}.`); return; }
+        if(d.unico && r.valor !== null){
+          const repetido = buscarRepetido(d, r.valor, cargarActivos().activos, a ? a.id : null);
+          if(repetido){ fallar(`Ya hay otro activo con ese «${d.etiqueta}»: ${fmtTag(repetido)}.`); return; }
+        }
+        valoresCampos[d.clave] = r.valor;
+        if(d.fijo) valores[d.columna] = r.valor === null ? "" : r.valor;
+      }
       // Solo lo que se ve: un campo oculto por el tipo no se envía (al editar,
       // la base conserva lo que tenía).
       const campos = camposParaGuardar(valores, visibles, { comunes: CAMPOS_COMUNES });
+      const personalizados = parchePersonalizados(defsVisibles, valoresCampos);
       const btn = document.getElementById("inventario-tecnologico-btn-guardar-activo");
       btn.disabled = true; btn.textContent = "Guardando…";
       try{
         let idActivo;
         if(esNuevo){
-          idActivo = await crearActivo(campos);
+          idActivo = await crearActivo(campos, { personalizados });
         } else {
           idActivo = a.id;
-          await editarActivoBase(idActivo, campos);
+          await editarActivoBase(idActivo, campos, { personalizados });
         }
         // Fotos pendientes recién ahora, en el mismo paso — si alguna falla,
         // los datos base ya quedaron guardados; se informa cuál falló en vez
@@ -232,64 +318,48 @@ function cabeceraSubmodal(idTitulo, titulo){
 }
 
 function abrirNuevoTipo(origen, alCrear){
+  abrirSubmodalTipo(origen, null, alCrear);
+}
+
+function abrirEditarTipo(origen, t, alGuardar){
+  abrirSubmodalTipo(origen, t, alGuardar);
+}
+
+// El mismo formulario que Configuración → Tipos y opciones (form-tipo.js),
+// en un submodal encima del activo: crear («+») o editar («✎»).
+function abrirSubmodalTipo(origen, t, alListo){
+  const editando = !!t;
   const html = `
     <div class="${P}modal ${P}submodal" role="dialog" aria-modal="true" aria-labelledby="${P}nt-titulo">
-      ${cabeceraSubmodal(`${P}nt-titulo`, "Nuevo tipo de activo")}
+      ${cabeceraSubmodal(`${P}nt-titulo`, editando ? `Editar el tipo «${esc(t.nombre)}»` : "Nuevo tipo de activo")}
       <form id="${P}form-nuevo-tipo" novalidate>
         <div class="${P}modal-body">
-          <div class="${P}form-grid">
-            <div class="${P}field"><label for="${P}nt-nombre">Nombre</label><input type="text" id="${P}nt-nombre" placeholder="Ej: Cámara IP" autocomplete="off"></div>
-            <div class="${P}field"><label for="${P}nt-color">Color</label><input type="color" id="${P}nt-color" value="#57697C"></div>
-            <div class="${P}field ${P}span-2"><label for="${P}nt-icono">Ícono (SVG, opcional)</label><textarea id="${P}nt-icono" class="${P}mono" placeholder="Pega acá el &lt;svg&gt;...&lt;/svg&gt; de un ícono (ej. de icons.getbootstrap.com). Si se deja vacío, se usa un ícono genérico."></textarea></div>
-            <div class="${P}field ${P}span-2">
-              <span class="${P}field-titulo" id="${P}nt-campos-titulo">Campos pertinentes para este tipo</span>
-              <div id="${P}nt-campos" class="${P}nt-campos" role="group" aria-labelledby="${P}nt-campos-titulo">
-                ${CAMPOS_BLOQUEABLES.concat(CAMPOS_EXTRA).map(c=>`<label><input type="checkbox" value="${c}" ${CAMPOS_BLOQUEABLES.includes(c)?'checked':''}> ${LABEL_CAMPO[c]}</label>`).join("")}
-              </div>
-              <div class="${P}hint">Marcados por defecto los campos "de cómputo" (serie, SO, RAM, etc.) — desmárcalos si no aplican a este tipo (ej. un cable o una fuente de alimentación).</div>
-            </div>
-          </div>
+          ${htmlFormTipo("nt", t)}
         </div>
         <div class="${P}modal-footer">
           <button type="button" class="${P}btn" data-submodal-cerrar id="${P}btn-cancelar-tipo">Cancelar</button>
-          <button type="submit" class="${P}btn ${P}btn-primary" id="${P}btn-crear-tipo">Crear tipo</button>
+          <button type="submit" class="${P}btn ${P}btn-primary" id="${P}btn-${editando ? "guardar" : "crear"}-tipo">${editando ? "Guardar cambios" : "Crear tipo"}</button>
         </div>
       </form>
     </div>`;
   abrirSubmodal(html, { origen, alMontar: host=>{
+    const formTipo = montarFormTipo(host, "nt", t);
     const form = host.querySelector(`#${P}form-nuevo-tipo`);
     form.addEventListener("submit", async e=>{
       e.preventDefault();
-      const nombre = host.querySelector(`#${P}nt-nombre`).value.trim();
-      if(!nombre){ mostrarToast("Ingresa el nombre del nuevo tipo.", "error"); host.querySelector(`#${P}nt-nombre`).focus(); return; }
-      // La validación de duplicados vive en crearTipoActivo() (igual que
-      // crearPropiedadOpcion/crearEstadoOpcion) — si ya existe, el catch de
-      // abajo muestra el mismo mensaje.
-      const iconoRaw = host.querySelector(`#${P}nt-icono`).value.trim();
-      if(iconoRaw){
-        if(!/^<svg[\s>]/i.test(iconoRaw)){
-          mostrarToast("El ícono debe empezar con <svg — pega el markup completo o deja el campo vacío.", "error"); return;
-        }
-        // iconoTipoTam() agranda el ícono para la vista grande del detalle
-        // reemplazando width="16" height="16" — si el SVG pegado no trae
-        // esas medidas exactas (el tamaño de icons.getbootstrap.com, igual
-        // que los íconos ya migrados), el reemplazo no encuentra nada y el
-        // ícono queda mal dimensionado ahí. Mejor avisar acá.
-        if(!/width="16"\s+height="16"/.test(iconoRaw)){
-          mostrarToast('El SVG debe tener width="16" height="16" (mismo tamaño que los íconos existentes, ej. de icons.getbootstrap.com) para verse bien también en la vista grande del detalle.', "error"); return;
-        }
-      }
-      const campos = [...host.querySelectorAll(`#${P}nt-campos input:checked`)].map(cb=>cb.value);
-      const btn = host.querySelector(`#${P}btn-crear-tipo`);
-      btn.disabled = true; btn.textContent = "Creando…";
+      let datos;
+      try{ datos = formTipo.leer(); }
+      catch(err){ mostrarToast(err.message, "error"); if(err.campo) err.campo.focus(); return; }
+      const btn = host.querySelector(`#${P}btn-${editando ? "guardar" : "crear"}-tipo`);
+      btn.disabled = true; btn.textContent = editando ? "Guardando…" : "Creando…";
       try{
-        await crearTipoActivo({ nombre, color: host.querySelector(`#${P}nt-color`).value, icono_svg: iconoRaw, campos_pertinentes: campos });
+        const nombre = await guardarFormTipo(t, datos);
         cerrarSubmodal();
-        alCrear(nombre);
-        mostrarToast("Tipo creado.", "success");
+        alListo(nombre);
+        mostrarToast(editando ? (nombre !== t.nombre ? `Tipo renombrado a «${nombre}».` : "Tipo guardado.") : "Tipo creado.", "success");
       } catch(err){
-        btn.disabled = false; btn.textContent = "Crear tipo";
-        mostrarToast("No se pudo crear el tipo: " + err.message, "error");
+        btn.disabled = false; btn.textContent = editando ? "Guardar cambios" : "Crear tipo";
+        mostrarToast(`No se pudo ${editando ? "guardar" : "crear"} el tipo: ` + err.message, "error");
       }
     });
   } });

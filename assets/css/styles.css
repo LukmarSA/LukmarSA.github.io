@@ -1433,3 +1433,43 @@ body.inventario-tecnologico-con-mapa-completo{overflow:hidden;}
 @media (prefers-reduced-motion:reduce){
   .inventario-tecnologico-ventana-aviso > .inventario-tecnologico-mapa-ventana-cab{animation:none;}
 }
+
+/* ---------- v10: campos configurables, tipos editables e íconos de ubicación ---------- */
+/* Modal del tipo: cada campo con «usa» y «obligatorio» (012) */
+.inventario-tecnologico-nt-campos.inventario-tecnologico-nt-campos-obl{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 16px;}
+.inventario-tecnologico-nt-campo{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 6px;border-radius:var(--radius-sm);}
+.inventario-tecnologico-nt-campo:hover{background:var(--surface-2);}
+.inventario-tecnologico-field .inventario-tecnologico-nt-campos .inventario-tecnologico-nt-obl{font-size:11.5px;color:var(--ink-muted);gap:4px;}
+.inventario-tecnologico-field .inventario-tecnologico-nt-campos .inventario-tecnologico-nt-obl input[type=checkbox]{width:14px;height:14px;}
+.inventario-tecnologico-nt-campos .inventario-tecnologico-nt-obl:has(input:disabled){opacity:0.45;}
+.inventario-tecnologico-nt-aviso{color:var(--warn);font-weight:500;}
+.inventario-tecnologico-nt-boton-nuevo-campo{margin-top:8px;}
+.inventario-tecnologico-nt-nuevo-campo{margin-top:8px;padding:10px;border:1px dashed var(--border-strong);border-radius:var(--radius-sm);background:var(--surface-2);}
+.inventario-tecnologico-nt-nuevo-campo[hidden]{display:none;}
+.inventario-tecnologico-nt-nc-marcas{display:flex;flex-wrap:wrap;gap:6px 18px;}
+.inventario-tecnologico-field.inventario-tecnologico-nt-nc-marcas label{display:flex;align-items:center;gap:6px;font-weight:400;font-size:13px;color:var(--ink);cursor:pointer;}
+.inventario-tecnologico-nt-nc-marcas input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--accent);}
+.inventario-tecnologico-nt-nc-marcas label[hidden]{display:none;}
+.inventario-tecnologico-nt-nc-botones{display:flex;gap:6px;margin-top:8px;}
+/* Formulario y detalle del activo */
+.inventario-tecnologico-fa-obligatorio{color:var(--danger);font-weight:700;}
+.inventario-tecnologico-v.inventario-tecnologico-v-largo{white-space:pre-line;}
+/* Configuración → campos de los activos */
+.inventario-tecnologico-campo-orden{white-space:nowrap;width:1%;}
+.inventario-tecnologico-campo-orden .inventario-tecnologico-btn-sm{min-width:30px;padding-left:6px;padding-right:6px;}
+.inventario-tecnologico-cfg-opciones{display:flex;flex-direction:column;gap:6px;margin:4px 0 6px;}
+.inventario-tecnologico-cfg-opcion{display:flex;align-items:center;gap:8px;}
+.inventario-tecnologico-cfg-opcion input[type=text]{flex:1;min-width:0;}
+.inventario-tecnologico-cfg-opcion label{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--ink-muted);white-space:nowrap;}
+[data-cc-si][hidden]{display:none !important;}
+/* Tipos de ubicación: el pin de la tabla y la vista previa del ícono */
+.inventario-tecnologico-cfg-pin{width:40px;}
+.inventario-tecnologico-cfg-pin .inventario-tecnologico-mapa-pin,
+.inventario-tecnologico-mapa-mini-vista .inventario-tecnologico-mapa-pin{display:inline-block;vertical-align:middle;}
+.inventario-tecnologico-cfg-icono-ubicacion{display:flex;gap:10px;align-items:flex-start;}
+.inventario-tecnologico-cfg-icono-ubicacion textarea{flex:1;min-height:70px;font-size:11.5px;}
+.inventario-tecnologico-mapa-mini-titulo{flex-basis:100%;font-size:12px;font-weight:600;color:var(--ink-muted);}
+.inventario-tecnologico-mapa-mini-icono{flex-basis:100%;display:flex;gap:10px;align-items:flex-start;}
+.inventario-tecnologico-mapa-mini-icono textarea{flex:1;min-width:0;min-height:52px;font-size:11.5px;}
+.inventario-tecnologico-mapa-mini-vista{flex:none;display:inline-flex;width:34px;height:42px;align-items:flex-start;justify-content:center;border-radius:var(--radius-sm);}
+.inventario-tecnologico-mapa-mini-vista.inventario-tecnologico-mapa-mini-vista-error{outline:2px solid var(--danger);outline-offset:2px;}

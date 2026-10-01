@@ -23,6 +23,15 @@
 // una red y version_nombres_equipos() = 2. De la 011 (fixture.m011, con la
 // 010): la red se hereda del servidor (en los nombres), una red propia igual
 // a la heredada se deja vacía después de cada cambio, y la versión es 3.
+// De la 012 (si el fixture trae la tabla campos_activo): los campos
+// configurables — activos.personalizados se mezcla con lo que había y los
+// null se quitan, «único» no deja repetir un valor, campos_activo la escribe
+// solo el admin, tipos_activo.campos_obligatorios, tipos_ubicacion.icono_svg y
+// renombrar_tipo_activo(). Sin la 012: la tabla no existe (PGRST205), esas
+// columnas tampoco (PGRST204) ni la función (PGRST202).
+// Como en la base real, tipos_activo, propiedad_opciones, estado_opciones y
+// tipos_ubicacion no tienen "id": filtrar por una columna que no existe da
+// el error 42703.
 // Las reglas de la base en sí se prueban contra Supabase de verdad
 // (db/pruebas/mapa_pruebas_reglas_rls.sql), no aquí.
 (function(){
@@ -40,6 +49,15 @@
   const hay009 = !!(fixture.tablas && "piscinas" in fixture.tablas);
   const hay010 = !!fixture.m010 || !!fixture.m011;
   const hay011 = !!fixture.m011;
+  const hay012 = !!(fixture.tablas && "campos_activo" in fixture.tablas);
+  const COLUMNAS_REALES = {
+    tipos_activo: ["nombre","icono_svg","color","campos_pertinentes","orden","creado_en","creado_por","activo", ...(hay012 ? ["campos_obligatorios"] : [])],
+    propiedad_opciones: ["valor","etiqueta","orden","activo","creado_en","creado_por"],
+    estado_opciones: ["valor","etiqueta","color_fg","color_bg","orden","activo","creado_en","creado_por"],
+    tipos_ubicacion: ["valor","etiqueta","color","orden","activo","creado_en","creado_por", ...(hay012 ? ["icono_svg"] : [])],
+  };
+  // Columnas que llegan con la 012 (sin ella, PostgREST responde PGRST204 al escribirlas).
+  const COLUMNAS_012 = { activos: ["personalizados"], tipos_activo: ["campos_obligatorios"], tipos_ubicacion: ["icono_svg"] };
 
   const tabla = t=>(DB[t] ||= []);
   const siguienteId = t=>tabla(t).reduce((m, r)=>Math.max(m, Number(r.id) || 0), 0) + 1;
@@ -56,7 +74,7 @@
   // RLS de lectura de la migración 004: la red (equipos y respaldos) solo con ver_mapa;
   // de la 006, el plano también. Y el plano solo lo escribe el administrador.
   const LECTURA_SOLO_MAPA = ["equipos_radioenlace", "enlaces_respaldo", "planos_mapa", "piscinas", ...TABLAS_007];
-  const ESCRITURA_SOLO_ADMIN = ["planos_mapa", "piscinas", ...TABLAS_007];
+  const ESCRITURA_SOLO_ADMIN = ["planos_mapa", "piscinas", "campos_activo", ...TABLAS_007];
   function esAdmin(){
     const perfil = sesion && tabla("perfiles").find(p=>p.id === sesion.user.id);
     return !!(perfil && perfil.rol === "administrador");
@@ -170,6 +188,52 @@
     if(!vacio(f.hectareas) && !(Number(f.hectareas) > 0)) throw { code:"23514", message:'new row for relation "piscinas" violates check constraint "piscinas_hectareas_validas"' };
   }
 
+  // --- imitación de la 012: campos configurables ---
+  const objeto = v=>v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  const sinNulos = o=>Object.fromEntries(Object.entries(objeto(o)).filter(([, v])=>v !== null && v !== undefined));
+  const comparable = (v, tipo)=>{
+    if(v === null || v === undefined || String(v).trim() === "") return null;
+    if(tipo === "numero" && Number.isFinite(Number(v))) return "n:" + Number(v);
+    return "t:" + String(v).trim().toLowerCase().replace(/\s+/g, " ");
+  };
+  const tagDe = a=>`${a.propiedad === "eq" ? "EQS" : "LKM"}-${String(a.id).padStart(3, "0")}`;
+  function revisarUnicos(nueva, vieja){
+    if(!hay012) return;
+    for(const c of tabla("campos_activo").filter(x=>x.unico)){
+      const valor = x=>x ? (c.fijo ? x[c.columna] : objeto(x.personalizados)[c.clave]) : null;
+      const k = comparable(valor(nueva), c.tipo_dato);
+      if(k === null || (vieja && k === comparable(valor(vieja), c.tipo_dato))) continue;
+      const otro = tabla("activos").find(a=>a.id !== nueva.id && comparable(valor(a), c.tipo_dato) === k);
+      if(otro) throw { code: "23505", message: `Ya hay otro activo con el mismo «${c.etiqueta}» (${tagDe(otro)}).` };
+    }
+  }
+  function validarCampo(f, idActual){
+    if(tabla("campos_activo").some(x=>x.id !== idActual && x.clave === f.clave)) throw { code: "23505", message: 'duplicate key value violates unique constraint "campos_activo_clave_unica"' };
+    if(tabla("campos_activo").some(x=>x.id !== idActual && claveTexto(x.etiqueta) === claveTexto(f.etiqueta))) throw { code: "23505", message: 'duplicate key value violates unique constraint "campos_activo_etiqueta_unica"' };
+  }
+  function columnas012SinMigracion(t, datos){
+    if(hay012 || !COLUMNAS_012[t]) return null;
+    const filas = Array.isArray(datos) ? datos : [datos];
+    const c = COLUMNAS_012[t].find(k=>filas.some(f=>f && k in f));
+    return c ? { code:"PGRST204", message:`Could not find the '${c}' column of '${t}' in the schema cache` } : null;
+  }
+  function renombrarTipo({ p_viejo, p_nuevo }){
+    if(!esAdmin()) return { data: null, error: { code: "42501", message: "Solo el administrador puede cambiar el nombre de un tipo." } };
+    const nuevo = String(p_nuevo ?? "").trim();
+    const t = tabla("tipos_activo").find(x=>x.nombre === p_viejo);
+    if(!t) return { data: null, error: { code: "P0002", message: `El tipo «${p_viejo}» no existe.` } };
+    if(p_viejo === "Celular") return { data: null, error: { code: "23514", message: "«Celular» no se puede renombrar: ese nombre activa los datos de celular." } };
+    if(!nuevo) return { data: null, error: { code: "23514", message: "El nombre nuevo no puede quedar vacío (hasta 60 caracteres)." } };
+    if(nuevo === p_viejo) return { data: 0, error: null };
+    if(tabla("tipos_activo").some(x=>x.nombre !== p_viejo && x.nombre.trim().toLowerCase() === nuevo.toLowerCase())) return { data: null, error: { code: "23505", message: `Ya existe un tipo que se llama «${nuevo}».` } };
+    const activos = tabla("activos").filter(a=>a.tipo === p_viejo);
+    t.nombre = nuevo;
+    for(const a of activos) a.tipo = nuevo;
+    for(const b of tabla("bajas")) if(b.activo && b.activo.tipo === p_viejo) b.activo.tipo = nuevo;
+    escrituras.push({ rpc: "renombrar_tipo_activo", args: { p_viejo, p_nuevo }, activos: activos.length });
+    return { data: activos.length, error: null };
+  }
+
   function columnas007SinMigracion(t, datos){
     if(hay007 || t !== "equipos_radioenlace") return null;
     const filas = Array.isArray(datos) ? datos : [datos];
@@ -260,7 +324,10 @@
     update(parche){ this.op = "update"; this.datos = parche; return this; }
     delete(){ this.op = "delete"; return this; }
     upsert(filas, opciones = {}){ this.op = "upsert"; this.datos = Array.isArray(filas) ? filas : [filas]; this.conflicto = (opciones.onConflict || "id").split(","); return this; }
-    eq(c, v){ this.filtros.push(r=>r[c] === v || (r[c] !== null && r[c] !== undefined && v !== null && String(r[c]) === String(v))); return this; }
+    eq(c, v){
+      if(COLUMNAS_REALES[this.t] && !COLUMNAS_REALES[this.t].includes(c)) this.errorColumna = this.errorColumna || { code: "42703", message: `column ${this.t}.${c} does not exist` };
+      this.filtros.push(r=>r[c] === v || (r[c] !== null && r[c] !== undefined && v !== null && String(r[c]) === String(v))); return this;
+    }
     is(c, v){ this.filtros.push(r=>v === null ? (r[c] === null || r[c] === undefined) : r[c] === v); return this; }
     in(c, vs){ this.filtros.push(r=>vs.includes(r[c])); return this; }
     order(c, o = {}){ this.ordenes.push([c, o.ascending !== false]); return this; }
@@ -273,6 +340,10 @@
       if(fallas[this.t]) return { data: null, error: fallas[this.t], count: null };
       if(TABLAS_007.includes(this.t) && !hay007) return { data: null, error: { code:"PGRST205", message:`Could not find the table 'public.${this.t}' in the schema cache` }, count: null };
       if(this.t === "piscinas" && !hay009) return { data: null, error: { code:"PGRST205", message:"Could not find the table 'public.piscinas' in the schema cache" }, count: null };
+      if(this.t === "campos_activo" && !hay012) return { data: null, error: { code:"PGRST205", message:"Could not find the table 'public.campos_activo' in the schema cache" }, count: null };
+      if(this.errorColumna) return { data: null, error: this.errorColumna, count: null };
+      const sin012 = (this.op === "insert" || this.op === "update") ? columnas012SinMigracion(this.t, this.datos) : null;
+      if(sin012) return { data: null, error: sin012, count: null };
       if(this.t === "equipos_radioenlace" && !hay008 && this.op === "select" && /\bmedio\b/.test(String(this.sel))) return { data: null, error: { code:"42703", message:"column equipos_radioenlace.medio does not exist" }, count: null };
       const sin007 = (this.op === "insert" || this.op === "update") ? (columnas007SinMigracion(this.t, this.datos) || columna008SinMigracion(this.t, this.datos)) : null;
       if(sin007) return { data: null, error: sin007, count: null };
@@ -298,6 +369,13 @@
             if(this.t === "redes"){ if(fila.activa === undefined) fila.activa = true; if(fila.orden === undefined) fila.orden = 0; if(fila.color === undefined) fila.color = "#007EB2"; }
             if(this.t === "tipos_equipo_red"){ if(fila.activo === undefined) fila.activo = true; if(fila.orden === undefined) fila.orden = 0; if(fila.genero === undefined) fila.genero = "m"; }
             if(this.t === "atajos_simulacion" && fila.orden === undefined) fila.orden = 0;
+            if(this.t === "activos" && hay012){ fila.personalizados = sinNulos(fila.personalizados); revisarUnicos(fila, null); }
+            if(this.t === "campos_activo"){
+              fila.id ??= siguienteId("campos_activo");
+              Object.assign(fila, { fijo: false, columna: null, unico: false, en_acta: false, activo: true, opciones: [], orden: 0, ...fila });
+              fila.etiqueta = String(fila.etiqueta ?? "").trim();
+              validarCampo(fila, null);
+            }
             validar007(this.t, fila, null);
             tabla(this.t).push(fila);
             if(this.t === "equipos_radioenlace") sincronizarActivoDeEquipo(fila);
@@ -309,6 +387,11 @@
           resultado = ESCRITURA_SOLO_ADMIN.includes(this.t) && !esAdmin() ? [] : this.filas(); // RLS: 0 filas, sin error
           for(const r of resultado){
             const nueva = { ...r, ...copia(this.datos) };
+            if(this.t === "activos" && hay012){
+              if("personalizados" in this.datos) nueva.personalizados = sinNulos({ ...objeto(r.personalizados), ...objeto(this.datos.personalizados) });
+              revisarUnicos(nueva, r);
+            }
+            if(this.t === "campos_activo") validarCampo(nueva, r.id);
             if(this.t === "equipos_radioenlace" && "servidor_id" in this.datos) validarJerarquia(nueva);
             if(this.t === "enlaces_respaldo") validarRespaldo(nueva, r.id);
             if(this.t === "planos_mapa") validarPlano(nueva);
@@ -319,7 +402,9 @@
           }
           resultado.forEach(r=>{
             const servidorAntes = r.servidor_id;
+            const personalizadosAntes = r.personalizados;
             Object.assign(r, copia(this.datos));
+            if(this.t === "activos" && hay012 && "personalizados" in this.datos) r.personalizados = sinNulos({ ...objeto(personalizadosAntes), ...objeto(this.datos.personalizados) });
             if(this.t === "planos_mapa" || this.t === "piscinas") r.actualizado_en = new Date().toISOString();
             if(this.t === "equipos_radioenlace"){
               sincronizarActivoDeEquipo(r);
@@ -375,6 +460,10 @@
         // Solo lectura (migración 004): no se anota como escritura.
         if(nombre === "version_nombres_equipos"){
           return hay010 ? { data: hay011 ? 3 : 2, error: null } : { data: null, error: { code: "PGRST202", message: "Could not find the function public.version_nombres_equipos without parameters in the schema cache" } };
+        }
+        if(nombre === "renombrar_tipo_activo"){
+          if(!hay012) return { data: null, error: { code: "PGRST202", message: "Could not find the function public.renombrar_tipo_activo(p_nuevo, p_viejo) in the schema cache" } };
+          return renombrarTipo(args || {});
         }
         if(nombre === "equipo_radio_de_activo"){
           const e = (puede("ver_listado") || puede("ver_mapa")) ? tabla("equipos_radioenlace").find(x=>x.activo_id === args.p_activo_id) : null;

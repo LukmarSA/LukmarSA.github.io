@@ -1,5 +1,17 @@
 import { ROL_ADMIN, sb } from "./config.js";
 import { state } from "./estado.js";
+import { definicionesDeCampos } from "./campos-personalizados.js";
+import { limpiarSvg } from "./svg-seguro.js";
+
+// Una tabla que todavía no existe (migración sin aplicar): PostgREST responde
+// PGRST205 (o 42P01 en versiones viejas). La app sigue sin esa parte.
+export function esTablaFaltante(error, tabla){
+  if(!error) return false;
+  if(error.code === "PGRST205" || error.code === "42P01") return true;
+  return !!tabla && new RegExp(`\\b${tabla}\\b`).test(String(error.message || "")) && /schema cache|does not exist|no existe/i.test(String(error.message || ""));
+}
+
+const objeto = v=>v && typeof v === "object" && !Array.isArray(v) ? v : {};
 
 export async function refrescarDatos(){
   const [
@@ -8,6 +20,7 @@ export async function refrescarDatos(){
     { data: tiposActivoRaw, error: e7 },
     { data: propiedadOpcionesRaw, error: e8 },
     { data: estadoOpcionesRaw, error: e9 },
+    { data: camposRaw, error: eC },
   ] = await Promise.all([
     sb.from("activos").select("*").order("id"),
     sb.from("historial_custodia").select("*").order("activo_id").order("orden"),
@@ -20,13 +33,21 @@ export async function refrescarDatos(){
     sb.from("tipos_activo").select("*").order("orden"),
     sb.from("propiedad_opciones").select("*").order("orden"),
     sb.from("estado_opciones").select("*").order("orden"),
+    // v10 (migración 012): definiciones de los campos. Sin la 012 la tabla no
+    // existe y la app usa los 9 campos de siempre.
+    sb.from("campos_activo").select("*").order("orden"),
   ]);
   if(e1) throw e1;
   if(e2) throw e2;
   if(e7) throw e7;
   if(e8) throw e8;
   if(e9) throw e9;
-  state.tiposActivo = tiposActivoRaw || [];
+  if(eC && !esTablaFaltante(eC, "campos_activo")) throw eC;
+  state.hay012 = !eC;
+  state.camposActivo = definicionesDeCampos(camposRaw || [], { hay012: state.hay012 });
+  // Los íconos se limpian al cargarlos (ver nucleo/svg-seguro.js): el que no
+  // se puede leer queda vacío y se ve el genérico.
+  state.tiposActivo = (tiposActivoRaw || []).map(t=>({ ...t, icono_svg: limpiarSvg(t.icono_svg) || null }));
   state.propiedadOpciones = propiedadOpcionesRaw || [];
   state.estadoOpciones = estadoOpcionesRaw || [];
   const historialPorActivo = {};
@@ -49,6 +70,7 @@ export async function refrescarDatos(){
       color: a.color, longitud_m: a.longitud_m,
       valor_compra: a.valor_compra, vida_util_anios: a.vida_util_anios,
       estado: a.estado,
+      personalizados: objeto(a.personalizados), // valores de los campos nuevos (012); {} sin la 012
       fotos: a.fotos || [],
       celular: (a.celular_gmail || a.celular_password) ? { gmail: a.celular_gmail, password: a.celular_password } : null,
       custodio: vigente ? { tipo_custodio: vigente.tipo_custodio, nombre: vigente.nombre, cargo: vigente.cargo } : null,
@@ -95,6 +117,12 @@ export function cargarTiposActivo(){ return state.tiposActivo || []; }
 export function cargarPropiedadOpciones(){ return state.propiedadOpciones || []; }
 
 export function cargarEstadoOpciones(){ return state.estadoOpciones || []; }
+
+// v10: definiciones de los campos (las de la 012 o los 9 fijos) y si la 012
+// está aplicada.
+export function cargarCamposActivo(){ return state.camposActivo || definicionesDeCampos([], { hay012: false }); }
+
+export function hayCamposConfigurables(){ return !!state.hay012; }
 
 export async function guardarPermisos(matriz){
   const filas = [];

@@ -467,7 +467,7 @@ function opcionesIcono(c, u){
   const est = c.sim ? c.estadoUbicaciones.get(u.id) : null;
   const hayCadena = c.seleccionId !== null;
   return {
-    color: infoTipoUbicacion(c.m.tiposUbicacion, u.tipo).color, tipo: u.tipo, cantidad: equipos + activos,
+    color: infoTipoUbicacion(c.m.tiposUbicacion, u.tipo).color, tipo: u.tipo, icono: infoTipoUbicacion(c.m.tiposUbicacion, u.tipo).icono, cantidad: equipos + activos,
     seleccionada: s.ubicacionId === u.id,
     enlazada: !!(servidor && servidor.ubicacion_id === u.id && u.id !== s.ubicacionId),
     archivada: u.activa === false,
@@ -1025,6 +1025,7 @@ function trasGuardar(fn){
 function abrirNuevaUbicacion({ lat = null, lng = null, id = null, borrador = null } = {}){
   const callbacks = {
     alGuardar: trasGuardar(nuevoId=>seleccionarUbicacion(nuevoId, { centrar: true })),
+    alCambiarTipo: trasGuardar(()=>refrescar()),
     alElegirEnMapa: b=>entrarEnColocacion(
       latlng=>abrirFormUbicacion({ id, borrador: b, lat: latlng.lat, lng: latlng.lng }, callbacks),
       ()=>abrirFormUbicacion({ id, borrador: b }, callbacks)

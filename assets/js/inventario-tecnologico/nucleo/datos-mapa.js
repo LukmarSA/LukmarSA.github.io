@@ -36,6 +36,7 @@ import { indexarMapa } from "./mapa-logica.js";
 import { analizarRed, anotarRedesEfectivas, simularFallas } from "./mapa-jerarquia.js";
 import { aplicarNombres, caidosEfectivos } from "./mapa-nombres.js";
 import { normalizarPlano } from "./plano-mapa.js";
+import { limpiarSvg } from "./svg-seguro.js";
 
 export function crearEstadoMapa(){
   return {
@@ -97,7 +98,7 @@ export async function refrescarDatosMapa(){
   ]);
   const error = t.error || u.error || e.error || r.error || h.error;
   if(error){ m.error = error; throw error; }
-  m.tiposUbicacion = t.data || [];
+  m.tiposUbicacion = limpiarIconosUbicacion(t.data || []);
   m.ubicaciones = u.data || [];
   m.equipos = e.data || [];
   m.respaldos = r.data || [];
@@ -151,6 +152,19 @@ export function cargarPlanoMapa(){
 }
 
 export function cargarTiposUbicacion(){ return estadoMapa().tiposUbicacion; }
+
+// v10: solo los tipos de ubicación, para Configuración (sin abrir el mapa).
+// Los íconos se limpian al cargarlos, igual que los de los tipos de activo.
+export async function refrescarTiposUbicacion(){
+  const { data, error } = await sb.from("tipos_ubicacion").select("*").order("orden");
+  if(error) throw error;
+  estadoMapa().tiposUbicacion = limpiarIconosUbicacion(data || []);
+  return estadoMapa().tiposUbicacion;
+}
+
+export function limpiarIconosUbicacion(tipos){
+  return (tipos || []).map(t=>("icono_svg" in t) ? { ...t, icono_svg: limpiarSvg(t.icono_svg) || null } : t);
+}
 
 export function cargarUbicaciones(){ return estadoMapa().ubicaciones; }
 

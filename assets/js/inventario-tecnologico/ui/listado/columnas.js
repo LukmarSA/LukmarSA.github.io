@@ -1,5 +1,7 @@
 import { state } from "../../nucleo/estado.js";
 import { esc } from "../../nucleo/helpers.js";
+import { cargarCamposActivo } from "../../nucleo/datos.js";
+import { CLAVE_CAMPO_POR_COLUMNA, LABEL_CAMPO, PREFIJO_COLUMNA_CAMPO, etiquetaConUnidad, ordenarCampos } from "../../nucleo/campos-personalizados.js";
 import { contenidoBotonFiltro, flechaOrden, opcionesFiltroCache, panelFiltroHtml, seleccionActiva } from "./filtros.js";
 import { abrirModal, cerrarModal, renderMain } from "../render-raiz.js";
 
@@ -33,6 +35,28 @@ export const DEFINICION_COLUMNAS = [
 
 export const COLUMNAS_VISIBLES_DEFAULT = ["inventario-tecnologico-tag","tipo","marca","estado","custodio","propiedad","acciones"];
 
+// v10: las columnas de la tabla. Las de siempre, con la etiqueta que se le
+// haya puesto al campo en Configuración (si cambió), y una columna opcional
+// por cada campo nuevo activo (clave "campo:<clave>"), antes de Acciones.
+export function definicionColumnas(){
+  const defs = cargarCamposActivo();
+  const porClave = new Map(defs.map(d=>[d.clave, d]));
+  const fijas = DEFINICION_COLUMNAS.map(c=>{
+    const d = porClave.get(CLAVE_CAMPO_POR_COLUMNA[c.key]);
+    if(!d || d.etiqueta === LABEL_CAMPO[d.clave]) return c;
+    return { ...c, label: etiquetaConUnidad(d) };
+  });
+  const nuevas = ordenarCampos(defs.filter(d=>!d.fijo && d.activo)).map(d=>({
+    key: PREFIJO_COLUMNA_CAMPO + d.clave, label: etiquetaConUnidad(d), core: false,
+    weight: d.tipo_dato === "texto_largo" ? 2 : 1.3,
+    sortCampo: PREFIJO_COLUMNA_CAMPO + d.clave, filterCampo: null,
+    campoTexto: d.tipo_dato === "fecha" ? null : PREFIJO_COLUMNA_CAMPO + d.clave,
+    placeholder: "Buscar…", campo: d,
+  }));
+  const i = fijas.findIndex(c=>c.key === "acciones");
+  return [...fijas.slice(0, i), ...nuevas, ...fijas.slice(i)];
+}
+
 export const LIMITE_COLUMNAS_RECOMENDADO = 7;
 
 export const MEDIA_COLAPSADA = "(max-width:720px)";
@@ -46,7 +70,7 @@ export function abrirGestorColumnas(){
   // real de las columnas en la tabla lo sigue decidiendo
   // columnasVisiblesOrdenadas(), que usa el orden de DEFINICION_COLUMNAS
   // (Tag primero, Acciones al final), no este.
-  const opcionesNoCore = DEFINICION_COLUMNAS.filter(c=>!c.core)
+  const opcionesNoCore = definicionColumnas().filter(c=>!c.core)
     .sort((a,b)=>a.label.localeCompare(b.label,'es'));
   const html = `<div class="inventario-tecnologico-modal">
     <div class="inventario-tecnologico-modal-header"><h3>Columnas visibles</h3><button class="inventario-tecnologico-modal-close">✕</button></div>
@@ -99,7 +123,7 @@ export function abrirGestorColumnas(){
 }
 
 export function restablecerColumnasPorDefecto(){
-  DEFINICION_COLUMNAS
+  definicionColumnas()
     .filter(c => state.columnasVisibles.has(c.key) && !COLUMNAS_VISIBLES_DEFAULT.includes(c.key))
     .forEach(c=>{
       if(c.filterCampo) state.filtros[c.filterCampo] = null;
@@ -121,15 +145,15 @@ export function actualizarAvisoColumnas(){
 export function thColumna(o){
   const { sortCampo, filterCampo, label, ordenable, opcionesChecklist, campoTexto, placeholderTexto, filtroFecha, colClass, widthPct } = o;
   const filaLabel = ordenable
-    ? `<span class="inventario-tecnologico-th-label inventario-tecnologico-th-sortable" data-sort="${sortCampo}"><span class="inventario-tecnologico-th-label-text">${label}</span>${flechaOrden(sortCampo)}</span>`
-    : `<span class="inventario-tecnologico-th-label"><span class="inventario-tecnologico-th-label-text">${label}</span></span>`;
+    ? `<span class="inventario-tecnologico-th-label inventario-tecnologico-th-sortable" data-sort="${sortCampo}"><span class="inventario-tecnologico-th-label-text">${esc(label)}</span>${flechaOrden(sortCampo)}</span>`
+    : `<span class="inventario-tecnologico-th-label"><span class="inventario-tecnologico-th-label-text">${esc(label)}</span></span>`;
   let filtroBtn = "";
   if(opcionesChecklist){
     const seleccion = seleccionActiva(filterCampo);
     const activo = seleccion.size < opcionesChecklist.length;
     const vacio = seleccion.size === 0;
     filtroBtn = `<div class="inventario-tecnologico-th-filter">
-      <button type="button" class="inventario-tecnologico-th-filter-btn ${activo?'inventario-tecnologico-active':''} ${vacio?'inventario-tecnologico-empty':''}" data-filtro-btn="${filterCampo}" tabindex="0" aria-label="Filtrar ${label}">${contenidoBotonFiltro(filterCampo, opcionesChecklist)}</button>
+      <button type="button" class="inventario-tecnologico-th-filter-btn ${activo?'inventario-tecnologico-active':''} ${vacio?'inventario-tecnologico-empty':''}" data-filtro-btn="${filterCampo}" tabindex="0" aria-label="Filtrar ${esc(label)}">${contenidoBotonFiltro(filterCampo, opcionesChecklist)}</button>
       ${panelFiltroHtml(filterCampo, opcionesChecklist)}
     </div>`;
   }
@@ -146,7 +170,7 @@ export function thColumna(o){
 }
 
 export function columnasVisiblesOrdenadas(){
-  return DEFINICION_COLUMNAS.filter(c=>state.columnasVisibles.has(c.key));
+  return definicionColumnas().filter(c=>state.columnasVisibles.has(c.key));
 }
 
 export function filaEncabezados(){

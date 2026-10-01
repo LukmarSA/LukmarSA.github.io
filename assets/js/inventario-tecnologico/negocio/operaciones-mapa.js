@@ -7,7 +7,9 @@
 // equipos, respaldos y tipos: solo administrador; historial_ubicacion: acción
 // "asignar_ubicacion" de la matriz). La UI solo esconde los botones.
 import { sb } from "../nucleo/config.js";
-import { cargarAtajos, cargarPiscinas, cargarRedes, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, datosNombres, estadoMapa, hayMedio, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa } from "../nucleo/datos-mapa.js";
+import { cargarAtajos, cargarPiscinas, cargarRedes, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, datosNombres, estadoMapa, hayMedio, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa, refrescarTiposUbicacion } from "../nucleo/datos-mapa.js";
+import { hayCamposConfigurables } from "../nucleo/datos.js";
+import { validarSvg } from "../nucleo/svg-seguro.js";
 import { numeroHectareas, redondearPunto, validarPiscina } from "../nucleo/piscinas.js";
 import { nombreParaGuardar, nombresAutomaticos, slugTipo, validarAtajo, validarRed, validarTipoEquipo } from "../nucleo/mapa-nombres.js";
 import { copiarEsquinas, esquinasValidas } from "../nucleo/plano-mapa.js";
@@ -58,16 +60,57 @@ function textoOpcional(v){
 // Tipos de ubicación (mismo mecanismo que crearEstadoOpcion: valor = slug
 // inmutable de la etiqueta, orden = máximo + 10)
 // ---------------------------------------------------------------------------
-export async function crearTipoUbicacion(etiqueta, color){
+// v10: el ícono (icono_svg) existe desde la 012; sin ella no se envía.
+// Desde Configuración (sin el mapa abierto) solo se recargan los tipos.
+async function recargarTiposUbicacion(){
+  if(estadoMapa().cargado) await refrescarDatosMapa();
+  else await refrescarTiposUbicacion();
+}
+
+function iconoUbicacionParaGuardar(icono_svg){
+  const v = validarSvg(icono_svg, { exigirViewBox: true });
+  if(!v.ok) throw new ErrorValidacion({ icono_svg: v.error });
+  return v.svg || null;
+}
+
+export async function crearTipoUbicacion(etiqueta, color, icono_svg = ""){
   const etq = String(etiqueta ?? "").trim();
   const valor = slugify(etq);
   const existentes = cargarTiposUbicacion();
   const v = validarTipoUbicacion(valor, etq, existentes);
   if(!v.ok) throw new ErrorValidacion(v.errores);
   const orden = existentes.length ? Math.max(...existentes.map(t=>t.orden || 0)) + 10 : 10;
-  exigir(await sb.from("tipos_ubicacion").insert({ valor, etiqueta: etq, color: color || "#57697C", orden }));
-  await refrescarDatosMapa();
+  const fila = { valor, etiqueta: etq, color: color || "#57697C", orden };
+  const icono = iconoUbicacionParaGuardar(icono_svg);
+  if(hayCamposConfigurables()) fila.icono_svg = icono;
+  else if(icono) throw new ErrorValidacion({ icono_svg: "Para guardar el ícono de un tipo de ubicación hace falta la migración 012." });
+  exigir(await sb.from("tipos_ubicacion").insert(fila));
+  await recargarTiposUbicacion();
   return valor;
+}
+
+// v10: la etiqueta, el color, el ícono y si se ofrece (activo). El valor
+// (la clave) no cambia: lo usan las ubicaciones y el glifo de fábrica.
+export async function editarTipoUbicacion(valor, { etiqueta, color, icono_svg, activo } = {}){
+  const actual = cargarTiposUbicacion().find(t=>t.valor === valor);
+  if(!actual) throw new Error("Ese tipo de ubicación ya no existe. Recarga la página.");
+  const parche = {};
+  if(etiqueta !== undefined){
+    const etq = String(etiqueta ?? "").trim();
+    if(!etq) throw new ErrorValidacion({ etiqueta: "La etiqueta no puede quedar vacía." });
+    if(cargarTiposUbicacion().some(t=>t.valor !== valor && t.etiqueta.trim().toLowerCase() === etq.toLowerCase())) throw new ErrorValidacion({ etiqueta: "Ya hay otro tipo de ubicación con esa etiqueta." });
+    parche.etiqueta = etq;
+  }
+  if(color !== undefined) parche.color = color || "#57697C";
+  if(icono_svg !== undefined){
+    const icono = iconoUbicacionParaGuardar(icono_svg);
+    if(hayCamposConfigurables()) parche.icono_svg = icono;
+    else if(icono) throw new ErrorValidacion({ icono_svg: "Para guardar el ícono de un tipo de ubicación hace falta la migración 012." });
+  }
+  if(activo !== undefined) parche.activo = !!activo;
+  if(!Object.keys(parche).length) return;
+  exigirFilas(await sb.from("tipos_ubicacion").update(parche).eq("valor", valor).select("valor"), "guardó el tipo de ubicación");
+  await recargarTiposUbicacion();
 }
 
 // ---------------------------------------------------------------------------
