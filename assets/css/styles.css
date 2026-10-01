@@ -1473,3 +1473,66 @@ body.inventario-tecnologico-con-mapa-completo{overflow:hidden;}
 .inventario-tecnologico-mapa-mini-icono textarea{flex:1;min-width:0;min-height:52px;font-size:11.5px;}
 .inventario-tecnologico-mapa-mini-vista{flex:none;display:inline-flex;width:34px;height:42px;align-items:flex-start;justify-content:center;border-radius:var(--radius-sm);}
 .inventario-tecnologico-mapa-mini-vista.inventario-tecnologico-mapa-mini-vista-error{outline:2px solid var(--danger);outline-offset:2px;}
+
+/* ---------- v12: filtros del mapa en desplegables (3.3) y «solo esta» (3.5) ----------
+   Un botón por categoría con su cuenta («Redes 2/3 ▾») que abre un panel con
+   casillas, como los filtros de columna de la tabla de activos. Las casillas
+   son botones con aria-pressed; el «solo» aparece con el mouse encima o con
+   el foco (en pantallas táctiles, siempre). */
+.inventario-tecnologico-mapa-desplegables{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;}
+.inventario-tecnologico-mapa-desplegable{position:relative;display:inline-flex;}
+.inventario-tecnologico-mapa-desplegable[hidden]{display:none;}
+.inventario-tecnologico-mapa-desplegable-btn{
+  display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border-strong);background:var(--surface);
+  color:var(--ink);border-radius:20px;padding:4px 10px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;
+}
+.inventario-tecnologico-mapa-desplegable-btn:hover{background:var(--surface-2);}
+.inventario-tecnologico-mapa-desplegable-btn:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+.inventario-tecnologico-mapa-desplegable-btn[aria-expanded="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink);}
+.inventario-tecnologico-mapa-desplegable-filtrado{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);}
+.inventario-tecnologico-mapa-desplegable-filtrado .inventario-tecnologico-mapa-chip-n{color:var(--accent-ink);font-weight:700;}
+.inventario-tecnologico-mapa-desplegable-flecha{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;opacity:0.7;}
+.inventario-tecnologico-mapa-desplegable-btn[aria-expanded="true"] .inventario-tecnologico-mapa-desplegable-flecha{transform:rotate(180deg);}
+.inventario-tecnologico-mapa-desplegable-panel{position:absolute;top:calc(100% + 4px);left:0;z-index:40;width:max-content;min-width:240px;max-width:min(330px, calc(100vw - 24px));}
+.inventario-tecnologico-mapa-desplegable-panel[hidden]{display:none;}
+.inventario-tecnologico-mapa-opciones{display:flex;flex-direction:column;gap:1px;max-height:min(320px, 50vh);overflow-y:auto;}
+.inventario-tecnologico-mapa-opcion{display:flex;align-items:center;gap:4px;border-radius:4px;padding-right:4px;}
+.inventario-tecnologico-mapa-opcion:hover{background:var(--surface-2);}
+.inventario-tecnologico-mapa-opcion-btn{
+  flex:1;min-width:0;display:flex;align-items:center;gap:7px;background:none;border:none;border-radius:4px;
+  padding:5px 6px;font:inherit;font-size:12.5px;color:var(--ink);text-align:left;cursor:pointer;
+}
+.inventario-tecnologico-mapa-opcion-btn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+.inventario-tecnologico-mapa-opcion-etiqueta{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.inventario-tecnologico-mapa-opcion-especial .inventario-tecnologico-mapa-opcion-etiqueta{font-style:italic;}
+.inventario-tecnologico-mapa-opcion-casilla{position:relative;flex:none;width:15px;height:15px;border:1.5px solid var(--border-strong);border-radius:3px;background:var(--surface);}
+.inventario-tecnologico-mapa-opcion-btn[aria-pressed="true"] .inventario-tecnologico-mapa-opcion-casilla{background:var(--accent);border-color:var(--accent);}
+.inventario-tecnologico-mapa-opcion-btn[aria-pressed="true"] .inventario-tecnologico-mapa-opcion-casilla::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);}
+.inventario-tecnologico-mapa-opcion-btn[aria-pressed="false"] .inventario-tecnologico-mapa-opcion-etiqueta{color:var(--ink-muted);}
+.inventario-tecnologico-mapa-opcion-btn[aria-pressed="false"] .inventario-tecnologico-mapa-chip-punto{background:transparent;box-shadow:inset 0 0 0 2px var(--chip-color);}
+.inventario-tecnologico-mapa-opcion-btn[aria-pressed="false"] .inventario-tecnologico-mapa-chip-linea{opacity:0.45;}
+/* «solo»: el mismo botón en el mapa, en la tabla de activos y en el selector de servidor. */
+.inventario-tecnologico-mapa-solo,.inventario-tecnologico-filtro-solo{
+  flex:none;font:inherit;font-size:10.5px;font-weight:600;line-height:1.2;padding:2px 7px;border:1px solid var(--accent-soft-2);border-radius:10px;
+  background:var(--surface);color:var(--accent-ink);cursor:pointer;opacity:0;pointer-events:none;
+}
+.inventario-tecnologico-mapa-opcion:hover .inventario-tecnologico-mapa-solo,
+.inventario-tecnologico-mapa-opcion:focus-within .inventario-tecnologico-mapa-solo,
+.inventario-tecnologico-filtro-fila:hover .inventario-tecnologico-filtro-solo,
+.inventario-tecnologico-filtro-fila:focus-within .inventario-tecnologico-filtro-solo{opacity:1;pointer-events:auto;}
+.inventario-tecnologico-mapa-solo:hover,.inventario-tecnologico-filtro-solo:hover{background:var(--accent-soft);}
+.inventario-tecnologico-mapa-solo:focus-visible,.inventario-tecnologico-filtro-solo:focus-visible{outline:none;opacity:1;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft);}
+@media (hover:none){
+  .inventario-tecnologico-mapa-solo,.inventario-tecnologico-filtro-solo{opacity:1;pointer-events:auto;}
+}
+.inventario-tecnologico-filtro-fila{display:flex;align-items:center;gap:4px;border-radius:4px;}
+.inventario-tecnologico-filtro-fila > .inventario-tecnologico-filter-opt{flex:1;min-width:0;}
+.inventario-tecnologico-filtro-fila:hover{background:var(--surface-2);}
+.inventario-tecnologico-filtro-fila:hover > .inventario-tecnologico-filter-opt{background:transparent;}
+.inventario-tecnologico-mapa-desplegable-extra{display:flex;margin-top:6px;padding:6px 6px 0;border-top:1px solid var(--border);}
+.inventario-tecnologico-mapa-chip-color-red[hidden]{display:none;}
+.inventario-tecnologico-mapa-quitar-filtros{white-space:nowrap;}
+.inventario-tecnologico-mapa-quitar-filtros:disabled{opacity:0.45;cursor:default;}
+@media (max-width:720px){
+  .inventario-tecnologico-mapa-desplegable-panel{min-width:min(240px, calc(100vw - 24px));}
+}

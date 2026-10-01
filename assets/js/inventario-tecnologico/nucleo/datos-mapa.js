@@ -54,6 +54,7 @@ export function crearEstadoMapa(){
       lineas: { backbone: true, p2mp: true, cable: true, respaldos: false }, // cable = cable y fibra entre sitios (008)
       rolesOcultos: [],   // raiz / backbone / distribucion / cliente
       redesOcultas: [],   // ids de redes (texto) y "sin" = equipos sin red (007)
+      tiposEquipoOcultos: [], // v12: valores de tipos_equipo_red, "-sin-tipo" y "-sin-equipos" (ubicaciones vacías)
       colorPorRed: false, // colorear las líneas con el color de la red del cliente
       estadosOcultos: [], // servicio / respaldo / sin_conexion / caido (solo en simulación)
     },

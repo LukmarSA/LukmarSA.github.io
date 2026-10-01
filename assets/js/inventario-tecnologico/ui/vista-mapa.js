@@ -27,7 +27,9 @@ import { state } from "../nucleo/estado.js";
 import { fmtCoordenadas, fmtDistancia } from "../nucleo/geo.js";
 import { esc, fmtTag } from "../nucleo/helpers.js";
 import { buscarEnMapa, infoTipoUbicacion, resumenMapa, traducirErrorMapa, ubicacionesVisibles } from "../nucleo/mapa-logica.js";
-import { ESTADOS_SIMULACION, GROSOR_LINEAS, ROLES, UMBRAL_AGRUPAR_CLIENTES, caminoARaiz, claveRed, conGrosor, contarRoles, equipoVisible, estadoPorUbicacion, normalizarGrosor, planDeAgrupados, planDeLineas, redEfectivaDe, resumenRed, textoGrosor } from "../nucleo/mapa-jerarquia.js";
+import { ESTADOS_SIMULACION, GROSOR_LINEAS, ROLES, TIPO_EQUIPO_SIN, UBICACION_SIN_EQUIPOS, UMBRAL_AGRUPAR_CLIENTES, caminoARaiz, claveRed, conGrosor, contarRoles, equipoVisible, estadoPorUbicacion, grosorDeLinea, normalizarGrosor, planDeAgrupados, planDeLineas, redEfectivaDe, resumenRed, textoGrosor, tituloSinRed, ubicacionVisiblePorEquipos, ubicacionesSinEquipos } from "../nucleo/mapa-jerarquia.js";
+import { LINEAS_POR_DEFECTO, cuantosFiltros, filtrosLimpios, lineasConVisibles, ocultosSoloEsta, opcionesTiposEquipo, resumenDesplegable } from "../nucleo/filtros-mapa.js";
+import { AYUDA_SOLO, esMayusEnter, tituloSolo } from "../nucleo/solo-esta.js";
 import { esAdmin, puede } from "../nucleo/permisos.js";
 import { editarPiscina, eliminarEquipo, eliminarRespaldo, eliminarUbicacion, establecerUbicacionActiva, guardarAjustePlano, quitarActivoDeUbicacion } from "../negocio/operaciones-mapa.js";
 import { urlFoto } from "../negocio/operaciones.js";
@@ -46,6 +48,7 @@ const P = "inventario-tecnologico-";
 let vista = null;     // { L, mapa, capaLineas, capaMarcadores, capaAgrupados, marcadores, main, colocando, alTeclear, ... }
 let generacion = 0;   // invalida cargas en curso si se sale de la pestaña antes de que terminen
 let alClicFueraBuscador = null;
+let alClicFueraFiltros = null; // v12: cierra el desplegable de filtros abierto
 let ubicacionEnPanel = null; // para conservar el scroll del panel solo si sigue mostrando la misma ubicación
 let grosorLineas = GROSOR_LINEAS.porDefecto; // factor del grosor de las líneas (v9), recordado en el navegador
 
@@ -95,6 +98,7 @@ export function destruirVistaMapa(){
   generacion++;
   ubicacionEnPanel = null;
   if(alClicFueraBuscador){ document.removeEventListener("click", alClicFueraBuscador); alClicFueraBuscador = null; }
+  if(alClicFueraFiltros){ document.removeEventListener("click", alClicFueraFiltros); alClicFueraFiltros = null; }
   if(!vista) return;
   if(vista.ajustePlano){ try{ vista.ajustePlano.terminar(); }catch(e){ /* el mapa ya se está desarmando */ } }
   if(vista.edicionPiscina){ try{ vista.edicionPiscina.terminar(); }catch(e){ /* el mapa ya se está desarmando */ } }
@@ -139,34 +143,25 @@ function htmlEsqueleto(){
         <details class="${P}mapa-filtros-det" id="${P}mapa-filtros-det" open>
         <summary class="${P}mapa-filtros-resumen">Filtros y capas <span class="${P}mapa-chip-n" id="${P}mapa-filtros-cuenta"></span></summary>
         <div class="${P}mapa-filtros" role="toolbar" aria-label="Capas y filtros del mapa">
-          <div class="${P}mapa-filtro-grupo" role="group" aria-label="Ubicaciones">
-            <span class="${P}mapa-filtro-titulo">Ubicaciones</span>
-            <div class="${P}mapa-chips" id="${P}mapa-chips"></div>
-            <label class="${P}mapa-check"><input type="checkbox" id="${P}mapa-ver-archivadas"> Archivadas</label>
+          <div class="${P}mapa-desplegables">
+            ${htmlDesplegable("ubicaciones", "Ubicaciones", { ayuda: "Tipos de ubicación que se ven en el mapa", extra: `<label class="${P}mapa-check ${P}mapa-desplegable-extra"><input type="checkbox" id="${P}mapa-ver-archivadas"> Ver también las archivadas</label>` })}
+            ${htmlDesplegable("lineas", "Líneas", { ayuda: "Clases de línea que se dibujan" })}
+            ${htmlDesplegable("roles", "Equipos", { ayuda: "Equipos por su papel en la red: raíz, backbone, distribución o cliente" })}
+            ${htmlDesplegable("redes", "Redes", { oculto: true, idWrap: `${P}mapa-grupo-redes`, ayuda: "Redes de la finca" })}
+            ${htmlDesplegable("tiposEquipo", "Tipos de equipo", { oculto: true, ayuda: "Router, PtP, Switch…: las torres sin los tipos elegidos se ocultan" })}
           </div>
-          <div class="${P}mapa-filtro-grupo" role="group" aria-label="Líneas">
-            <span class="${P}mapa-filtro-titulo">Líneas</span>
-            <div class="${P}mapa-chips" id="${P}mapa-chips-lineas"></div>
-            <div class="${P}mapa-grosor" title="Grosor de todas las líneas de conexión (se recuerda en este navegador)">
-              <label for="${P}mapa-grosor">Grosor</label>
-              <input type="range" id="${P}mapa-grosor" min="${GROSOR_LINEAS.min}" max="${GROSOR_LINEAS.max}" step="${GROSOR_LINEAS.paso}" value="${GROSOR_LINEAS.porDefecto}">
-              <output id="${P}mapa-grosor-valor" for="${P}mapa-grosor">${textoGrosor(GROSOR_LINEAS.porDefecto)}</output>
-              <button type="button" class="${P}btn ${P}btn-sm ${P}btn-ghost" id="${P}mapa-grosor-normal" hidden title="Volver al grosor normal">Normal</button>
-            </div>
-          </div>
-          <div class="${P}mapa-filtro-grupo" role="group" aria-label="Equipos por tipo">
-            <span class="${P}mapa-filtro-titulo">Equipos</span>
-            <div class="${P}mapa-chips" id="${P}mapa-chips-roles"></div>
-          </div>
-          <div class="${P}mapa-filtro-grupo" role="group" aria-label="Redes" id="${P}mapa-grupo-redes" hidden>
-            <span class="${P}mapa-filtro-titulo">Redes</span>
-            <div class="${P}mapa-chips" id="${P}mapa-chips-redes"></div>
-            <button type="button" class="${P}mapa-chip ${P}mapa-chip-color-red" id="${P}mapa-color-red" data-color-red="1" aria-pressed="false" title="Pintar cada línea con el color de la red de su equipo">Colorear líneas por red</button>
-          </div>
+          <button type="button" class="${P}btn ${P}btn-sm ${P}btn-ghost ${P}mapa-quitar-filtros" id="${P}mapa-quitar-filtros" disabled title="Volver a ver todo: tipos, líneas, equipos, redes y archivadas">✕ Quitar filtros</button>
+          <button type="button" class="${P}mapa-chip ${P}mapa-chip-color-red" id="${P}mapa-color-red" data-color-red="1" aria-pressed="false" hidden title="Pintar cada línea con el color de la red de su equipo">Colorear líneas por red</button>
           <div class="${P}mapa-filtro-grupo ${P}mapa-filtro-simulacion" role="group" aria-label="Simulación de fallas">
             <button type="button" class="${P}mapa-chip ${P}mapa-chip-sim" id="${P}mapa-simulacion" aria-pressed="false" title="Activar o apagar la simulación de fallas (no se guarda nada)">Simulación de fallas</button>
-            <div class="${P}mapa-chips" id="${P}mapa-chips-estados" hidden></div>
+            ${htmlDesplegable("estados", "Estados", { oculto: true, ayuda: "Equipos según su estado en la simulación" })}
             <button type="button" class="${P}btn ${P}btn-sm" id="${P}mapa-sim-restablecer" hidden>Restablecer simulación</button>
+          </div>
+          <div class="${P}mapa-grosor" title="Grosor de todas las líneas de conexión. En 0 no se dibujan, salvo el camino del equipo elegido (se recuerda en este navegador)">
+            <label for="${P}mapa-grosor">Grosor</label>
+            <input type="range" id="${P}mapa-grosor" min="${GROSOR_LINEAS.min}" max="${GROSOR_LINEAS.max}" step="${GROSOR_LINEAS.paso}" value="${GROSOR_LINEAS.porDefecto}">
+            <output id="${P}mapa-grosor-valor" for="${P}mapa-grosor">${textoGrosor(GROSOR_LINEAS.porDefecto)}</output>
+            <button type="button" class="${P}btn ${P}btn-sm ${P}btn-ghost" id="${P}mapa-grosor-normal" hidden title="Volver al grosor normal">Normal</button>
           </div>
         </div>
         </details>
@@ -266,6 +261,8 @@ function crearMapa(L, main){
   vista.alTeclear = e=>{
     if(e.key !== "Escape" || state.vista !== "mapa" || !vista) return;
     if(hayModalAbierto()) return;
+    // v12: un desplegable de filtros abierto se cierra primero (el foco vuelve a su botón).
+    if(cerrarDesplegables({ foco: true })){ e.preventDefault(); e.stopPropagation(); return; }
     if(vista.ajustePlano || vista.edicionPiscina) return; // el Esc lo manejan "Ajustar plano" y el editor de piscinas
     if(vista.mapa.getContainer().querySelector(".leaflet-popup")){ e.preventDefault(); vista.mapa.closePopup(); return; } // primero se cierra la ventanita de una piscina
     if(e.target && e.target.id === `${P}mapa-buscar`) return; // el buscador maneja su propio Esc
@@ -303,11 +300,11 @@ function calcular(){
   const base = new Set(ubicacionesVisibles(m.ubicaciones, f).map(u=>u.id));
   // Una ubicación se oculta por los filtros de equipos solo si TODOS sus
   // equipos quedaron ocultos; la seleccionada y las del camino se ven siempre.
+  // v11 (3.6): una sin equipos de red cuenta como «Sin red».
   const visibleUbicacion = id=>{
     if(id === s.ubicacionId || ubicacionesCamino.has(id)) return true;
     if(!base.has(id)) return false;
-    const equipos = idx.equiposPorUbicacion.get(id) || [];
-    return !equipos.length || equipos.some(e=>visibleEquipo(e.id));
+    return ubicacionVisiblePorEquipos(idx.equiposPorUbicacion.get(id) || [], f, visibleEquipo);
   };
   return { m, idx, red, sim, seleccionId, camino, ubicacionesCamino, ubicacionesClientes, visibleEquipo, visibleUbicacion, expandidos: new Set(m.expandidos), estadoUbicaciones: estadoPorUbicacion(red, sim) };
 }
@@ -362,79 +359,229 @@ function refrescar(){
 // ---------------------------------------------------------------------------
 // Barra de filtros (se repinta con los conteos al día)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Filtros en desplegables (v12, pedido 3.3). Cada categoría es un botón con su
+// cuenta («Redes 2/3 ▾») que abre un panel con casillas, cuántos hay de cada
+// opción, «Todas» y «Ninguna». Las casillas son botones con aria-pressed y el
+// mismo data-* de los chips de antes (data-tipo, data-linea, data-rol,
+// data-red, data-estado y, nuevo, data-tipo-equipo). «Solo esta» (3.5): doble
+// clic, su botón «solo» o Mayús+Enter. Se abre uno a la vez; Esc o un clic
+// afuera lo cierran.
+// ---------------------------------------------------------------------------
+function htmlDesplegable(id, titulo, { oculto = false, ayuda = "", extra = "", idWrap = "" } = {}){
+  return `<div class="${P}mapa-desplegable" data-desplegable="${id}"${idWrap ? ` id="${idWrap}"` : ""}${oculto ? " hidden" : ""}>
+    <button type="button" class="${P}mapa-desplegable-btn" id="${P}mapa-dd-${id}" data-dd-boton="${id}" aria-expanded="false" aria-controls="${P}mapa-dd-${id}-panel"${ayuda ? ` title="${esc(ayuda)}"` : ""}>
+      <span class="${P}mapa-desplegable-titulo">${esc(titulo)}</span><span class="${P}mapa-chip-n" data-dd-cuenta="${id}"></span><span class="${P}mapa-desplegable-flecha" aria-hidden="true"></span>
+    </button>
+    <div class="${P}mapa-desplegable-panel" id="${P}mapa-dd-${id}-panel" role="group" aria-labelledby="${P}mapa-dd-${id}" hidden>
+      <div class="${P}filter-panel-card">
+        <div class="${P}filter-panel-titlebar">${esc(titulo)}</div>
+        <div class="${P}filter-panel-card-inner">
+          <div class="${P}filter-panel-actions">
+            <button type="button" class="${P}btn ${P}btn-sm" data-dd-todas="${id}">Todas</button>
+            <button type="button" class="${P}btn ${P}btn-sm" data-dd-ninguna="${id}">Ninguna</button>
+          </div>
+          <div class="${P}mapa-opciones" data-dd-lista="${id}"></div>
+          ${extra}
+          <div class="${P}filter-panel-hint">${esc(AYUDA_SOLO)}</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// Una opción: la casilla (botón con aria-pressed) y su botón «solo».
+function htmlOpcion(dd, o){
+  return `<div class="${P}mapa-opcion" data-opcion-dd="${dd}" data-opcion-valor="${esc(o.valor)}">`
+    + `<button type="button" class="${P}mapa-opcion-btn${o.especial ? ` ${P}mapa-opcion-especial` : ""}" data-${o.data}="${esc(o.valor)}" aria-pressed="${o.visible}"${o.color ? ` style="--chip-color:${esc(o.color)}"` : ""} title="${esc(o.titulo || "")}">`
+    + `<span class="${P}mapa-opcion-casilla" aria-hidden="true"></span>${o.extra || (o.color ? `<span class="${P}mapa-chip-punto"></span>` : "")}`
+    + `<span class="${P}mapa-opcion-etiqueta">${esc(o.etiqueta)}</span>${o.n !== null && o.n !== undefined ? `<span class="${P}mapa-chip-n">${o.n}</span>` : ""}</button>`
+    + `<button type="button" class="${P}mapa-solo" data-solo-dd="${dd}" data-solo-valor="${esc(o.valor)}" title="${esc(tituloSolo(o.etiqueta))}" aria-label="${esc(`Solo ${o.etiqueta}`)}">solo</button>`
+    + `</div>`;
+}
+
+// Pinta las opciones de un desplegable. Si son las mismas de antes, solo pone
+// al día casillas, cuentas y ayudas (así no se pierde el foco ni se corta un
+// doble clic); si cambiaron, las rearma y devuelve el foco a la misma opción.
+const valoresDesplegable = {}; // id → valores a la vista (para «Todas», «Ninguna» y «solo»)
+function pintarDesplegable(id, opciones, { ocultasPorDefecto = [] } = {}){
+  const lista = document.querySelector(`[data-dd-lista="${id}"]`);
+  if(!lista) return;
+  valoresDesplegable[id] = opciones.map(o=>o.valor);
+  const firma = JSON.stringify(opciones.map(o=>[o.data, o.valor, o.etiqueta, o.color || "", !!o.extra, !!o.especial]));
+  if(lista.dataset.firma === firma){
+    for(const o of opciones){
+      const fila = lista.querySelector(`[data-opcion-valor="${CSS.escape(String(o.valor))}"]`);
+      if(!fila) continue;
+      const b = fila.querySelector(`.${P}mapa-opcion-btn`);
+      b.setAttribute("aria-pressed", String(o.visible));
+      b.title = o.titulo || "";
+      const n = b.querySelector(`.${P}mapa-chip-n`);
+      if(n) n.textContent = o.n;
+    }
+  } else {
+    const activo = document.activeElement && lista.contains(document.activeElement) ? document.activeElement : null;
+    const foco = activo ? { valor: activo.closest("[data-opcion-valor]")?.dataset.opcionValor, solo: activo.classList.contains(`${P}mapa-solo`) } : null;
+    lista.innerHTML = opciones.map(o=>htmlOpcion(id, o)).join("");
+    lista.dataset.firma = firma;
+    if(foco && foco.valor !== undefined){
+      const fila = lista.querySelector(`[data-opcion-valor="${CSS.escape(foco.valor)}"]`);
+      const el = fila && fila.querySelector(foco.solo ? `.${P}mapa-solo` : `.${P}mapa-opcion-btn`);
+      if(el) el.focus({ preventScroll: true });
+    }
+  }
+  const ocultas = opciones.filter(o=>!o.visible).map(o=>o.valor);
+  const r = resumenDesplegable(valoresDesplegable[id], ocultas);
+  const cuenta = document.querySelector(`[data-dd-cuenta="${id}"]`);
+  if(cuenta) cuenta.textContent = r.texto;
+  // Se resalta si está distinto de como arranca (las líneas arrancan sin «Respaldos»).
+  const porDefecto = new Set(ocultasPorDefecto.filter(v=>valoresDesplegable[id].includes(v)));
+  const distinto = ocultas.length !== porDefecto.size || ocultas.some(v=>!porDefecto.has(v));
+  const boton = document.getElementById(`${P}mapa-dd-${id}`);
+  if(boton) boton.classList.toggle(`${P}mapa-desplegable-filtrado`, distinto);
+}
+
+function desplegableAbierto(){
+  const b = document.querySelector(`.${P}mapa-desplegable-btn[aria-expanded="true"]`);
+  return b ? b.dataset.ddBoton : null;
+}
+function abrirDesplegable(id){
+  for(const b of document.querySelectorAll(`.${P}mapa-desplegable-btn`)){
+    const abrir = b.dataset.ddBoton === id && b.getAttribute("aria-expanded") !== "true";
+    b.setAttribute("aria-expanded", String(abrir));
+    const panel = document.getElementById(b.getAttribute("aria-controls"));
+    if(!panel) continue;
+    panel.hidden = !abrir;
+    if(abrir) acomodarPanel(panel);
+  }
+}
+// El panel cuelga de su botón; si se sale de la pantalla (un botón a la
+// derecha, el celular), se corre hacia adentro.
+function acomodarPanel(panel){
+  panel.style.left = "";
+  const ancho = document.documentElement.clientWidth || window.innerWidth;
+  const r = panel.getBoundingClientRect();
+  const margen = 8;
+  let corrimiento = 0;
+  if(r.right > ancho - margen) corrimiento = (ancho - margen) - r.right;
+  if(r.left + corrimiento < margen) corrimiento = margen - r.left;
+  if(corrimiento) panel.style.left = `${Math.round(corrimiento)}px`;
+}
+// Cierra el desplegable abierto (si hay uno). Con foco: si el foco estaba
+// adentro, vuelve a su botón. Devuelve true si cerró algo.
+function cerrarDesplegables({ foco = false } = {}){
+  const id = desplegableAbierto();
+  if(!id) return false;
+  const boton = document.getElementById(`${P}mapa-dd-${id}`);
+  const panel = boton ? document.getElementById(boton.getAttribute("aria-controls")) : null;
+  const adentro = panel && document.activeElement && panel.contains(document.activeElement);
+  if(boton) boton.setAttribute("aria-expanded", "false");
+  if(panel) panel.hidden = true;
+  if(foco && (adentro || document.activeElement === boton) && boton) boton.focus({ preventScroll: true });
+  return true;
+}
+
 function chip({ data, valor, pressed, color = null, etiqueta, n = null, titulo = "", extra = "" }){
   return `<button type="button" class="${P}mapa-chip" data-${data}="${esc(valor)}" aria-pressed="${pressed}"${color ? ` style="--chip-color:${esc(color)}"` : ""} title="${esc(titulo)}">${extra || (color ? `<span class="${P}mapa-chip-punto"></span>` : "")}${esc(etiqueta)}${n !== null ? ` <span class="${P}mapa-chip-n">${n}</span>` : ""}</button>`;
 }
-
 function pintarFiltros(c){
   const m = c.m;
   const f = m.filtros;
-  const cont = document.getElementById(`${P}mapa-chips`);
-  if(!cont) return;
+  if(!document.querySelector(`[data-dd-lista="ubicaciones"]`)) return;
   const usados = new Set(m.ubicaciones.map(u=>u.tipo));
   const tipos = m.tiposUbicacion.filter(t=>t.activo !== false || usados.has(t.valor));
-  cont.innerHTML = tipos.map(t=>{
-    const n = m.ubicaciones.filter(u=>u.tipo === t.valor && (f.verArchivadas || u.activa !== false)).length;
+  pintarDesplegable("ubicaciones", tipos.map(t=>{
     const visible = !f.tiposOcultos.includes(t.valor);
-    return chip({ data: "tipo", valor: t.valor, pressed: visible, color: t.color, etiqueta: t.etiqueta, n, titulo: `${visible ? "Ocultar" : "Mostrar"} ${t.etiqueta}` });
-  }).join("");
+    return { data: "tipo", valor: t.valor, visible, color: t.color, etiqueta: t.etiqueta,
+      n: m.ubicaciones.filter(u=>u.tipo === t.valor && (f.verArchivadas || u.activa !== false)).length,
+      titulo: `${visible ? "Ocultar" : "Mostrar"} ${t.etiqueta}` };
+  }));
   const va = document.getElementById(`${P}mapa-ver-archivadas`);
   if(va) va.checked = f.verArchivadas;
 
   const rr = resumenRed(c.red);
   const nLineas = { backbone: rr.backbone, p2mp: rr.p2mp, cable: rr.cable, respaldos: rr.respaldos };
   // "Cable/fibra" solo aparece con la 008 o si ya hay alguno.
-  document.getElementById(`${P}mapa-chips-lineas`).innerHTML = LINEAS.filter(l=>l.id !== "cable" || hayMedio() || rr.cable).map(l=>chip({
-    data: "linea", valor: l.id, pressed: !!f.lineas[l.id], etiqueta: l.etiqueta, n: nLineas[l.id],
+  pintarDesplegable("lineas", LINEAS.filter(l=>l.id !== "cable" || hayMedio() || rr.cable).map(l=>({
+    data: "linea", valor: l.id, visible: !!f.lineas[l.id], etiqueta: l.etiqueta, n: nLineas[l.id],
     titulo: `${f.lineas[l.id] ? "Ocultar" : "Mostrar"}: ${l.ayuda}`, extra: `<span class="${P}mapa-chip-linea ${P}mapa-chip-linea-${l.id}"></span>`,
-  })).join("");
+  })), { ocultasPorDefecto: Object.keys(LINEAS_POR_DEFECTO).filter(id=>!LINEAS_POR_DEFECTO[id]) });
 
   const nRoles = contarRoles(c.red);
-  document.getElementById(`${P}mapa-chips-roles`).innerHTML = ROLES.map(r=>chip({
-    data: "rol", valor: r.id, pressed: !f.rolesOcultos.includes(r.id), color: r.color, etiqueta: r.etiqueta, n: nRoles[r.id] || 0,
+  pintarDesplegable("roles", ROLES.map(r=>({
+    data: "rol", valor: r.id, visible: !f.rolesOcultos.includes(r.id), color: r.color, etiqueta: r.etiqueta, n: nRoles[r.id] || 0,
     titulo: `${f.rolesOcultos.includes(r.id) ? "Mostrar" : "Ocultar"}: ${r.ayuda}`,
-  })).join("");
+  })));
 
-  // Redes de la finca (007): un chip por red (y "Sin red"), más colorear las líneas.
+  // Ubicaciones sin equipos de red: las oculta «Sin red» (v11, 3.6) y «Sin
+  // equipos» en «Tipos de equipo» (v12, 3.4).
+  const vacias = ubicacionesSinEquipos(m.ubicaciones, c.idx.equiposPorUbicacion, { verArchivadas: f.verArchivadas }).length;
+
+  // Redes de la finca (007): una opción por red (y "Sin red"), más colorear las líneas.
+  const hayRedes = hayRedFinca() && m.redes.length > 0;
   const grupoRedes = document.getElementById(`${P}mapa-grupo-redes`);
-  if(grupoRedes){
-    const hayRedes = hayRedFinca() && m.redes.length > 0;
-    grupoRedes.hidden = !hayRedes;
-    if(hayRedes){
-      const n = new Map();
-      for(const e of m.equipos){ const k = claveRed(e); n.set(k, (n.get(k) || 0) + 1); }
-      const opciones = [...m.redes.map(r=>({ valor: String(r.id), etiqueta: r.nombre, color: r.color })), ...(n.get("sin") ? [{ valor: "sin", etiqueta: "Sin red", color: "#8B9AAA" }] : [])];
-      document.getElementById(`${P}mapa-chips-redes`).innerHTML = opciones.map(o=>{
-        const visible = !f.redesOcultas.includes(o.valor);
-        return chip({ data: "red", valor: o.valor, pressed: visible, color: o.color, etiqueta: o.etiqueta, n: n.get(o.valor) || 0, titulo: `${visible ? "Ocultar" : "Mostrar"} los equipos de «${o.etiqueta}»` });
-      }).join("");
-      document.getElementById(`${P}mapa-color-red`).setAttribute("aria-pressed", String(!!f.colorPorRed));
-    }
-    const leyendaRedes = document.getElementById(`${P}mapa-leyenda-redes`);
-    if(leyendaRedes){
-      leyendaRedes.hidden = !(hayRedes && f.colorPorRed);
-      leyendaRedes.innerHTML = hayRedes && f.colorPorRed ? `<li class="${P}mapa-leyenda-subtitulo">Líneas por red</li>` + m.redes.map(r=>`<li><span class="${P}mapa-leyenda-linea" style="border-top:4px solid ${esc(r.color)}"></span>${esc(r.nombre)}</li>`).join("") : "";
-    }
+  if(grupoRedes) grupoRedes.hidden = !hayRedes;
+  const colorRed = document.getElementById(`${P}mapa-color-red`);
+  if(colorRed){ colorRed.hidden = !hayRedes; colorRed.setAttribute("aria-pressed", String(!!f.colorPorRed)); }
+  if(hayRedes){
+    const n = new Map();
+    for(const e of m.equipos){ const k = claveRed(e); n.set(k, (n.get(k) || 0) + 1); }
+    // «Sin red» aparece si hay equipos sin red o ubicaciones vacías. Su cuenta
+    // sigue siendo la de equipos; la ayuda dice cuántas ubicaciones son.
+    const opciones = [...m.redes.map(r=>({ valor: String(r.id), etiqueta: r.nombre, color: r.color })), ...(n.get("sin") || vacias ? [{ valor: "sin", etiqueta: "Sin red", color: "#8B9AAA", especial: true }] : [])];
+    pintarDesplegable("redes", opciones.map(o=>{
+      const visible = !f.redesOcultas.includes(o.valor);
+      return { ...o, data: "red", visible, n: n.get(o.valor) || 0,
+        titulo: o.valor === "sin" ? tituloSinRed(visible, n.get("sin") || 0, vacias) : `${visible ? "Ocultar" : "Mostrar"} los equipos de «${o.etiqueta}»` };
+    }));
   }
+  const leyendaRedes = document.getElementById(`${P}mapa-leyenda-redes`);
+  if(leyendaRedes){
+    leyendaRedes.hidden = !(hayRedes && f.colorPorRed);
+    leyendaRedes.innerHTML = hayRedes && f.colorPorRed ? `<li class="${P}mapa-leyenda-subtitulo">Líneas por red</li>` + m.redes.map(r=>`<li><span class="${P}mapa-leyenda-linea" style="border-top:4px solid ${esc(r.color)}"></span>${esc(r.nombre)}</li>`).join("") : "";
+  }
+
+  // Tipos de equipo de red (v12, 3.4): con la 007 y si hay equipos o
+  // ubicaciones vacías. Los equipos de los tipos apagados se ocultan, y con
+  // ellos las torres donde no queda ninguno a la vista.
+  const opcionesTipos = hayRedFinca() ? opcionesTiposEquipo(m.tiposEquipo, m.equipos, vacias) : [];
+  const grupoTipos = document.querySelector(`[data-desplegable="tiposEquipo"]`);
+  const hayTipos = opcionesTipos.length > 0 && (m.equipos.length > 0 || vacias > 0);
+  if(grupoTipos) grupoTipos.hidden = !hayTipos;
+  if(hayTipos) pintarDesplegable("tiposEquipo", opcionesTipos.map(o=>{
+    const visible = !f.tiposEquipoOcultos.includes(o.valor);
+    const accion = visible ? "Ocultar" : "Mostrar";
+    const titulo = o.valor === UBICACION_SIN_EQUIPOS ? `${accion} las ubicaciones sin equipos de red (${o.n})`
+      : o.valor === TIPO_EQUIPO_SIN ? `${accion} los equipos sin tipo (${o.n})`
+      : `${accion} los equipos de tipo «${o.etiqueta}» (${o.n})`;
+    return { data: "tipo-equipo", valor: o.valor, visible, etiqueta: o.etiqueta, n: o.n, especial: !!o.especial, titulo };
+  }));
 
   const cuentaFiltros = document.getElementById(`${P}mapa-filtros-cuenta`);
+  const activos = cuantosFiltros(f, { sim: !!c.sim });
   if(cuentaFiltros){
-    const activos = f.tiposOcultos.length + f.rolesOcultos.length + (c.sim ? f.estadosOcultos.length + 1 : 0) + (f.verArchivadas ? 1 : 0)
-      + (f.lineas.backbone ? 0 : 1) + (f.lineas.p2mp ? 0 : 1) + (f.lineas.cable === false ? 1 : 0) + (f.lineas.respaldos ? 1 : 0) + f.redesOcultas.length;
-    cuentaFiltros.textContent = activos ? `${activos} activo${activos === 1 ? "" : "s"}${c.sim ? " · simulación" : ""}` : "";
+    // La simulación cuenta como uno más, como antes.
+    const total = activos + (c.sim ? 1 : 0);
+    cuentaFiltros.textContent = total ? `${total} activo${total === 1 ? "" : "s"}${c.sim ? " · simulación" : ""}` : "";
     if(vista && vista.pantalla) vista.pantalla.filtrosCambio();
   }
+  const quitar = document.getElementById(`${P}mapa-quitar-filtros`);
+  if(quitar) quitar.disabled = !activos;
 
   const botonSim = document.getElementById(`${P}mapa-simulacion`);
-  const estados = document.getElementById(`${P}mapa-chips-estados`);
+  const estados = document.querySelector(`[data-desplegable="estados"]`);
   const restablecer = document.getElementById(`${P}mapa-sim-restablecer`);
   botonSim.setAttribute("aria-pressed", String(!!c.sim));
-  estados.hidden = !c.sim;
+  if(estados) estados.hidden = !c.sim;
+  if(!c.sim && desplegableAbierto() === "estados") cerrarDesplegables();
   restablecer.hidden = !(c.sim && c.sim.caidos.size);
-  estados.innerHTML = c.sim ? ESTADOS_SIMULACION.map(e=>chip({
-    data: "estado", valor: e.id, pressed: !f.estadosOcultos.includes(e.id), color: e.color, etiqueta: e.etiqueta, n: c.sim.cuentas[e.id] || 0,
+  if(c.sim) pintarDesplegable("estados", ESTADOS_SIMULACION.map(e=>({
+    data: "estado", valor: e.id, visible: !f.estadosOcultos.includes(e.id), color: e.color, etiqueta: e.etiqueta, n: c.sim.cuentas[e.id] || 0,
     titulo: `${f.estadosOcultos.includes(e.id) ? "Mostrar" : "Ocultar"} equipos: ${e.etiqueta.toLowerCase()}`,
-  })).join("") : "";
+  })));
+  // Un desplegable que quedó oculto (p. ej. «Tipos de equipo» sin equipos) no queda abierto.
+  const abierto = desplegableAbierto();
+  if(abierto && document.querySelector(`[data-desplegable="${abierto}"]`)?.hidden) cerrarDesplegables();
 }
 
 function pintarAvisoSimulacion(c){
@@ -539,7 +686,11 @@ function pintarLineas(c){
   };
   for(const d of plan){
     // v9: el grosor elegido (ancho y punteado) vale para todas las líneas.
-    let estilo = conGrosor(ESTILOS_LINEA[d.estilo], grosorLineas);
+    // v11: en 0 no se dibujan (ni sus tooltips), salvo el camino resaltado
+    // del equipo elegido, al mínimo visible.
+    const factor = grosorDeLinea(grosorLineas, { enCadena: d.enCadena });
+    if(!factor) continue;
+    let estilo = conGrosor(ESTILOS_LINEA[d.estilo], factor);
     if(colorPorRed && ["backbone", "p2mp", "cable", "fibra"].includes(d.estilo)){ const color = colorDe(d); if(color) estilo = { ...estilo, color }; }
     const puntos = [[d.desde.lat, d.desde.lng], [d.hasta.lat, d.hasta.lng]];
     if(ESTILOS_CON_HALO.has(d.estilo) && !d.atenuada) L.polyline(puntos, { ...HALO, weight: estilo.weight + 4 }).addTo(vista.capaLineas);
@@ -1137,22 +1288,66 @@ function montarBarra(main){
 
   // Toggles: todos editan estadoMapa().filtros y repintan.
   const alternarEnLista = (lista, valor)=>lista.includes(valor) ? lista.filter(x=>x !== valor) : [...lista, valor];
-  main.querySelector(`.${P}mapa-filtros`).addEventListener("click", e=>{
+  // Si la ubicación elegida quedó con su tipo oculto, se suelta.
+  const soltarSiOculta = m=>{
+    const u = m.seleccion.ubicacionId ? m.ubicaciones.find(x=>x.id === m.seleccion.ubicacionId) : null;
+    if(u && m.filtros.tiposOcultos.includes(u.tipo)) m.seleccion = { ubicacionId: null, equipoId: null, activoId: null };
+  };
+  // Lo oculto de cada desplegable: leer y poner (para «Todas», «Ninguna» y «solo»).
+  const ocultosDe = (f, dd)=>{
+    if(dd === "lineas") return (valoresDesplegable.lineas || []).filter(id=>!f.lineas[id]);
+    return { ubicaciones: f.tiposOcultos, roles: f.rolesOcultos, redes: f.redesOcultas, tiposEquipo: f.tiposEquipoOcultos, estados: f.estadosOcultos }[dd] || [];
+  };
+  const ponerOcultos = (m, dd, ocultos)=>{
+    const f = m.filtros;
+    if(dd === "lineas"){
+      const ids = valoresDesplegable.lineas || [];
+      f.lineas = { ...f.lineas, ...lineasConVisibles(ids, ids.filter(id=>!ocultos.includes(id))) };
+    } else if(dd === "ubicaciones"){ f.tiposOcultos = ocultos; soltarSiOculta(m); }
+    else if(dd === "roles") f.rolesOcultos = ocultos;
+    else if(dd === "redes") f.redesOcultas = ocultos;
+    else if(dd === "tiposEquipo") f.tiposEquipoOcultos = ocultos;
+    else if(dd === "estados") f.estadosOcultos = ocultos;
+    else return false;
+    return true;
+  };
+  // «Solo esta» (3.5): queda solo esa opción; si ya era la única, vuelven todas.
+  const soloEstaOpcion = (dd, valor)=>{
+    const m = estadoMapa();
+    const valores = valoresDesplegable[dd] || [];
+    if(!valores.includes(valor)) return;
+    if(ponerOcultos(m, dd, ocultosSoloEsta(valores, ocultosDe(m.filtros, dd), valor))) refrescar();
+  };
+  const barraFiltros = main.querySelector(`.${P}mapa-filtros`);
+  barraFiltros.addEventListener("click", e=>{
     const m = estadoMapa();
     const f = m.filtros;
+    const boton = e.target.closest("[data-dd-boton]");
+    if(boton){ abrirDesplegable(boton.dataset.ddBoton); return; }
+    const todas = e.target.closest("[data-dd-todas]");
+    const ninguna = e.target.closest("[data-dd-ninguna]");
+    if(todas || ninguna){
+      const dd = (todas || ninguna).dataset[todas ? "ddTodas" : "ddNinguna"];
+      if(ponerOcultos(m, dd, todas ? [] : [...(valoresDesplegable[dd] || [])])) refrescar();
+      return;
+    }
+    const solo = e.target.closest("[data-solo-dd]");
+    if(solo){ soloEstaOpcion(solo.dataset.soloDd, solo.dataset.soloValor); return; }
     const t = e.target.closest("[data-tipo]");
     const l = e.target.closest("[data-linea]");
     const r = e.target.closest("[data-rol]");
     const s = e.target.closest("[data-estado]");
     const rd = e.target.closest("[data-red]");
+    const te = e.target.closest("[data-tipo-equipo]");
     if(rd){
       f.redesOcultas = alternarEnLista(f.redesOcultas, rd.dataset.red);
+    } else if(te){
+      f.tiposEquipoOcultos = alternarEnLista(f.tiposEquipoOcultos, te.dataset.tipoEquipo);
     } else if(e.target.closest("[data-color-red]")){
       f.colorPorRed = !f.colorPorRed;
     } else if(t){
       f.tiposOcultos = alternarEnLista(f.tiposOcultos, t.dataset.tipo);
-      const u = m.seleccion.ubicacionId ? m.ubicaciones.find(x=>x.id === m.seleccion.ubicacionId) : null;
-      if(u && f.tiposOcultos.includes(u.tipo)) m.seleccion = { ubicacionId: null, equipoId: null, activoId: null };
+      soltarSiOculta(m);
     } else if(l){
       f.lineas = { ...f.lineas, [l.dataset.linea]: !f.lineas[l.dataset.linea] };
     } else if(r){
@@ -1163,9 +1358,37 @@ function montarBarra(main){
       return alternarModoSimulacion();
     } else if(e.target.closest(`#${P}mapa-sim-restablecer`)){
       return restablecerSimulacion();
+    } else if(e.target.closest(`#${P}mapa-quitar-filtros`)){
+      m.filtros = filtrosLimpios(f);
+      soltarSiOculta(m);
     } else return;
     refrescar();
   });
+  // Doble clic en una opción: los dos clics ya la alternaron dos veces (quedó
+  // como estaba); el doble clic fija «solo esta».
+  barraFiltros.addEventListener("dblclick", e=>{
+    const fila = e.target.closest("[data-opcion-dd]");
+    if(!fila || e.target.closest("[data-solo-dd]")) return;
+    e.preventDefault();
+    soloEstaOpcion(fila.dataset.opcionDd, fila.dataset.opcionValor);
+  });
+  // Mayús+Enter sobre una opción: «solo esta» (sin el clic que haría Enter).
+  barraFiltros.addEventListener("keydown", e=>{
+    if(!esMayusEnter(e)) return;
+    const fila = e.target.closest("[data-opcion-dd]");
+    if(!fila) return;
+    e.preventDefault();
+    soloEstaOpcion(fila.dataset.opcionDd, fila.dataset.opcionValor);
+  });
+  // Un clic afuera cierra el desplegable abierto. Se mira el camino del evento
+  // (no e.target.closest): la opción tocada puede haberse rearmado.
+  if(alClicFueraFiltros) document.removeEventListener("click", alClicFueraFiltros);
+  alClicFueraFiltros = e=>{
+    if(!desplegableAbierto()) return;
+    if(e.composedPath().some(n=>n && n.classList && n.classList.contains(`${P}mapa-desplegable`))) return;
+    cerrarDesplegables();
+  };
+  document.addEventListener("click", alClicFueraFiltros);
   main.querySelector(`#${P}mapa-ver-archivadas`).addEventListener("change", e=>{
     const m = estadoMapa();
     m.filtros.verArchivadas = e.target.checked;

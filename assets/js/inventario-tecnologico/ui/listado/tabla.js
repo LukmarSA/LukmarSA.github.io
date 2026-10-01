@@ -10,7 +10,8 @@ import { abrirFormActivo } from "../detalle/form-activo.js";
 import { abrirDetalle } from "../detalle/vista.js";
 import { abrirGestorColumnas, columnasVisiblesOrdenadas, filaEncabezados } from "./columnas.js";
 import { exportarActivosExcel } from "./exportar-excel.js";
-import { actualizarBotonFiltroActivo, actualizarConteosFiltros, actualizarFlechasOrden, estadoInicialFiltros, hayFiltrosActivos, listaOrdenadaFiltrada, marcarCheckboxesPanel, opcionesFiltroCache, recalcularOpcionesFiltro, tramoVigente } from "./filtros.js";
+import { actualizarBotonFiltroActivo, actualizarConteosFiltros, actualizarFlechasOrden, estadoInicialFiltros, hayFiltrosActivos, listaOrdenadaFiltrada, marcarCheckboxesPanel, opcionesFiltroCache, recalcularOpcionesFiltro, seleccionActiva, tramoVigente } from "./filtros.js";
+import { esMayusEnter, soloEsta } from "../../nucleo/solo-esta.js";
 import { abrirHistorialCustodio } from "./historial-custodio.js";
 import { abrirPendientesFirma, listaPendientesFirma } from "./pendientes-firma.js";
 import { CAMPOS_RESUMEN_GLOBAL, abrirModalKpiColumna, calcularResumenColumna, copiarAlPortapapelesTexto, descargarArchivoTexto, resumenACSV, resumenAHTML, resumenATextoWhatsApp } from "./resumen.js";
@@ -184,7 +185,7 @@ document.addEventListener("input", (e)=>{
   const q = buscador.value.trim().toLowerCase();
   document.querySelectorAll(`.inventario-tecnologico-filter-opt[data-filtro-opt-campo="${campo}"]`).forEach(opt=>{
     const texto = opt.querySelector(".inventario-tecnologico-filter-opt-label").textContent.toLowerCase();
-    opt.style.display = texto.includes(q) ? "" : "none";
+    (opt.closest(".inventario-tecnologico-filtro-fila") || opt).style.display = texto.includes(q) ? "" : "none";
   });
 });
 
@@ -199,16 +200,35 @@ document.addEventListener("change", (e)=>{
   actualizarTablaYResumen();
 });
 
-document.addEventListener("dblclick", (e)=>{
-  const opt = e.target.closest(".inventario-tecnologico-filter-opt");
-  if(!opt) return;
-  e.preventDefault();
-  const campo = opt.dataset.filtroOptCampo;
-  const valor = opt.dataset.filtroOptValor;
-  state.filtros[campo] = new Set([valor]);
+// «Solo esta» (v12, 3.5): doble clic en una opción, su botón «solo» o
+// Mayús+Enter en su casilla. Si ya era la única, vuelven todas.
+function soloEstaFiltro(campo, valor){
+  if(!campo || !(campo in state.filtros)) return;
+  state.filtros[campo] = new Set(soloEsta(opcionesFiltroCache[campo] || [], seleccionActiva(campo), valor));
   marcarCheckboxesPanel(campo, state.filtros[campo]);
   actualizarBotonFiltroActivo(campo);
   actualizarTablaYResumen();
+}
+document.addEventListener("dblclick", (e)=>{
+  if(e.target.closest("[data-filtro-solo-campo]")) return;
+  const opt = e.target.closest(".inventario-tecnologico-filter-opt[data-filtro-opt-campo]");
+  if(!opt) return;
+  e.preventDefault();
+  soloEstaFiltro(opt.dataset.filtroOptCampo, opt.dataset.filtroOptValor);
+});
+document.addEventListener("click", (e)=>{
+  const solo = e.target.closest("[data-filtro-solo-campo]");
+  if(!solo) return;
+  e.preventDefault();
+  soloEstaFiltro(solo.dataset.filtroSoloCampo, solo.dataset.filtroSoloValor);
+});
+document.addEventListener("keydown", (e)=>{
+  if(!esMayusEnter(e)) return;
+  const cb = e.target.closest && e.target.closest("input[data-filtro-campo], [data-filtro-solo-campo]");
+  if(!cb) return;
+  e.preventDefault();
+  if(cb.matches("[data-filtro-solo-campo]")) soloEstaFiltro(cb.dataset.filtroSoloCampo, cb.dataset.filtroSoloValor);
+  else soloEstaFiltro(cb.dataset.filtroCampo, cb.dataset.filtroValor);
 });
 
 export function celdaInline(colLetra, fila, styleIdx, valor){

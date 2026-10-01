@@ -280,6 +280,33 @@ const SEL = {
   simular: id=>`#inventario-tecnologico-mapa-panel [data-accion="simular-caida"][data-id="${id}"]`,
 };
 
+// v12 (3.3): las opciones de los filtros del mapa viven en desplegables. Se
+// abre el que corresponde (si está cerrado), se hace clic en la opción y se
+// vuelve a cerrar, para que el panel no tape el mapa en el clic siguiente.
+async function abrirFiltroDe(page, selector){
+  const el = page.locator(selector).first();
+  if(await el.isVisible()) return el;
+  const id = await el.evaluate(n=>n.closest("[data-desplegable]")?.dataset.desplegable || null);
+  if(id){
+    await page.click(`#inventario-tecnologico-mapa-dd-${id}`);
+    await el.waitFor({ state: "visible", timeout: 3000 });
+  }
+  return el;
+}
+async function cerrarFiltros(page){
+  const abierto = page.locator('.inventario-tecnologico-mapa-desplegable-btn[aria-expanded="true"]');
+  if(await abierto.count()) await abierto.first().click();
+}
+async function clicFiltro(page, selector, { cerrar = true } = {}){
+  await (await abrirFiltroDe(page, selector)).click();
+  if(cerrar) await cerrarFiltros(page);
+}
+async function marcarFiltro(page, selector, marcar = true){
+  const el = await abrirFiltroDe(page, selector);
+  if(marcar) await el.check(); else await el.uncheck();
+  await cerrarFiltros(page);
+}
+
 async function irAlMapa(page){
   await page.click(SEL.tab("mapa"));
   await page.waitForSelector(".leaflet-marker-icon", { timeout: 10000 });
@@ -368,10 +395,13 @@ async function escenarioAdmin(browser, base){
     const g = await texto(page, SEL.agrupado);
     exigir(/AP Sector Norte · 9 clientes/.test(g), "indicador: " + g);
   });
-  await verificar("la barra conserva los filtros de ubicación y suma Líneas, Equipos y Simulación con sus conteos", async ()=>{
+  await verificar("la barra (v12): desplegables Ubicaciones, Líneas y Equipos con su cuenta, Simulación y «Quitar filtros»; las opciones con sus conteos", async ()=>{
     const t = await texto(page, ".inventario-tecnologico-mapa-filtros");
-    for(const re of [/Torre\s*2/, /Backbone\s*2/, /P2MP\s*11/, /Respaldos\s*1/, /Raíz\s*1/, /Distribución\s*2/, /Cliente\s*11/, /Simulación de fallas/]) exigir(re.test(t), `falta ${re}: ${t.replace(/\s+/g, " ")}`);
+    for(const re of [/Ubicaciones\s*4\/4/, /Líneas\s*2\/3/, /Equipos\s*4\/4/, /Simulación de fallas/, /Quitar filtros/]) exigir(re.test(t), `falta ${re}: ${t.replace(/\s+/g, " ")}`);
+    const todo = await page.locator(".inventario-tecnologico-mapa-filtros").evaluate(n=>n.textContent);
+    for(const re of [/Torre\s*2/, /Backbone\s*2/, /P2MP\s*11/, /Respaldos\s*1/, /Raíz\s*1/, /Distribución\s*2/, /Cliente\s*11/]) exigir(re.test(todo), `falta ${re}: ${todo.replace(/\s+/g, " ")}`);
     exigir(await page.locator(SEL.chip("linea", "respaldos")).getAttribute("aria-pressed") === "false", "Respaldos no arranca apagado");
+    exigir(await page.locator("#inventario-tecnologico-mapa-quitar-filtros").isDisabled(), "«Quitar filtros» habilitado sin filtros");
   });
   await captura(page, "01-red.png");
 
@@ -428,31 +458,31 @@ async function escenarioAdmin(browser, base){
   });
 
   // ---------------- Toggles
-  await page.click(SEL.chip("linea", "p2mp"));
+  await clicFiltro(page, SEL.chip("linea", "p2mp"));
   await verificar("toggle P2MP: oculta las líneas de distribución y deja el backbone", async ()=>{
     await esperarCuenta(page, SEL.linea("p2mp"), 0);
     await esperarCuenta(page, SEL.linea("backbone"), 2);
   });
-  await page.click(SEL.chip("linea", "backbone"));
+  await clicFiltro(page, SEL.chip("linea", "backbone"));
   await verificar("toggle Backbone: sin líneas", async ()=>{ await esperarCuenta(page, SEL.lineas, 0); });
-  await page.click(SEL.chip("linea", "respaldos"));
+  await clicFiltro(page, SEL.chip("linea", "respaldos"));
   await verificar("toggle Respaldos (apagado de fábrica): muestra el respaldo registrado, punteado", async ()=>{
     await esperarCuenta(page, SEL.linea("respaldo"), 1);
     exigir(await page.locator(`${SEL.linea("respaldo")}[data-cliente-id="101"][data-servidor-id="21"]`).count() === 1, "no es Piscina 1 → AP Santa Ana");
   });
-  for(const l of ["respaldos", "backbone", "p2mp"]) await page.click(SEL.chip("linea", l));
+  for(const l of ["respaldos", "backbone", "p2mp"]) await clicFiltro(page, SEL.chip("linea", l));
   await esperarCuenta(page, SEL.lineas, 4);
-  await page.click(SEL.chip("rol", "cliente"));
+  await clicFiltro(page, SEL.chip("rol", "cliente"));
   await verificar("filtro de equipos por tipo: ocultar «Cliente» saca las piscinas y la bodega (solo tienen clientes)", async ()=>{
     await esperarCuenta(page, ".leaflet-marker-icon.inventario-tecnologico-mapa-icono", 3, "marcadores");
     exigir(await cuenta(page, SEL.agrupado) === 1, "el indicador del AP (distribución) debería seguir");
   });
-  await page.click(SEL.chip("rol", "cliente"));
-  await page.click('.inventario-tecnologico-mapa-chip[data-tipo="torre"]');
+  await clicFiltro(page, SEL.chip("rol", "cliente"));
+  await clicFiltro(page, SEL.chip("tipo", "torre"));
   await verificar("el filtro por tipo de ubicación sigue funcionando (sin torres: 11 marcadores)", async ()=>{
     await esperarCuenta(page, ".leaflet-marker-icon.inventario-tecnologico-mapa-icono", 11);
   });
-  await page.click('.inventario-tecnologico-mapa-chip[data-tipo="torre"]');
+  await clicFiltro(page, SEL.chip("tipo", "torre"));
   await esperarCuenta(page, ".leaflet-marker-icon.inventario-tecnologico-mapa-icono", 13);
 
   // ---------------- Simulación de fallas
@@ -505,11 +535,11 @@ async function escenarioAdmin(browser, base){
     await page.waitForFunction(()=>/Caído y sin conectividad/.test(document.getElementById("inventario-tecnologico-mapa-panel")?.innerText || ""));
     exigir(/2 caídos · 0 vía respaldo · 3 sin conectividad/.test(await texto(page, "#inventario-tecnologico-mapa-aviso-sim")), await texto(page, "#inventario-tecnologico-mapa-aviso-sim"));
   });
-  await page.click(SEL.chip("estado", "sin_conexion"));
+  await clicFiltro(page, SEL.chip("estado", "sin_conexion"));
   await verificar("filtro por estado de la simulación: ocultar «Sin conectividad» saca la bodega", async ()=>{
     await esperarCuenta(page, SEL.marcador("Bodega Sur"), 0);
   });
-  await page.click(SEL.chip("estado", "sin_conexion"));
+  await clicFiltro(page, SEL.chip("estado", "sin_conexion"));
   await page.click("#inventario-tecnologico-mapa-simulacion");
   await verificar("apagar el modo simulación muestra la red normal sin perder el escenario", async ()=>{
     await esperarCuenta(page, SEL.linea("cortado"), 0);
@@ -777,7 +807,7 @@ async function escenarioCelular(browser, base){
   await verificar("celular: los filtros arrancan plegados (el mapa se ve sin bajar) y se despliegan al tocar", async ()=>{
     exigir(await page.evaluate(()=>document.getElementById("inventario-tecnologico-mapa-filtros-det").open) === false, "arrancaron desplegados");
     await page.click(".inventario-tecnologico-mapa-filtros-resumen");
-    await page.waitForSelector(`${SEL.chip("linea", "backbone")}`, { state: "visible" });
+    await page.waitForSelector("#inventario-tecnologico-mapa-dd-lineas", { state: "visible" });
     await page.click(".inventario-tecnologico-mapa-filtros-resumen");
   });
   await seleccionarEquipoDesdeSuUbicacion(page, 1, 11);
@@ -1362,9 +1392,9 @@ async function escenarioMedio(browser, base){
     exigir(salidas.some(t=>/Bodega Sur/.test(t)), salidas.join(" | "));
   });
   await verificar("008: el toggle «Cable/fibra» oculta la línea de fibra", async ()=>{
-    await page.click(SEL.chip("linea", "cable"));
+    await clicFiltro(page, SEL.chip("linea", "cable"));
     await esperarCuenta(page, SEL.linea("fibra"), 0, "línea de fibra");
-    await page.click(SEL.chip("linea", "cable"));
+    await clicFiltro(page, SEL.chip("linea", "cable"));
     await esperarCuenta(page, SEL.linea("fibra"), 1, "línea de fibra");
   });
   await verificar("008: volver el medio a «Automático» lo manda en NULL (y la línea pasa a ser radioenlace)", async ()=>{
@@ -1483,11 +1513,11 @@ async function escenarioRedes(browser, base){
   });
   await verificar("redes: ocultar «Sin red» esconde sus equipos (y las ubicaciones que quedan vacías)", async ()=>{
     const antes = await cuenta(page, ".leaflet-marker-icon[data-ubicacion-id]");
-    await page.click('.inventario-tecnologico-mapa-filtros [data-red="sin"]');
+    await clicFiltro(page, SEL.chip("red", "sin"));
     await page.waitForFunction(n=>document.querySelectorAll(".leaflet-marker-icon[data-ubicacion-id]").length === n, antes - 10, { timeout: 4000 });
     exigir(await page.getAttribute('.inventario-tecnologico-mapa-filtros [data-red="sin"]', "aria-pressed") === "false", "el chip no quedó apagado");
     exigir(/1 activo/.test(await texto(page, "#inventario-tecnologico-mapa-filtros-cuenta")), "el contador de filtros no lo cuenta");
-    await page.click('.inventario-tecnologico-mapa-filtros [data-red="sin"]');
+    await clicFiltro(page, SEL.chip("red", "sin"));
     await page.waitForFunction(n=>document.querySelectorAll(".leaflet-marker-icon[data-ubicacion-id]").length === n, antes, { timeout: 4000 });
   });
   await verificar("redes: «Colorear líneas por red» pinta cada línea con el color de su red (y la leyenda lo explica)", async ()=>{
@@ -1750,6 +1780,25 @@ async function escenarioServidor(browser, base){
     exigir((await opcionesVisibles(page)).length > 5, "no volvieron todos");
     exigir(await page.locator(`${SERV}-panel [data-faceta-limpiar]`).isHidden(), "«Quitar filtros» sigue a la vista");
   });
+  await verificar("selector (v12, 3.5): «solo», Mayús+Enter y doble clic en la única devuelven todos", async ()=>{
+    await page.click(`${SERV}-panel [data-faceta="ubicacion"] > summary`);
+    const total = (await opcionesVisibles(page)).length;
+    const opDC = `${SERV}-panel [data-faceta-opt="ubicacion"][data-valor="5"]`;
+    await page.dblclick(opDC);
+    exigir(JSON.stringify(await opcionesVisibles(page)) === '["a:4"]', JSON.stringify(await opcionesVisibles(page)));
+    await page.dblclick(opDC);
+    exigir((await opcionesVisibles(page)).length === total, "el doble clic en la única no devolvió todos");
+    exigir(/Doble clic, «solo» o Mayús\+Enter/.test(await texto(page, `${SERV}-panel [data-faceta="ubicacion"] .inventario-tecnologico-filter-panel-hint`)), "ayuda");
+    await page.hover(`${SERV}-panel .inventario-tecnologico-filtro-fila:has([data-faceta-opt="ubicacion"][data-valor="5"])`);
+    await page.click(`${SERV}-panel [data-faceta-solo="ubicacion"][data-valor="5"]`);
+    exigir(JSON.stringify(await opcionesVisibles(page)) === '["a:4"]', "«solo»: " + JSON.stringify(await opcionesVisibles(page)));
+    await page.focus(`${SERV}-panel input[data-faceta-casilla="ubicacion"][value="5"]`);
+    await page.keyboard.press("Shift+Enter");
+    exigir((await opcionesVisibles(page)).length === total, "Mayús+Enter en la única no devolvió todos");
+    exigir(await page.isChecked(`${SERV}-panel input[data-faceta-casilla="ubicacion"][value="5"]`), "Mayús+Enter alternó la casilla");
+    exigir(!(await page.locator(`${SERV}-panel`).isHidden()), "el panel se cerró");
+    await page.click(`${SERV}-panel [data-faceta="ubicacion"] > summary`);
+  });
   await verificar("selector: filtro de origen (equipos de red / activos del inventario)", async ()=>{
     await page.click(`${SERV}-panel [data-faceta="ubicacion"] > summary`);
     await page.click(`${SERV}-panel [data-faceta="origen"] > summary`);
@@ -1991,10 +2040,10 @@ async function escenarioHerencia(browser, base){
   });
   await verificar("011: ocultar una red oculta lo que la hereda, pero no la red aparte que cuelga de ella", async ()=>{
     exigir(await cuenta(page, 'path.inventario-tecnologico-mapa-linea[data-cliente-id="20"]') === 1, "falta la línea de Santa Ana");
-    await page.click('.inventario-tecnologico-mapa-filtros [data-red="1"]');
+    await clicFiltro(page, SEL.chip("red", "1"));
     await page.waitForFunction(()=>!document.querySelector('path.inventario-tecnologico-mapa-linea[data-cliente-id="20"]'), null, { timeout: 4000 });
     exigir(await cuenta(page, 'path.inventario-tecnologico-mapa-linea[data-cliente-id="32"]') === 1, "la red aparte también se ocultó");
-    await page.click('.inventario-tecnologico-mapa-filtros [data-red="1"]');
+    await clicFiltro(page, SEL.chip("red", "1"));
     await page.waitForSelector('path.inventario-tecnologico-mapa-linea[data-cliente-id="20"]');
   });
   await verificar("011: al cambiar el servidor en el formulario, cambia la red que se hereda", async ()=>{
@@ -2977,13 +3026,411 @@ async function escenarioSin012(browser, base){
   await context.close();
 }
 
+// ------------------------------------------------------------------ v11 (3.6): ubicaciones sin equipos de red
+// Una oficina con un activo pero sin equipos, un comedor vacío y una bodega
+// vacía archivada. Con red007, los 9 CPE y el SM Bodega no tienen red.
+const UBIC_VACIAS = [
+  { id:60, nombre:"Oficina Vacía", tipo:"oficina", lat:-2.1950, lng:-79.8800, direccion:null, notas:null, fotos:[], activa:true },
+  { id:61, nombre:"Comedor", tipo:"otro", lat:-2.2000, lng:-79.8850, direccion:null, notas:null, fotos:[], activa:true },
+  { id:62, nombre:"Bodega Vieja", tipo:"bodega", lat:-2.2050, lng:-79.8900, direccion:null, notas:null, fotos:[], activa:false },
+];
+function fixtureVacias({ red007 = true, todasConRed = false } = {}){
+  const fx = fixture({ red007 });
+  fx.tablas.ubicaciones.push(...UBIC_VACIAS.map(u=>({ ...u })));
+  fx.tablas.historial_ubicacion.push({ id:1003, activo_id:3, ubicacion_id:60, desde:"2026-09-20", hasta:null, notas:null });
+  if(todasConRed) for(const e of fx.tablas.equipos_radioenlace) if(e.red_id === null || e.red_id === undefined) e.red_id = 1;
+  return fx;
+}
+const MARCADORES = ".leaflet-marker-icon[data-ubicacion-id]";
+const CHIP_SIN_RED = '.inventario-tecnologico-mapa-filtros [data-red="sin"]';
+const hayMarcador = (page, id)=>page.locator(`.leaflet-marker-icon[data-ubicacion-id="${id}"]`).count();
+const esperarMarcadores = (page, n)=>page.waitForFunction(n=>document.querySelectorAll(".leaflet-marker-icon[data-ubicacion-id]").length === n, n, { timeout: 4000 });
+async function escenarioVacias(browser, base){
+  {
+    const { context, page, errores } = await abrirApp(browser, base, fixtureVacias());
+    await irAlMapa(page);
+    await verificar("3.6: con «Sin red» encendido se ven las ubicaciones sin equipos de red (la oficina cuenta su activo; la archivada no)", async ()=>{
+      exigir(await hayMarcador(page, 60) === 1 && await hayMarcador(page, 61) === 1, "no se ven");
+      exigir(await hayMarcador(page, 62) === 0, "la archivada se ve");
+      exigir(await texto(page, '.leaflet-marker-icon[data-ubicacion-id="60"] .inventario-tecnologico-mapa-pin-cantidad') === "1", "la oficina no cuenta su activo");
+    });
+    await verificar("3.6: «Sin red» cuenta sus equipos y su ayuda dice cuántas ubicaciones vacías oculta", async ()=>{
+      exigir(await texto(page, `${CHIP_SIN_RED} .inventario-tecnologico-mapa-chip-n`) === "10", "cuenta: " + await texto(page, `${CHIP_SIN_RED} .inventario-tecnologico-mapa-chip-n`));
+      const t = await page.getAttribute(CHIP_SIN_RED, "title");
+      exigir(t === "Ocultar los 10 equipos sin red y las 2 ubicaciones sin equipos de red", t);
+    });
+    await verificar("3.6: apagar «Sin red» oculta también las ubicaciones sin equipos de red, en el mapa y en la lista del panel", async ()=>{
+      const antes = await cuenta(page, MARCADORES);
+      await clicFiltro(page, CHIP_SIN_RED);
+      await esperarMarcadores(page, antes - 12);
+      exigir(await hayMarcador(page, 60) === 0 && await hayMarcador(page, 61) === 0, "las vacías siguen");
+      const t = await page.getAttribute(CHIP_SIN_RED, "title");
+      exigir(t === "Mostrar los 10 equipos sin red y las 2 ubicaciones sin equipos de red", t);
+      exigir(await cuenta(page, `${SEL.panel} [data-accion="ver-ubicacion"][data-id="60"]`) === 0, "la lista del panel la sigue mostrando");
+      exigir(/1 activo/.test(await texto(page, "#inventario-tecnologico-mapa-filtros-cuenta")), "el contador de filtros no lo cuenta");
+      await captura(page, "v11-sin-red-vacias.png");
+      await clicFiltro(page, CHIP_SIN_RED);
+      await esperarMarcadores(page, antes);
+    });
+    await verificar("3.6: la ubicación vacía seleccionada se sigue viendo con «Sin red» apagado y se oculta al soltarla", async ()=>{
+      await irAUbicacionDesdePanel(page, 60);
+      await clicFiltro(page, CHIP_SIN_RED);
+      await page.waitForFunction(()=>!document.querySelector('.leaflet-marker-icon[data-ubicacion-id="61"]'), null, { timeout: 4000 });
+      exigir(await hayMarcador(page, 60) === 1, "se ocultó la seleccionada");
+      await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+      await page.waitForFunction(()=>!document.querySelector('.leaflet-marker-icon[data-ubicacion-id="60"]'), null, { timeout: 4000 });
+      await clicFiltro(page, CHIP_SIN_RED);
+      await page.waitForSelector('.leaflet-marker-icon[data-ubicacion-id="60"]', { timeout: 4000 });
+    });
+    await verificar("3.6: con «Archivadas», la ayuda cuenta también la archivada vacía", async ()=>{
+      await marcarFiltro(page, "#inventario-tecnologico-mapa-ver-archivadas", true);
+      await page.waitForSelector('.leaflet-marker-icon[data-ubicacion-id="62"]', { timeout: 4000 });
+      const t = await page.getAttribute(CHIP_SIN_RED, "title");
+      exigir(t === "Ocultar los 10 equipos sin red y las 3 ubicaciones sin equipos de red", t);
+      await marcarFiltro(page, "#inventario-tecnologico-mapa-ver-archivadas", false);
+      await page.waitForFunction(()=>!document.querySelector('.leaflet-marker-icon[data-ubicacion-id="62"]'), null, { timeout: 4000 });
+    });
+    await verificar("3.6: los roles no ocultan las ubicaciones vacías", async ()=>{
+      const roles = await page.locator(".inventario-tecnologico-mapa-filtros [data-rol]").evaluateAll(l=>l.map(c=>c.dataset.rol));
+      exigir(roles.length >= 4, "roles: " + roles.join(","));
+      for(const r of roles) await clicFiltro(page, `.inventario-tecnologico-mapa-filtros [data-rol="${r}"]`);
+      await esperarMarcadores(page, 2);
+      exigir(await hayMarcador(page, 60) === 1 && await hayMarcador(page, 61) === 1, "se ocultaron las vacías");
+      for(const r of roles) await clicFiltro(page, `.inventario-tecnologico-mapa-filtros [data-rol="${r}"]`);
+      await page.waitForFunction(()=>document.querySelectorAll(".leaflet-marker-icon[data-ubicacion-id]").length > 2, null, { timeout: 4000 });
+    });
+    await verificar("sin errores de JavaScript (ubicaciones vacías)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    const { context, page, errores } = await abrirApp(browser, base, fixtureVacias({ todasConRed: true }));
+    await irAlMapa(page);
+    await verificar("3.6: si todos los equipos tienen red, «Sin red» aparece igual por las ubicaciones vacías (con 0 equipos)", async ()=>{
+      exigir(await cuenta(page, CHIP_SIN_RED) === 1, "no aparece");
+      exigir(await texto(page, `${CHIP_SIN_RED} .inventario-tecnologico-mapa-chip-n`) === "0", "cuenta");
+      const t = await page.getAttribute(CHIP_SIN_RED, "title");
+      exigir(t === "Ocultar las 2 ubicaciones sin equipos de red", t);
+      const antes = await cuenta(page, MARCADORES);
+      await clicFiltro(page, CHIP_SIN_RED);
+      await esperarMarcadores(page, antes - 2);
+      exigir(await hayMarcador(page, 60) === 0 && await hayMarcador(page, 61) === 0, "las vacías siguen");
+    });
+    await verificar("sin errores de JavaScript (todas con red)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    const { context, page, errores } = await abrirApp(browser, base, fixtureVacias({ red007: false }));
+    await irAlMapa(page);
+    await verificar("3.6 sin la 007: no hay chips de redes y las ubicaciones vacías se ven", async ()=>{
+      exigir(await page.locator("#inventario-tecnologico-mapa-grupo-redes").isHidden(), "el grupo de redes está a la vista");
+      exigir(await hayMarcador(page, 60) === 1 && await hayMarcador(page, 61) === 1, "no se ven");
+    });
+    await verificar("sin errores de JavaScript (vacías sin la 007)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+}
+
+// ------------------------------------------------------------------ v11 (3.7): grosor de las líneas hasta 0
+const CLAVE_GROSOR = "inventario-tecnologico-mapa-grosor-lineas";
+async function escenarioGrosorCero(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixture());
+  await irAlMapa(page);
+  const GROSOR = "#inventario-tecnologico-mapa-grosor";
+  const sinLineas = ()=>page.waitForFunction(()=>document.querySelectorAll("path.inventario-tecnologico-mapa-linea").length === 0, null, { timeout: 4000 });
+  await verificar("3.7: la barra llega a 0: dice «0× (sin líneas)», no dibuja ninguna línea ni etiqueta, y se recuerda", async ()=>{
+    exigir(await page.getAttribute(GROSOR, "min") === "0", "mínimo: " + await page.getAttribute(GROSOR, "min"));
+    exigir(await cuenta(page, SEL.lineas) > 0, "sin líneas al empezar");
+    await page.locator(GROSOR).fill("0");
+    await sinLineas();
+    exigir(await texto(page, "#inventario-tecnologico-mapa-grosor-valor") === "0× (sin líneas)", "texto");
+    exigir(await page.getAttribute(GROSOR, "aria-valuetext") === "0× (sin líneas)", "aria-valuetext");
+    exigir(await page.evaluate(k=>localStorage.getItem(k), CLAVE_GROSOR) === "0", "no se recordó");
+    exigir(!(await page.locator("#inventario-tecnologico-mapa-grosor-normal").isHidden()), "sin «Normal»");
+    exigir(await cuenta(page, SEL.etiquetas) === 0, "quedaron etiquetas de enlaces");
+    await captura(page, "v11-grosor-cero.png");
+  });
+  await verificar("3.7: en 0, el camino del equipo elegido se dibuja a 0,5× (y nada más); al soltarlo no queda ninguna línea", async ()=>{
+    await seleccionarEquipoDesdeSuUbicacion(page, 1, 11);
+    await page.waitForSelector(SEL.linea("cadena"), { timeout: 4000 });
+    const dibujadas = await page.evaluate(()=>[...document.querySelectorAll("path.inventario-tecnologico-mapa-linea")].map(p=>[(p.getAttribute("class").match(/mapa-linea-(\w+)/) || [])[1], Number(p.getAttribute("stroke-width"))]));
+    // El camino del AP 11 cruza una sola vez de ubicación (Cerro Azul → Oficina Centro).
+    exigir(dibujadas.length === 1 && dibujadas.every(([c, w])=>c === "cadena" && w === 3), JSON.stringify(dibujadas));
+    await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+    await sinLineas();
+  });
+  await verificar("3.7: al volver al mapa sigue en 0, y «Normal» devuelve las líneas a 1×", async ()=>{
+    await page.click(SEL.tab("activos"));
+    await irAlMapa(page);
+    exigir(await page.inputValue(GROSOR) === "0", "no se recordó: " + await page.inputValue(GROSOR));
+    exigir(await cuenta(page, SEL.lineas) === 0, "hay líneas");
+    await page.click("#inventario-tecnologico-mapa-grosor-normal");
+    await page.waitForFunction(()=>Number(document.querySelector('path.inventario-tecnologico-mapa-linea[data-cliente-id="20"]')?.getAttribute("stroke-width")) === 5, null, { timeout: 4000 });
+    exigir(await page.evaluate(k=>localStorage.getItem(k), CLAVE_GROSOR) === "1", "no se guardó el 1×");
+  });
+  await verificar("3.7: un valor guardado vacío o raro vuelve a 1× (no se toma como 0)", async ()=>{
+    for(const raro of ["", "abc"]){
+      await page.evaluate(([k, v])=>localStorage.setItem(k, v), [CLAVE_GROSOR, raro]);
+      await page.reload();
+      await page.waitForSelector(".inventario-tecnologico-topbar", { timeout: 10000 });
+      await irAlMapa(page);
+      exigir(await page.inputValue(GROSOR) === "1", `con «${raro}»: ` + await page.inputValue(GROSOR));
+      exigir(await cuenta(page, SEL.lineas) > 0, `con «${raro}» no hay líneas`);
+    }
+  });
+  await verificar("sin errores de JavaScript (grosor 0)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+}
+
+// ------------------------------------------------------------------ v12 (3.3, 3.4 y 3.5): filtros del mapa en desplegables
+const DD = id=>`#inventario-tecnologico-mapa-dd-${id}`;
+const DD_PANEL = id=>`#inventario-tecnologico-mapa-dd-${id}-panel`;
+const OPCION = (dd, valor)=>`.inventario-tecnologico-mapa-opcion[data-opcion-dd="${dd}"][data-opcion-valor="${valor}"]`;
+const textoBoton = (page, id)=>page.locator(DD(id)).innerText().then(s=>s.replace(/\s+/g, " ").trim());
+async function escenarioFiltros(browser, base){
+  {
+    const { context, page, errores } = await abrirApp(browser, base, fixtureVacias());
+    await irAlMapa(page);
+    await verificar("3.3: la barra tiene un desplegable por categoría con su cuenta; a la vista quedan Colorear, Simulación, Grosor y «Quitar filtros»", async ()=>{
+      const botones = [];
+      for(const id of ["ubicaciones", "lineas", "roles", "redes", "tiposEquipo"]) botones.push(await textoBoton(page, id));
+      exigir(JSON.stringify(botones) === JSON.stringify(["Ubicaciones 4/4", "Líneas 2/3", "Equipos 4/4", "Redes 3/3", "Tipos de equipo 10/10"]), JSON.stringify(botones));
+      exigir(await page.locator(DD("estados")).isHidden(), "«Estados» a la vista sin simulación");
+      for(const sel of ["#inventario-tecnologico-mapa-color-red", "#inventario-tecnologico-mapa-simulacion", "#inventario-tecnologico-mapa-grosor", "#inventario-tecnologico-mapa-quitar-filtros"]) exigir(await page.locator(sel).isVisible(), "no se ve " + sel);
+      exigir(await page.locator("#inventario-tecnologico-mapa-quitar-filtros").isDisabled(), "«Quitar filtros» habilitado sin filtros");
+      exigir(await page.locator(".inventario-tecnologico-mapa-opcion-btn:visible").count() === 0, "hay opciones a la vista con todo cerrado");
+      exigir(!(await page.locator(DD("lineas")).evaluate(b=>b.classList.contains("inventario-tecnologico-mapa-desplegable-filtrado"))), "«Líneas» resaltada de fábrica (Respaldos arranca apagado)");
+      exigir(await cuenta(page, MARCADORES) === 15, "marcadores: " + await cuenta(page, MARCADORES));
+    });
+    await verificar("3.3: el desplegable abre un panel con título, «Todas», «Ninguna», casillas con cuentas y la ayuda; uno a la vez", async ()=>{
+      await page.click(DD("redes"));
+      exigir(await page.getAttribute(DD("redes"), "aria-expanded") === "true" && await page.locator(DD_PANEL("redes")).isVisible(), "no se abrió");
+      const t = await texto(page, DD_PANEL("redes"));
+      for(const re of [/Redes/i, /Todas/, /Ninguna/, /Red Administrativa\s*8/, /Red Cámaras\s*3/, /Sin red\s*10/, /Doble clic, «solo» o Mayús\+Enter/]) exigir(re.test(t), `falta ${re}: ${t.replace(/\s+/g, " ")}`);
+      exigir(await page.getAttribute(OPCION("redes", "1") + " [data-red]", "aria-pressed") === "true", "casilla");
+      const caja = await page.locator(DD_PANEL("redes")).boundingBox();
+      exigir(caja && caja.x >= 0 && caja.x + caja.width <= 1400, "el panel se sale: " + JSON.stringify(caja));
+      await captura(page, "v12-desplegable-redes.png");
+      await page.click(DD("ubicaciones"));
+      exigir(await page.locator(DD_PANEL("redes")).isHidden() && await page.locator(DD_PANEL("ubicaciones")).isVisible(), "quedaron dos abiertos");
+      await page.click("#inventario-tecnologico-mapa-buscar");
+      await page.waitForFunction(()=>document.getElementById("inventario-tecnologico-mapa-dd-ubicaciones-panel").hidden, null, { timeout: 3000 });
+    });
+    await verificar("3.3: «Ninguna» y «Todas»; la cuenta y el resaltado del botón lo siguen", async ()=>{
+      await page.click(DD("redes"));
+      await page.click('[data-dd-ninguna="redes"]');
+      await esperarMarcadores(page, 0);
+      exigir(await textoBoton(page, "redes") === "Redes 0/3", await textoBoton(page, "redes"));
+      exigir(await page.locator(DD("redes")).evaluate(b=>b.classList.contains("inventario-tecnologico-mapa-desplegable-filtrado")), "sin resaltar");
+      exigir(await page.locator(DD_PANEL("redes")).isVisible(), "el panel se cerró al tocar «Ninguna»");
+      await page.click('[data-dd-todas="redes"]');
+      await esperarMarcadores(page, 15);
+      exigir(await textoBoton(page, "redes") === "Redes 3/3", await textoBoton(page, "redes"));
+    });
+    await verificar("3.5: doble clic deja solo esa red; otra vez en la única, vuelven todas", async ()=>{
+      await page.dblclick(OPCION("redes", "1") + " [data-red]");
+      await esperarMarcadores(page, 3);
+      exigir(await textoBoton(page, "redes") === "Redes 1/3", await textoBoton(page, "redes"));
+      exigir(await page.getAttribute(OPCION("redes", "2") + " [data-red]", "aria-pressed") === "false" && await page.getAttribute(OPCION("redes", "sin") + " [data-red]", "aria-pressed") === "false", "las otras siguen marcadas");
+      await page.dblclick(OPCION("redes", "1") + " [data-red]");
+      await esperarMarcadores(page, 15);
+    });
+    await verificar("3.5: el botón «solo» aparece al pasar el mouse y deja solo esa; Mayús+Enter en la única devuelve todas", async ()=>{
+      const solo = OPCION("redes", "2") + " .inventario-tecnologico-mapa-solo";
+      exigir(Number(await page.locator(solo).evaluate(b=>getComputedStyle(b).opacity)) === 0, "«solo» a la vista sin el mouse");
+      await page.hover(OPCION("redes", "2"));
+      await page.waitForFunction(sel=>Number(getComputedStyle(document.querySelector(sel)).opacity) === 1, solo, { timeout: 2000 });
+      await page.click(solo);
+      await esperarMarcadores(page, 1);
+      await page.focus(OPCION("redes", "2") + " [data-red]");
+      await page.keyboard.press("Shift+Enter");
+      await esperarMarcadores(page, 15);
+      exigir(await page.getAttribute(OPCION("redes", "2") + " [data-red]", "aria-pressed") === "true", "Mayús+Enter también alternó la casilla");
+    });
+    await verificar("3.5: con el teclado: Enter abre, Espacio alterna sin perder el foco, Mayús+Enter deja solo esa y Esc cierra y devuelve el foco", async ()=>{
+      await cerrarFiltros(page);
+      await page.focus(DD("ubicaciones"));
+      await page.keyboard.press("Enter");
+      exigir(await page.getAttribute(DD("ubicaciones"), "aria-expanded") === "true", "Enter no lo abrió");
+      await page.focus(OPCION("ubicaciones", "otro") + " [data-tipo]");
+      await page.keyboard.press("Space");
+      await esperarMarcadores(page, 5);
+      exigir(await page.evaluate(()=>document.activeElement && document.activeElement.dataset.tipo) === "otro", "el foco se perdió al alternar");
+      await page.keyboard.press("Shift+Enter");
+      await esperarMarcadores(page, 10);
+      exigir(await textoBoton(page, "ubicaciones") === "Ubicaciones 1/4", await textoBoton(page, "ubicaciones"));
+      await page.keyboard.press("Shift+Enter");
+      await esperarMarcadores(page, 15);
+      await page.keyboard.press("Escape");
+      exigir(await page.locator(DD_PANEL("ubicaciones")).isHidden(), "Esc no lo cerró");
+      exigir(await page.evaluate(()=>document.activeElement.id) === "inventario-tecnologico-mapa-dd-ubicaciones", "el foco no volvió al botón");
+      exigir(await page.locator(SEL.panel).isVisible(), "Esc hizo otra cosa");
+    });
+    await verificar("3.3: «Quitar filtros» deja todo como al empezar (Archivadas apagada, Respaldos apagado) y conserva «Colorear líneas por red»", async ()=>{
+      await page.click("#inventario-tecnologico-mapa-color-red");
+      await clicFiltro(page, SEL.chip("linea", "respaldos"));
+      await clicFiltro(page, SEL.chip("red", "sin"));
+      await clicFiltro(page, SEL.chip("tipo-equipo", "camara"));
+      await marcarFiltro(page, "#inventario-tecnologico-mapa-ver-archivadas", true);
+      exigir(/4 activos/.test(await page.locator("#inventario-tecnologico-mapa-filtros-cuenta").textContent()), "contador: " + await page.locator("#inventario-tecnologico-mapa-filtros-cuenta").textContent());
+      exigir(!(await page.locator("#inventario-tecnologico-mapa-quitar-filtros").isDisabled()), "deshabilitado con filtros");
+      await page.click("#inventario-tecnologico-mapa-quitar-filtros");
+      await esperarMarcadores(page, 15);
+      const botones = [];
+      for(const id of ["ubicaciones", "lineas", "roles", "redes", "tiposEquipo"]) botones.push(await textoBoton(page, id));
+      exigir(JSON.stringify(botones) === JSON.stringify(["Ubicaciones 4/4", "Líneas 2/3", "Equipos 4/4", "Redes 3/3", "Tipos de equipo 10/10"]), JSON.stringify(botones));
+      exigir(!(await page.locator("#inventario-tecnologico-mapa-ver-archivadas").isChecked()), "Archivadas sigue marcada");
+      exigir(await page.getAttribute(SEL.chip("linea", "respaldos"), "aria-pressed") === "false", "Respaldos quedó encendido");
+      exigir(await page.locator("#inventario-tecnologico-mapa-quitar-filtros").isDisabled(), "sigue habilitado");
+      exigir(await page.getAttribute("#inventario-tecnologico-mapa-color-red", "aria-pressed") === "true", "se apagó Colorear");
+      await page.click("#inventario-tecnologico-mapa-color-red");
+    });
+    await verificar("3.4: «Tipos de equipo» con cuentas, «Sin tipo» y «Sin equipos»; solo los AP deja las torres con AP", async ()=>{
+      await page.click(DD("tiposEquipo"));
+      const op = await page.locator(`${DD_PANEL("tiposEquipo")} .inventario-tecnologico-mapa-opcion-btn`).evaluateAll(l=>l.map(b=>b.querySelector(".inventario-tecnologico-mapa-opcion-etiqueta").textContent + ":" + b.querySelector(".inventario-tecnologico-mapa-chip-n").textContent));
+      exigir(JSON.stringify(op) === JSON.stringify(["Router:1", "Switch:1", "Punto a Punto:4", "AP:2", "Estación:10", "Cámara:2", "NVR:0", "Equipo:0", "Sin tipo:1", "Sin equipos:2"]), JSON.stringify(op));
+      await page.dblclick(OPCION("tiposEquipo", "ap") + " [data-tipo-equipo]");
+      await esperarMarcadores(page, 2);
+      exigir(await hayMarcador(page, 1) === 1 && await hayMarcador(page, 2) === 1, "no son Cerro Azul y Santa Ana");
+      exigir(await textoBoton(page, "tiposEquipo") === "Tipos de equipo 1/10", await textoBoton(page, "tiposEquipo"));
+      await cerrarFiltros(page);
+    });
+    await verificar("3.4: al elegir un AP se ve su camino a la raíz completo, aunque pase por torres de otros tipos", async ()=>{
+      await seleccionarEquipoDesdeSuUbicacion(page, 1, 11);
+      await page.waitForSelector('.leaflet-marker-icon[data-ubicacion-id="3"]', { timeout: 4000 });
+      exigir(await cuenta(page, SEL.linea("cadena")) >= 1, "sin el camino resaltado");
+      await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+      await esperarMarcadores(page, 2);
+      // «solo» en la única a la vista: vuelven todas (el botón aparece al pasar el mouse).
+      await abrirFiltroDe(page, OPCION("tiposEquipo", "ap") + " [data-tipo-equipo]");
+      await page.hover(OPCION("tiposEquipo", "ap"));
+      await page.click(OPCION("tiposEquipo", "ap") + " .inventario-tecnologico-mapa-solo");
+      await esperarMarcadores(page, 15);
+      await cerrarFiltros(page);
+    });
+    await verificar("3.4: «Sin equipos» oculta las ubicaciones vacías y «Sin tipo», la bodega (su único equipo no tiene tipo)", async ()=>{
+      await clicFiltro(page, SEL.chip("tipo-equipo", "-sin-equipos"));
+      await esperarMarcadores(page, 13);
+      exigir(await hayMarcador(page, 60) === 0 && await hayMarcador(page, 61) === 0, "las vacías siguen");
+      await clicFiltro(page, SEL.chip("tipo-equipo", "-sin-tipo"));
+      await esperarMarcadores(page, 12);
+      exigir(await hayMarcador(page, 4) === 0, "la bodega sigue");
+      await page.click("#inventario-tecnologico-mapa-quitar-filtros");
+      await esperarMarcadores(page, 15);
+    });
+    await verificar("3.3: con la simulación aparece «Estados» (desplegable) y se va al apagarla", async ()=>{
+      await page.click("#inventario-tecnologico-mapa-simulacion");
+      await page.waitForSelector(DD("estados"), { state: "visible", timeout: 3000 });
+      exigir(await textoBoton(page, "estados") === "Estados 4/4", await textoBoton(page, "estados"));
+      await page.click(DD("estados"));
+      exigir((await texto(page, DD_PANEL("estados"))).includes("En servicio"), "sin opciones");
+      await page.click("#inventario-tecnologico-mapa-simulacion");
+      await page.waitForSelector(DD("estados"), { state: "hidden", timeout: 3000 });
+      exigir(await page.locator(DD_PANEL("estados")).isHidden(), "el panel quedó abierto");
+    });
+    await verificar("3.3: en pantalla completa los desplegables funcionan dentro de la ventana de filtros", async ()=>{
+      await page.click(BOTON_COMPLETA);
+      await page.waitForSelector(COMPLETA);
+      await page.click(ALTERNAR("barra"));
+      await page.click(DD("redes"));
+      const caja = await page.locator(DD_PANEL("redes")).boundingBox();
+      exigir(caja && caja.width > 100 && caja.x >= 0 && caja.x + caja.width <= 1400 && caja.y + caja.height <= 900, "panel: " + JSON.stringify(caja));
+      await page.click(OPCION("redes", "sin") + " [data-red]");
+      await esperarMarcadores(page, 3);
+      await page.click(OPCION("redes", "sin") + " [data-red]");
+      await esperarMarcadores(page, 15);
+      await page.keyboard.press("Escape");
+      exigir(await page.locator(DD_PANEL("redes")).isHidden() && await cuenta(page, COMPLETA) === 1, "Esc salió de la pantalla completa antes de cerrar el desplegable");
+      await page.click(BOTON_COMPLETA);
+      await page.waitForFunction(()=>!document.querySelector(".inventario-tecnologico-mapa-vista.inventario-tecnologico-mapa-completa"), null, { timeout: 4000 });
+    });
+    await verificar("sin errores de JavaScript (filtros en desplegables)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    const { context, page, errores } = await abrirApp(browser, base, fixtureVacias(), { viewport: { width: 390, height: 844 } });
+    await irAlMapa(page);
+    await verificar("3.3 en el celular: el panel del último desplegable cabe en la pantalla", async ()=>{
+      await page.click(".inventario-tecnologico-mapa-filtros-resumen");
+      await page.click(DD("tiposEquipo"));
+      const caja = await page.locator(DD_PANEL("tiposEquipo")).boundingBox();
+      exigir(caja && caja.x >= 0 && caja.x + caja.width <= 390, "se sale: " + JSON.stringify(caja));
+      const ancho = await page.evaluate(()=>document.documentElement.scrollWidth);
+      exigir(ancho <= 390, "scroll horizontal: " + ancho);
+      await captura(page, "v12-celular-tipos.png");
+    });
+    await verificar("sin errores de JavaScript (desplegables en el celular)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    const { context, page, errores } = await abrirApp(browser, base, fixture());
+    await irAlMapa(page);
+    await verificar("3.3 sin la 007: sin «Redes», «Tipos de equipo» ni «Colorear»; los otros desplegables funcionan", async ()=>{
+      exigir(await page.locator(DD("redes")).isHidden() && await page.locator(DD("tiposEquipo")).isHidden() && await page.locator("#inventario-tecnologico-mapa-color-red").isHidden(), "se ven");
+      await clicFiltro(page, SEL.chip("rol", "cliente"));
+      await page.waitForFunction(()=>document.querySelectorAll(".leaflet-marker-icon.inventario-tecnologico-mapa-icono").length === 3, null, { timeout: 4000 });
+      exigir(await textoBoton(page, "roles") === "Equipos 3/4", await textoBoton(page, "roles"));
+      await page.click("#inventario-tecnologico-mapa-quitar-filtros");
+      await page.waitForFunction(()=>document.querySelectorAll(".leaflet-marker-icon.inventario-tecnologico-mapa-icono").length === 13, null, { timeout: 4000 });
+    });
+    await verificar("sin errores de JavaScript (desplegables sin la 007)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+}
+
+// ------------------------------------------------------------------ v12 (3.5): «solo esta» en los filtros de la tabla de activos
+async function escenarioSoloTabla(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixture());
+  const FILAS = "#inventario-tecnologico-tbody-activos tr[data-id], #inventario-tecnologico-tbody-activos tr:has(td)";
+  const tags = ()=>page.locator("#inventario-tecnologico-tbody-activos tr").evaluateAll(l=>l.map(tr=>(tr.innerText.match(/(LKM|EQS)-\d+/) || [""])[0]).filter(Boolean));
+  const abrirPanelTipo = async ()=>{ await page.hover('[data-filtro-btn="tipo"]'); await page.waitForSelector('.inventario-tecnologico-filter-opt[data-filtro-opt-campo="tipo"]', { state: "visible", timeout: 3000 }); };
+  await page.waitForSelector("#inventario-tecnologico-tbody-activos tr");
+  await verificar("3.5 tabla: el filtro de Tipo tiene «solo» por opción y la ayuda nueva", async ()=>{
+    exigir(JSON.stringify(await tags()) === '["LKM-001","LKM-002","EQS-003"]', JSON.stringify(await tags()));
+    await abrirPanelTipo();
+    exigir(await cuenta(page, '[data-filtro-solo-campo="tipo"]') === 3, "sin los botones «solo»");
+    exigir(/Doble clic, «solo» o Mayús\+Enter/.test(await page.locator('.inventario-tecnologico-th-filter:has([data-filtro-btn="tipo"]) .inventario-tecnologico-filter-panel-hint').innerText()), "ayuda");
+  });
+  await verificar("3.5 tabla: «solo» deja solo ese tipo; otra vez, vuelven todos", async ()=>{
+    await abrirPanelTipo();
+    await page.hover('.inventario-tecnologico-filtro-fila:has([data-filtro-opt-valor="Laptop"])');
+    await page.click('[data-filtro-solo-campo="tipo"][data-filtro-solo-valor="Laptop"]');
+    await page.waitForFunction(()=>document.querySelectorAll("#inventario-tecnologico-tbody-activos tr").length === 1, null, { timeout: 3000 });
+    exigir(JSON.stringify(await tags()) === '["LKM-001"]', JSON.stringify(await tags()));
+    await abrirPanelTipo();
+    await page.hover('.inventario-tecnologico-filtro-fila:has([data-filtro-opt-valor="Laptop"])');
+    await page.click('[data-filtro-solo-campo="tipo"][data-filtro-solo-valor="Laptop"]');
+    await page.waitForFunction(()=>document.querySelectorAll("#inventario-tecnologico-tbody-activos tr").length === 3, null, { timeout: 3000 });
+  });
+  await verificar("3.5 tabla: doble clic deja solo esa opción y, en la única, vuelven todas", async ()=>{
+    await abrirPanelTipo();
+    await page.dblclick('.inventario-tecnologico-filter-opt[data-filtro-opt-campo="tipo"][data-filtro-opt-valor="Monitor"] .inventario-tecnologico-filter-opt-label');
+    await page.waitForFunction(()=>document.querySelectorAll("#inventario-tecnologico-tbody-activos tr").length === 1, null, { timeout: 3000 });
+    exigir(JSON.stringify(await tags()) === '["EQS-003"]', JSON.stringify(await tags()));
+    await abrirPanelTipo();
+    await page.dblclick('.inventario-tecnologico-filter-opt[data-filtro-opt-campo="tipo"][data-filtro-opt-valor="Monitor"] .inventario-tecnologico-filter-opt-label');
+    await page.waitForFunction(()=>document.querySelectorAll("#inventario-tecnologico-tbody-activos tr").length === 3, null, { timeout: 3000 });
+  });
+  await verificar("3.5 tabla: Mayús+Enter en la casilla deja solo esa (sin alternarla) y otra vez devuelve todas", async ()=>{
+    await abrirPanelTipo();
+    await page.focus('input[data-filtro-campo="tipo"][data-filtro-valor="Antena"]');
+    await page.keyboard.press("Shift+Enter");
+    await page.waitForFunction(()=>document.querySelectorAll("#inventario-tecnologico-tbody-activos tr").length === 1, null, { timeout: 3000 });
+    exigir(JSON.stringify(await tags()) === '["LKM-002"]', JSON.stringify(await tags()));
+    exigir(await page.isChecked('input[data-filtro-campo="tipo"][data-filtro-valor="Antena"]'), "la casilla quedó desmarcada");
+    await page.keyboard.press("Shift+Enter");
+    await page.waitForFunction(()=>document.querySelectorAll("#inventario-tecnologico-tbody-activos tr").length === 3, null, { timeout: 3000 });
+  });
+  await verificar("sin errores de JavaScript («solo» en la tabla)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+}
+
 // ------------------------------------------------------------------ main
 const srv = await servir(RAIZ);
 const base = `http://127.0.0.1:${srv.address().port}`;
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 try{
   // SOLO=plano (u otro nombre) corre un solo escenario, para depurar.
-  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo, campos: escenarioCampos, sin012: escenarioSin012 };
+  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo, campos: escenarioCampos, sin012: escenarioSin012, vacias: escenarioVacias, grosor0: escenarioGrosorCero, filtros: escenarioFiltros, solo: escenarioSoloTabla };
   // SOLO=plano o SOLO=plano,torre (varios, separados por comas).
   const solo = process.env.SOLO ? process.env.SOLO.split(",").map(x=>x.trim()).filter(Boolean) : null;
   for(const [nombre, fn] of Object.entries(escenarios)) if(!solo || solo.includes(nombre)) await fn(browser, base);

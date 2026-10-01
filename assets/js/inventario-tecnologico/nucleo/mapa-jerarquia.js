@@ -432,36 +432,85 @@ export function herederosDeRed(red, equipoId){
 }
 
 // ---------------------------------------------------------------------------
-// Grosor de las líneas de conexión (v9): un factor para todas (0,5× a 3×, de
-// a 0,25). Se aplica al ancho y a los trazos punteados, para que conserven su
-// forma. Lo recuerda cada navegador (ui/mapa/leaflet.js).
+// Grosor de las líneas de conexión (v9; desde 0 en el v11): un factor para
+// todas (0× a 3×, de a 0,25). Se aplica al ancho y a los trazos punteados,
+// para que conserven su forma. En 0 no se dibuja ninguna línea, salvo el
+// camino resaltado del equipo elegido, que va al mínimo visible (0,5×). Lo
+// recuerda cada navegador (ui/mapa/leaflet.js).
 // ---------------------------------------------------------------------------
-export const GROSOR_LINEAS = { min: 0.5, max: 3, paso: 0.25, porDefecto: 1 };
+export const GROSOR_LINEAS = { min: 0, max: 3, paso: 0.25, porDefecto: 1 };
+export const GROSOR_MINIMO_VISIBLE = 0.5;
 export function normalizarGrosor(k){
+  // Lo que falta o no es un número vuelve al de por defecto. Ojo: Number("")
+  // y Number(null) dan 0, que ahora es un valor válido («sin líneas»).
+  if(k === null || k === undefined || typeof k === "boolean" || (typeof k === "string" && !k.trim())) return GROSOR_LINEAS.porDefecto;
   const n = Number(k);
-  if(!Number.isFinite(n) || n <= 0) return GROSOR_LINEAS.porDefecto;
+  if(!Number.isFinite(n) || n < 0) return GROSOR_LINEAS.porDefecto;
   const redondeado = Math.round(n / GROSOR_LINEAS.paso) * GROSOR_LINEAS.paso;
-  return Math.min(GROSOR_LINEAS.max, Math.max(GROSOR_LINEAS.min, redondeado));
+  return Math.min(GROSOR_LINEAS.max, Math.max(GROSOR_LINEAS.min, redondeado)) || 0;
+}
+// El factor con que se dibuja una línea: el elegido. En 0, solo el camino
+// resaltado (enCadena), al mínimo visible; 0 = la línea no se dibuja.
+export function grosorDeLinea(k, { enCadena = false } = {}){
+  const f = normalizarGrosor(k);
+  if(f > 0) return f;
+  return enCadena ? GROSOR_MINIMO_VISIBLE : 0;
 }
 export function conGrosor(estilo, k = 1){
   const f = normalizarGrosor(k);
-  if(!estilo || f === 1) return estilo;
+  if(!estilo) return estilo;
+  // En 0 la línea no se dibuja: con un dashArray «0 0» se vería continua.
+  if(f === 0) return null;
+  if(f === 1) return estilo;
   const escalar = x=>Math.round(x * f * 100) / 100;
   const out = { ...estilo, weight: escalar(estilo.weight) };
   if(estilo.dashArray) out.dashArray = String(estilo.dashArray).trim().split(/[\s,]+/).map(x=>escalar(Number(x))).join(" ");
   return out;
 }
-// «1×», «1,5×», «0,75×».
-export function textoGrosor(k){ return `${String(normalizarGrosor(k)).replace(".", ",")}×`; }
+// «1×», «1,5×», «0,75×»; en 0, «0× (sin líneas)».
+export function textoGrosor(k){
+  const f = normalizarGrosor(k);
+  return f === 0 ? "0× (sin líneas)" : `${String(f).replace(".", ",")}×`;
+}
 
 // Filtro (c): tipo = rol calculado; estado = el de la simulación (solo si está activa).
 // Filtro por red (007): "sin" = equipos sin red (con la 011, sin red efectiva).
+// Filtro por tipo de equipo (v12, 3.4): el `tipo_equipo` de la 007; los que no
+// tienen tipo van en TIPO_EQUIPO_SIN. Las ubicaciones sin ningún equipo de red
+// tienen su propia opción, UBICACION_SIN_EQUIPOS. Las dos claves llevan un
+// guion, que un valor de tipos_equipo_red no puede tener (^[a-z0-9_]+$).
+export const TIPO_EQUIPO_SIN = "-sin-tipo";
+export const UBICACION_SIN_EQUIPOS = "-sin-equipos";
 export function claveRed(e){ const r = redEfectivaDe(e); return r !== null ? String(r) : "sin"; }
-export function equipoVisible(red, equipoId, { rolesOcultos = [], estadosOcultos = [], redesOcultas = [] } = {}, sim = null){
+export function claveTipoEquipo(e){ return (e && e.tipo_equipo) || TIPO_EQUIPO_SIN; }
+export function equipoVisible(red, equipoId, { rolesOcultos = [], estadosOcultos = [], redesOcultas = [], tiposEquipoOcultos = [] } = {}, sim = null){
   if(rolesOcultos.includes(red.rol.get(equipoId))) return false;
   if(redesOcultas.length && redesOcultas.includes(claveRed(red.equipoPorId.get(equipoId)))) return false;
+  if(tiposEquipoOcultos.length && tiposEquipoOcultos.includes(claveTipoEquipo(red.equipoPorId.get(equipoId)))) return false;
   if(sim && estadosOcultos.includes((sim.estado.get(equipoId) || {}).estado)) return false;
   return true;
+}
+// v11 (3.6): una ubicación sin equipos de red cuenta como «Sin red» y se
+// oculta con ese chip apagado, aunque tenga activos. v12 (3.4): también con
+// «Sin equipos» apagado en «Tipos de equipo». Con equipos, se ve mientras
+// alguno de ellos se vea (los roles y la simulación no tocan a las vacías).
+// La seleccionada y las del camino las resuelve quien llama.
+export function ubicacionVisiblePorEquipos(equipos, { redesOcultas = [], tiposEquipoOcultos = [] } = {}, visibleEquipo = ()=>true){
+  if(!equipos || !equipos.length) return !redesOcultas.includes("sin") && !tiposEquipoOcultos.includes(UBICACION_SIN_EQUIPOS);
+  return equipos.some(e=>visibleEquipo(e.id));
+}
+// Las ubicaciones sin ningún equipo de red (las activas; también las
+// archivadas si se están viendo): las que «Sin red» oculta además de sus equipos.
+export function ubicacionesSinEquipos(ubicaciones, equiposPorUbicacion, { verArchivadas = false } = {}){
+  return (ubicaciones || []).filter(u=>(verArchivadas || u.activa !== false) && !((equiposPorUbicacion && equiposPorUbicacion.get(u.id)) || []).length);
+}
+// La ayuda (title) del chip «Sin red»: qué oculta o muestra, con cuántos son.
+export function tituloSinRed(visible, equipos, vacias){
+  const accion = visible ? "Ocultar" : "Mostrar";
+  if(!vacias) return `${accion} los equipos de «Sin red»`;
+  const ubic = `${vacias === 1 ? "la ubicación" : `las ${vacias} ubicaciones`} sin equipos de red`;
+  if(!equipos) return `${accion} ${ubic}`;
+  return `${accion} ${equipos === 1 ? "el equipo" : `los ${equipos} equipos`} sin red y ${ubic}`;
 }
 
 export function contarRoles(red){

@@ -15,6 +15,8 @@ import * as N from "../assets/js/inventario-tecnologico/nucleo/mapa-nombres.js";
 import * as PI from "../assets/js/inventario-tecnologico/nucleo/piscinas.js";
 import * as SS from "../assets/js/inventario-tecnologico/nucleo/selector-servidor.js";
 import { htmlPin } from "../assets/js/inventario-tecnologico/ui/mapa/leaflet.js";
+import * as SOLO from "../assets/js/inventario-tecnologico/nucleo/solo-esta.js";
+import * as FM from "../assets/js/inventario-tecnologico/nucleo/filtros-mapa.js";
 
 let ok = 0, total = 0;
 const fallas = [];
@@ -1082,16 +1084,62 @@ prueba("011: el selector de servidor muestra y filtra por la red efectiva y marc
   assert.deepEqual(SS.filtrarServidores(ops, { texto: "invitados" }).map(o=>o.clave).sort(), ["6", "7"]);
 });
 
-// ---------------------------------------------------------------- v9: grosor de las líneas
-prueba("grosor: factor entre 0,5× y 3× de a 0,25 (lo raro vuelve a 1×)", ()=>{
+// ---------------------------------------------------------------- v9: grosor de las líneas (v11: desde 0)
+prueba("grosor: factor entre 0× y 3× de a 0,25 (lo que falta o no es número vuelve a 1×)", ()=>{
+  assert.equal(J.GROSOR_LINEAS.min, 0);
   assert.equal(J.normalizarGrosor(2), 2);
   assert.equal(J.normalizarGrosor("1.6"), 1.5);
-  assert.equal(J.normalizarGrosor(0.1), 0.5);
+  assert.equal(J.normalizarGrosor(0.2), 0.25);
   assert.equal(J.normalizarGrosor(9), 3);
-  for(const raro of [null, undefined, "", "abc", -1, 0, NaN]) assert.equal(J.normalizarGrosor(raro), 1, String(raro));
+  // v11: 0 es un valor válido («sin líneas»), también como texto (localStorage) y -0.
+  for(const cero of [0, "0", "0.0", 0.1, -0]) assert.ok(Object.is(J.normalizarGrosor(cero), 0), String(cero));
+  // Number("") y Number(null) darían 0: lo que falta sigue volviendo a 1×.
+  for(const raro of [null, undefined, "", "  ", "abc", -1, -0.25, NaN, Infinity, true, false]) assert.equal(J.normalizarGrosor(raro), 1, String(raro));
   assert.equal(J.textoGrosor(1.5), "1,5×");
   assert.equal(J.textoGrosor(1), "1×");
   assert.equal(J.textoGrosor(0.75), "0,75×");
+  assert.equal(J.textoGrosor(0.25), "0,25×");
+  assert.equal(J.textoGrosor(0), "0× (sin líneas)");
+  assert.equal(J.textoGrosor("0"), "0× (sin líneas)");
+});
+prueba("grosor 0 (v11): ninguna línea, salvo el camino resaltado del equipo elegido, al mínimo visible", ()=>{
+  assert.equal(J.GROSOR_MINIMO_VISIBLE, 0.5);
+  assert.equal(J.grosorDeLinea(0), 0);
+  assert.equal(J.grosorDeLinea("0", { enCadena: false }), 0);
+  assert.equal(J.grosorDeLinea(0, { enCadena: true }), 0.5);
+  assert.equal(J.grosorDeLinea(2, { enCadena: true }), 2, "con otro grosor, el camino va con ese");
+  assert.equal(J.grosorDeLinea(0.25, { enCadena: true }), 0.25);
+  assert.equal(J.grosorDeLinea(null), 1);
+  assert.equal(J.grosorDeLinea(undefined, { enCadena: true }), 1);
+  // conGrosor con 0: no se dibuja (un dashArray «0 0» se vería continuo).
+  assert.equal(J.conGrosor({ weight:3, dashArray:"3 8" }, 0), null);
+  assert.equal(J.conGrosor(null, 0), null);
+  assert.deepEqual(J.conGrosor({ weight:6, dashArray:"12 7" }, J.grosorDeLinea(0, { enCadena: true })), { weight:3, dashArray:"6 3.5" });
+});
+prueba("«Sin red» (v11, 3.6): una ubicación sin equipos de red cuenta como «Sin red»", ()=>{
+  const todos = ()=>true, ninguno = ()=>false;
+  assert.equal(J.ubicacionVisiblePorEquipos([], {}), true, "sin filtros se ve");
+  assert.equal(J.ubicacionVisiblePorEquipos([], { redesOcultas: ["1"] }), true, "ocultar otra red no la toca");
+  assert.equal(J.ubicacionVisiblePorEquipos([], { redesOcultas: ["sin"] }), false, "con «Sin red» apagado se oculta");
+  assert.equal(J.ubicacionVisiblePorEquipos(undefined, { redesOcultas: ["sin"] }), false);
+  assert.equal(J.ubicacionVisiblePorEquipos([], { redesOcultas: [], rolesOcultos: ["raiz", "backbone", "distribucion", "cliente"] }), true, "los roles no tocan a las vacías");
+  assert.equal(J.ubicacionVisiblePorEquipos([{ id:1 }, { id:2 }], { redesOcultas: ["sin"] }, id=>id === 2), true, "con equipos: si alguno se ve");
+  assert.equal(J.ubicacionVisiblePorEquipos([{ id:1 }], { redesOcultas: [] }, ninguno), false, "con equipos: si ninguno se ve");
+  assert.equal(J.ubicacionVisiblePorEquipos([{ id:1 }], { redesOcultas: ["sin"] }, todos), true);
+  const ubic = [{ id:1, activa:true }, { id:2, activa:true }, { id:3, activa:false }, { id:4 }];
+  const porUbic = new Map([[1, [{ id:10 }]], [2, []]]);
+  assert.deepEqual(J.ubicacionesSinEquipos(ubic, porUbic).map(u=>u.id), [2, 4], "las archivadas no cuentan");
+  assert.deepEqual(J.ubicacionesSinEquipos(ubic, porUbic, { verArchivadas: true }).map(u=>u.id), [2, 3, 4], "salvo si se están viendo");
+  assert.deepEqual(J.ubicacionesSinEquipos(ubic, null).map(u=>u.id), [1, 2, 4]);
+  assert.deepEqual(J.ubicacionesSinEquipos(null, porUbic), []);
+});
+prueba("«Sin red» (v11): la ayuda dice qué oculta, con cuántos son", ()=>{
+  assert.equal(J.tituloSinRed(true, 7, 0), "Ocultar los equipos de «Sin red»", "sin vacías, como antes");
+  assert.equal(J.tituloSinRed(false, 7, 0), "Mostrar los equipos de «Sin red»");
+  assert.equal(J.tituloSinRed(true, 7, 9), "Ocultar los 7 equipos sin red y las 9 ubicaciones sin equipos de red");
+  assert.equal(J.tituloSinRed(false, 1, 1), "Mostrar el equipo sin red y la ubicación sin equipos de red");
+  assert.equal(J.tituloSinRed(true, 0, 9), "Ocultar las 9 ubicaciones sin equipos de red");
+  assert.equal(J.tituloSinRed(true, 0, 1), "Ocultar la ubicación sin equipos de red");
 });
 prueba("grosor: escala el ancho y los punteados (conservan su forma); con 1× no copia nada", ()=>{
   const base = { color:"#000", weight:2.2, opacity:0.8, dashArray:"3 8" };
@@ -1102,6 +1150,66 @@ prueba("grosor: escala el ancho y los punteados (conservan su forma); con 1× no
   assert.deepEqual(J.conGrosor({ weight:5 }, 0.5), { weight:2.5 });
   assert.equal(J.conGrosor({ weight:3, dashArray:"12, 7" }, 1.5).dashArray, "18 10.5");
   assert.equal(J.conGrosor(null, 2), null);
+});
+
+// ---------------------------------------------------------------- v12: filtros en desplegables (3.3), tipo de equipo (3.4) y «solo esta» (3.5)
+prueba("«solo esta»: deja solo esa; si ya era la única, vuelven todas (también con lo oculto)", ()=>{
+  const todos = ["a", "b", "c"];
+  assert.deepEqual(SOLO.soloEsta(todos, ["a", "b", "c"], "b"), ["b"]);
+  assert.deepEqual(SOLO.soloEsta(todos, new Set(["a", "c"]), "c"), ["c"]);
+  assert.deepEqual(SOLO.soloEsta(todos, ["b"], "b"), ["a", "b", "c"], "la única: vuelven todas");
+  assert.deepEqual(SOLO.soloEsta(todos, [], "a"), ["a"], "con ninguna marcada");
+  assert.deepEqual(SOLO.soloEsta(todos, null, "a"), ["a"]);
+  // Los filtros del mapa guardan lo oculto.
+  assert.deepEqual(SOLO.soloEstaOcultos(todos, [], "b"), ["a", "c"]);
+  assert.deepEqual(SOLO.soloEstaOcultos(todos, ["a", "c"], "b"), [], "la única a la vista: vuelven todas");
+  assert.deepEqual(SOLO.soloEstaOcultos(todos, ["a", "b", "c"], "a"), ["b", "c"], "con todas ocultas, queda esa");
+  assert.deepEqual(FM.ocultosSoloEsta(todos, ["x"], "a"), ["b", "c"], "lo oculto que ya no es opción no cuenta");
+  assert.equal(SOLO.esMayusEnter({ key: "Enter", shiftKey: true }), true);
+  for(const e of [{ key: "Enter" }, { key: "Enter", shiftKey: true, ctrlKey: true }, { key: "Enter", shiftKey: true, metaKey: true }, { key: " ", shiftKey: true }, null]) assert.equal(SOLO.esMayusEnter(e), false, JSON.stringify(e));
+  assert.match(SOLO.tituloSolo("Red Oficina"), /^Dejar solo «Red Oficina» \(Mayús\+Enter\)/);
+  assert.match(SOLO.AYUDA_SOLO, /Doble clic, «solo» o Mayús\+Enter/);
+});
+prueba("desplegables: cuenta «a/b», «Quitar filtros» y cuántos filtros hay (la simulación aparte)", ()=>{
+  assert.deepEqual(FM.resumenDesplegable(["a", "b", "c"], ["b"]), { visibles: 2, total: 3, texto: "2/3", filtrado: true });
+  assert.deepEqual(FM.resumenDesplegable(["a", "b"], ["z"]), { visibles: 2, total: 2, texto: "2/2", filtrado: false });
+  assert.equal(FM.resumenDesplegable([], []).texto, "0/0");
+  const sucios = { tiposOcultos: ["torre"], verArchivadas: true, lineas: { backbone: false, p2mp: true, cable: true, respaldos: true }, rolesOcultos: ["cliente"], redesOcultas: ["1", "sin"], tiposEquipoOcultos: ["ap"], estadosOcultos: ["caido"], colorPorRed: true };
+  // tipo 1 + rol 1 + redes 2 + tipo de equipo 1 + archivadas 1 + backbone apagado 1 + respaldos encendido 1
+  assert.equal(FM.cuantosFiltros(sucios), 8, "sin simulación no cuentan los estados");
+  assert.equal(FM.cuantosFiltros(sucios, { sim: true }), 9);
+  const limpios = FM.filtrosLimpios(sucios);
+  assert.deepEqual(limpios, { tiposOcultos: [], verArchivadas: false, lineas: { backbone: true, p2mp: true, cable: true, respaldos: false }, rolesOcultos: [], redesOcultas: [], tiposEquipoOcultos: [], estadosOcultos: [], colorPorRed: true }, "«Colorear líneas por red» queda");
+  assert.equal(FM.cuantosFiltros(limpios, { sim: true }), 0);
+  assert.equal(FM.cuantosFiltros({}), 0, "un estado vacío no rompe");
+  assert.notEqual(limpios.lineas, FM.LINEAS_POR_DEFECTO, "copia, no la constante");
+  assert.deepEqual(FM.lineasConVisibles(["backbone", "p2mp", "respaldos"], ["p2mp"]), { backbone: false, p2mp: true, respaldos: false });
+  assert.deepEqual(FM.ocultosTodas(), []);
+  assert.deepEqual(FM.ocultosNinguna(["a", "b"]), ["a", "b"]);
+});
+prueba("tipo de equipo (3.4): opciones con cuentas, «Sin tipo» y «Sin equipos»; las torres sin esos tipos se ocultan", ()=>{
+  const tipos = [
+    { valor:"router", etiqueta:"Router", orden:10, activo:true }, { valor:"ap", etiqueta:"AP", orden:40, activo:true },
+    { valor:"ptp", etiqueta:"PtP-E", orden:30, activo:true }, { valor:"nvr", etiqueta:"NVR", orden:70, activo:false },
+    { valor:"camara", etiqueta:"Cámara", orden:60, activo:false },
+  ];
+  const equipos = [{ id:1, tipo_equipo:"router" }, { id:2, tipo_equipo:"ptp" }, { id:3, tipo_equipo:"ptp" }, { id:4, tipo_equipo:"ap" }, { id:5, tipo_equipo:null }, { id:6, tipo_equipo:"camara" }];
+  const o = FM.opcionesTiposEquipo(tipos, equipos, 2);
+  assert.deepEqual(o.map(x=>[x.valor, x.etiqueta, x.n]), [["router", "Router", 1], ["ptp", "PtP-E", 2], ["ap", "AP", 1], ["camara", "Cámara", 1], [J.TIPO_EQUIPO_SIN, "Sin tipo", 1], [J.UBICACION_SIN_EQUIPOS, "Sin equipos", 2]], "en su orden; el inactivo sin uso no; el inactivo en uso sí");
+  assert.deepEqual(FM.opcionesTiposEquipo(tipos, [{ id:1, tipo_equipo:"router" }], 0).map(x=>x.valor), ["router", "ptp", "ap"], "sin «Sin tipo» ni «Sin equipos» si no hay");
+  assert.ok(!/^[a-z0-9_]+$/.test(J.TIPO_EQUIPO_SIN) && !/^[a-z0-9_]+$/.test(J.UBICACION_SIN_EQUIPOS), "las claves especiales no chocan con un valor de tipos_equipo_red");
+  assert.equal(J.claveTipoEquipo({ tipo_equipo: "ap" }), "ap");
+  assert.equal(J.claveTipoEquipo({ tipo_equipo: null }), J.TIPO_EQUIPO_SIN);
+  // equipoVisible con los tipos ocultos.
+  const red = J.analizarRed({ equipos: [{ id:1, ubicacion_id:1, servidor_id:null, tipo_equipo:"router" }, { id:2, ubicacion_id:2, servidor_id:1, tipo_equipo:"ap" }, { id:3, ubicacion_id:3, servidor_id:2, tipo_equipo:null }], ubicaciones: [{ id:1, lat:0, lng:0 }, { id:2, lat:0, lng:0.01 }, { id:3, lat:0, lng:0.02 }], respaldos: [] });
+  assert.equal(J.equipoVisible(red, 2, { tiposEquipoOcultos: ["ap"] }), false);
+  assert.equal(J.equipoVisible(red, 1, { tiposEquipoOcultos: ["ap"] }), true);
+  assert.equal(J.equipoVisible(red, 3, { tiposEquipoOcultos: [J.TIPO_EQUIPO_SIN] }), false, "«Sin tipo»");
+  assert.equal(J.equipoVisible(red, 3, {}), true, "sin el filtro, como antes");
+  // Las vacías: «Sin equipos» apagado las oculta; con equipos, no la toca.
+  assert.equal(J.ubicacionVisiblePorEquipos([], { tiposEquipoOcultos: [J.UBICACION_SIN_EQUIPOS] }), false);
+  assert.equal(J.ubicacionVisiblePorEquipos([], { tiposEquipoOcultos: ["ap"] }), true);
+  assert.equal(J.ubicacionVisiblePorEquipos([{ id:1 }], { tiposEquipoOcultos: [J.UBICACION_SIN_EQUIPOS] }, ()=>true), true);
 });
 
 prueba("errores de la 008/009 traducidos", ()=>{

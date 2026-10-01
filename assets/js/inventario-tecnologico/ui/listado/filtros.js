@@ -5,6 +5,7 @@ import { campoPorClave, camposDeTipo, infoEstado, infoPropiedad } from "../../nu
 import { PREFIJO_COLUMNA_CAMPO, textoValor, valorCrudo, valorParaOrdenar } from "../../nucleo/campos-personalizados.js";
 import { columnasColapsadas } from "./columnas.js";
 import { NOMBRE_COLUMNA_KPI } from "./resumen.js";
+import { AYUDA_SOLO, tituloSolo } from "../../nucleo/solo-esta.js";
 
 export let opcionesFiltroCache = { tipo:[], propiedad:[], custodioClase:[], marca:[], estado:[] };
 
@@ -225,13 +226,16 @@ export function panelFiltroHtml(campo, opciones){
         </div>
         <div class="inventario-tecnologico-filter-panel-list">
           ${opciones.map(op=>`
-            <label class="inventario-tecnologico-filter-opt" data-filtro-opt-campo="${campo}" data-filtro-opt-valor="${esc(op)}">
-              <input type="checkbox" data-filtro-campo="${campo}" data-filtro-valor="${esc(op)}" ${seleccion.has(op)?"checked":""}>
-              <span class="inventario-tecnologico-filter-opt-label">${esc(labelOpcionFiltro(campo, op))}</span>
-              <span class="inventario-tecnologico-filter-opt-count">${contarValorEnLista(lista, campo, op)}</span>
-            </label>`).join("")}
+            <div class="inventario-tecnologico-filtro-fila">
+              <label class="inventario-tecnologico-filter-opt" data-filtro-opt-campo="${campo}" data-filtro-opt-valor="${esc(op)}">
+                <input type="checkbox" data-filtro-campo="${campo}" data-filtro-valor="${esc(op)}" ${seleccion.has(op)?"checked":""}>
+                <span class="inventario-tecnologico-filter-opt-label">${esc(labelOpcionFiltro(campo, op))}</span>
+                <span class="inventario-tecnologico-filter-opt-count">${contarValorEnLista(lista, campo, op)}</span>
+              </label>
+              <button type="button" class="inventario-tecnologico-filtro-solo" data-filtro-solo-campo="${campo}" data-filtro-solo-valor="${esc(op)}" title="${esc(tituloSolo(labelOpcionFiltro(campo, op)))}" aria-label="${esc(`Solo ${labelOpcionFiltro(campo, op)}`)}">solo</button>
+            </div>`).join("")}
         </div>
-        <div class="inventario-tecnologico-filter-panel-hint">Doble clic en una opción para seleccionar solo esa.</div>
+        <div class="inventario-tecnologico-filter-panel-hint">${esc(AYUDA_SOLO)}</div>
         <button type="button" class="inventario-tecnologico-btn inventario-tecnologico-btn-sm inventario-tecnologico-filter-panel-kpi-btn" data-ver-kpis="${campo}">📊 Ver resumen</button>
       </div>
     </div>

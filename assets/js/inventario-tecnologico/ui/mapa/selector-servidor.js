@@ -19,6 +19,7 @@ import { esc } from "../../nucleo/helpers.js";
 import { fmtDistancia } from "../../nucleo/geo.js";
 import { normalizarBusqueda } from "../../nucleo/formulario-activo.js";
 import { FACETAS_SERVIDOR, ORDENES_SERVIDOR, ORDEN_SERVIDOR_POR_DEFECTO, esOrdenServidor, facetasServidor, filtrarServidores, ordenarServidores } from "../../nucleo/selector-servidor.js";
+import { AYUDA_SOLO, esMayusEnter, soloEsta, tituloSolo } from "../../nucleo/solo-esta.js";
 
 const P = "inventario-tecnologico-";
 const CLAVE_ORDEN = "inventario-tecnologico-orden-servidor";
@@ -174,13 +175,13 @@ export function montarSelectorServidor(select, {
             <button type="button" class="${P}btn ${P}btn-sm" data-faceta-ninguno="${faceta}">Ninguno</button>
           </div>
           <div class="${P}filter-panel-list" role="group" aria-label="${esc(etiquetas[faceta])}">
-            ${valores.map(v=>`<label class="${P}filter-opt${v.misma ? ` ${P}serv-faceta-misma` : ""}" data-faceta-opt="${faceta}" data-valor="${esc(v.valor)}">
+            ${valores.map(v=>`<div class="${P}filtro-fila"><label class="${P}filter-opt${v.misma ? ` ${P}serv-faceta-misma` : ""}" data-faceta-opt="${faceta}" data-valor="${esc(v.valor)}">
               <input type="checkbox" data-faceta-casilla="${faceta}" value="${esc(v.valor)}" ${!filtros[faceta] || filtros[faceta].has(v.valor) ? "checked" : ""}>
               <span class="${P}filter-opt-label">${esc(v.etiqueta)}${v.misma ? ` <span class="${P}mapa-muted">(esta)</span>` : ""}</span>
               <span class="${P}filter-opt-count" data-cuenta="${esc(v.valor)}">${v.n}</span>
-            </label>`).join("")}
+            </label><button type="button" class="${P}filtro-solo" data-faceta-solo="${faceta}" data-valor="${esc(v.valor)}" title="${esc(tituloSolo(v.etiqueta))}" aria-label="${esc(`Solo ${v.etiqueta}`)}">solo</button></div>`).join("")}
           </div>
-          <div class="${P}filter-panel-hint">Doble clic en una opción para dejar solo esa.</div>
+          <div class="${P}filter-panel-hint">${esc(AYUDA_SOLO)}</div>
         </div>
       </details>`).join("")
       + `<button type="button" class="${P}btn ${P}btn-sm ${P}serv-limpiar" data-faceta-limpiar hidden>Quitar filtros</button>`;
@@ -364,7 +365,22 @@ export function montarSelectorServidor(select, {
     const f = c.dataset.facetaCasilla;
     marcar(f, [...cajaFacetas.querySelectorAll(`input[data-faceta-casilla="${f}"]`)].filter(x=>x.checked).map(x=>x.value));
   });
+  // «Solo esta» (v12, 3.5): doble clic, el botón «solo» o Mayús+Enter. Si ya
+  // era la única marcada, vuelven todas.
+  const seleccionados = f=>filtros[f] ? [...filtros[f]] : valoresDe(f);
+  const soloEstaFaceta = (f, valor)=>marcar(f, soloEsta(valoresDe(f), seleccionados(f), valor));
+  cajaFacetas.addEventListener("keydown", e=>{
+    if(!esMayusEnter(e)) return;
+    const c = e.target.closest("input[data-faceta-casilla], [data-faceta-solo]");
+    if(!c) return;
+    e.preventDefault();
+    e.stopPropagation(); // que no llegue al Enter del combo
+    if(c.matches("[data-faceta-solo]")) soloEstaFaceta(c.dataset.facetaSolo, c.dataset.valor);
+    else soloEstaFaceta(c.dataset.facetaCasilla, c.value);
+  });
   cajaFacetas.addEventListener("click", e=>{
+    const solo = e.target.closest("[data-faceta-solo]");
+    if(solo){ soloEstaFaceta(solo.dataset.facetaSolo, solo.dataset.valor); return; }
     const t = e.target.closest("[data-faceta-todos], [data-faceta-ninguno], [data-faceta-limpiar]");
     if(!t) return;
     if(t.hasAttribute("data-faceta-limpiar")){ filtros = {}; ponerAlDiaFacetas(); pintarLista(); filtro.focus(); return; }
@@ -372,10 +388,11 @@ export function montarSelectorServidor(select, {
     marcar(f, t.dataset.facetaTodos ? valoresDe(f) : []);
   });
   cajaFacetas.addEventListener("dblclick", e=>{
+    if(e.target.closest("[data-faceta-solo]")) return;
     const op = e.target.closest("[data-faceta-opt]");
     if(!op) return;
     e.preventDefault();
-    marcar(op.dataset.facetaOpt, [op.dataset.valor]);
+    soloEstaFaceta(op.dataset.facetaOpt, op.dataset.valor);
   });
   lista.addEventListener("mousedown", e=>e.preventDefault()); // el foco sigue en la búsqueda
   lista.addEventListener("click", e=>{
