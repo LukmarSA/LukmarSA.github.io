@@ -1596,3 +1596,67 @@ body.inventario-tecnologico-con-mapa-completo{overflow:hidden;}
 .inventario-tecnologico-tipo-icono-vista{display:flex;align-items:center;gap:14px;color:var(--accent-ink);margin-top:6px;}
 .inventario-tecnologico-tipo-icono-vista-error{color:var(--danger);}
 
+
+/* ---------- v16: el equipo abierto, una tarjeta del color de su red; su detalle, en cajas (3.11) ----------
+   La fila y el detalle del equipo abierto van en el mismo marco (borde
+   izquierdo grueso del color de su red, fondo teñido, sombra y aire con el
+   equipo siguiente); los demás equipos se ven como siempre. Cada sección del
+   detalle va en su caja, con barra de título, ícono y el color de su línea en
+   el mapa (backbone, camino, P2MP y respaldo). El color llega por el `style`
+   del <li> (--equipo-color, --equipo-suave y --equipo-borde). */
+.inventario-tecnologico-mapa-equipo-sel{
+  --equipo-color:#007EB2;--equipo-suave:#EEF7FB;--equipo-borde:#80BFD9;
+  margin:8px 0 12px;padding:5px 6px 10px 5px;
+  border:1px solid var(--equipo-borde);border-left:5px solid var(--equipo-color);border-radius:10px;
+  background:var(--equipo-suave);
+  box-shadow:0 1px 2px rgba(20,30,40,.06), 0 12px 24px -16px rgba(20,30,40,.45);
+}
+.inventario-tecnologico-mapa-equipo-sel > .inventario-tecnologico-mapa-equipo-fila > .inventario-tecnologico-mapa-fila{border-color:transparent;background:transparent;}
+.inventario-tecnologico-mapa-equipo-sel > .inventario-tecnologico-mapa-equipo-fila > .inventario-tecnologico-mapa-fila:hover{border-color:transparent;background:rgba(255,255,255,.6);}
+/* En la simulación, la fila conserva el color de su estado. */
+.inventario-tecnologico-mapa-equipo-sel.inventario-tecnologico-mapa-equipo-sin_conexion > .inventario-tecnologico-mapa-equipo-fila > .inventario-tecnologico-mapa-fila,
+.inventario-tecnologico-mapa-equipo-sel.inventario-tecnologico-mapa-equipo-caido > .inventario-tecnologico-mapa-equipo-fila > .inventario-tecnologico-mapa-fila{background:var(--danger-soft);}
+.inventario-tecnologico-mapa-equipo-sel.inventario-tecnologico-mapa-equipo-respaldo > .inventario-tecnologico-mapa-equipo-fila > .inventario-tecnologico-mapa-fila{background:var(--good-soft);}
+.inventario-tecnologico-mapa-equipo-sel > .inventario-tecnologico-mapa-equipo-detalle{margin:6px 2px 0 4px;padding-left:0;border-left:none;gap:10px;}
+
+.inventario-tecnologico-mapa-equipo-detalle .inventario-tecnologico-mapa-bloque{
+  --bloque-color:#004DAB;--bloque-suave:#EBF1F8;--bloque-tinta:#004DAB;
+  gap:0;border:1px solid var(--border);border-radius:9px;background:var(--surface);overflow:hidden;
+  box-shadow:0 1px 1px rgba(20,30,40,.04);
+}
+.inventario-tecnologico-mapa-equipo-detalle .inventario-tecnologico-mapa-bloque-camino{--bloque-color:#EC741D;--bloque-suave:#FDF4ED;--bloque-tinta:#9A4309;}
+.inventario-tecnologico-mapa-equipo-detalle .inventario-tecnologico-mapa-bloque-clientes{--bloque-color:#007EB2;--bloque-suave:#EBF5F9;--bloque-tinta:#005F86;}
+.inventario-tecnologico-mapa-equipo-detalle .inventario-tecnologico-mapa-bloque-respaldos{--bloque-color:#5B4B8A;--bloque-suave:#F2F1F6;--bloque-tinta:#433569;}
+.inventario-tecnologico-mapa-equipo-detalle .inventario-tecnologico-mapa-bloque-cab{
+  justify-content:flex-start;gap:7px;min-height:30px;padding:5px 8px 5px 6px;
+  background:var(--bloque-suave);border-bottom:1px solid var(--border);
+}
+.inventario-tecnologico-mapa-bloque-icono{
+  flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;
+  background:var(--bloque-color);color:#fff;box-shadow:inset 0 -2px 0 rgba(0,0,0,.12);
+}
+.inventario-tecnologico-mapa-equipo-detalle .inventario-tecnologico-mapa-bloque-titulo{color:var(--bloque-tinta);}
+.inventario-tecnologico-mapa-bloque-accion{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;}
+.inventario-tecnologico-mapa-bloque-accion .inventario-tecnologico-btn{background:var(--surface);}
+.inventario-tecnologico-mapa-bloque-cuerpo{display:flex;flex-direction:column;gap:6px;padding:8px 10px 9px;min-width:0;}
+/* El enlace con el servidor ya va en su caja: sin un segundo marco (salvo «cortado» en la simulación). */
+.inventario-tecnologico-mapa-bloque-cuerpo .inventario-tecnologico-mapa-enlace-flecha{display:none;} /* la flecha ya está en el ícono de la caja */
+.inventario-tecnologico-mapa-bloque-cuerpo > .inventario-tecnologico-mapa-enlace{border-color:transparent;background:none;padding:0;}
+.inventario-tecnologico-mapa-bloque-cuerpo > .inventario-tecnologico-mapa-enlace-cortado{border-color:var(--danger);padding:6px 8px;}
+/* Las acciones del equipo, al pie de la tarjeta. */
+.inventario-tecnologico-mapa-equipo-acciones{margin-top:0;padding-top:9px;border-top:1px dashed var(--equipo-borde, var(--border));}
+
+/* ---------- v16: «Todos los equipos» de una ubicación, para simular su caída ----------
+   Va arriba de la lista, con su casilla en la misma columna que las de cada
+   equipo; a medias (algunos caídos) se ve con una raya. */
+.inventario-tecnologico-mapa-caida-todos{display:flex;align-items:stretch;gap:4px;margin:0 0 6px;padding-bottom:6px;border-bottom:1px dashed var(--border);}
+.inventario-tecnologico-mapa-caida-todos-texto{flex:1;display:flex;align-items:center;flex-wrap:wrap;gap:2px 5px;min-height:32px;padding:4px 8px;border-radius:8px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;}
+.inventario-tecnologico-mapa-caida-todos-texto:hover{background:var(--danger-soft);}
+.inventario-tecnologico-mapa-caida-todos-on .inventario-tecnologico-mapa-caida-todos-texto,
+.inventario-tecnologico-mapa-caida-todos-cuenta{color:#8B1E12;}
+.inventario-tecnologico-mapa-caida-check input:indeterminate + .inventario-tecnologico-mapa-caida-caja{background:#8B1E12;border-color:#8B1E12;}
+.inventario-tecnologico-mapa-caida-check input:indeterminate + .inventario-tecnologico-mapa-caida-caja::after{content:"";width:9px;height:0;border-top:2px solid #fff;}
+/* La caja dibujada no recibe el clic: así el clic cae siempre en la casilla de verdad (marcada, la caja crece y la tapaba). */
+.inventario-tecnologico-mapa-caida-caja{pointer-events:none;}
+.inventario-tecnologico-mapa-caida-bloqueada + .inventario-tecnologico-mapa-caida-todos-texto{cursor:not-allowed;}
+.inventario-tecnologico-mapa-caida-bloqueada + .inventario-tecnologico-mapa-caida-todos-texto:hover{background:transparent;}

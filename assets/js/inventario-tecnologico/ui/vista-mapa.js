@@ -1022,6 +1022,8 @@ function pintarPanel(c){
   const altoAntes = detalleAntes ? detalleAntes.getBoundingClientRect().height + parseFloat(getComputedStyle(detalleAntes).marginTop) + parseFloat(getComputedStyle(detalleAntes).marginBottom) : 0;
   const foco = focoEnPanel(panel);
   panel.innerHTML = u ? htmlPanelUbicacion(ctx, u) : htmlPanelResumen(ctx);
+  // v16: la casilla «Todos los equipos» a medias (el HTML no tiene atributo para eso).
+  for(const i of panel.querySelectorAll('input[data-parcial="1"]')) i.indeterminate = true;
   panel.scrollTop = (u ? u.id : null) === ubicacionEnPanel ? scroll : 0;
   ubicacionEnPanel = u ? u.id : null;
   restaurarFoco(panel, foco);
@@ -1142,8 +1144,24 @@ function aplicarFocoPendiente(){
 // ---------------------------------------------------------------------------
 function alternarCaida(equipoId){
   const s = estadoMapa().simulacion;
-  const estaba = s.caidos.includes(equipoId);
-  s.caidos = estaba ? s.caidos.filter(x=>x !== equipoId) : [...s.caidos, equipoId];
+  // v16: con la simulación apagada la casilla se ve desmarcada (aunque haya
+  // caídas guardadas de antes): el clic la marca, no la desmarca.
+  const estaba = s.activa && s.caidos.includes(equipoId);
+  s.caidos = estaba ? s.caidos.filter(x=>x !== equipoId) : [...new Set([...s.caidos, equipoId])];
+  s.activa = true;
+  refrescar();
+}
+
+// v16: «Todos los equipos» de una ubicación: todos o ninguno. Si no están
+// todos caídos, los tumba a todos; si lo están, levanta los marcados a mano
+// (los de un atajo encendido siguen caídos hasta que se apague el atajo).
+function alternarCaidaUbicacion(ubicacionId){
+  const s = estadoMapa().simulacion;
+  const ids = (indicesMapa().equiposPorUbicacion.get(ubicacionId) || []).map(e=>e.id);
+  if(!ids.length) return;
+  const caidos = s.activa ? new Set(caidosActuales()) : new Set();
+  const todos = ids.every(id=>caidos.has(id));
+  s.caidos = todos ? s.caidos.filter(id=>!ids.includes(id)) : [...new Set([...s.caidos, ...ids])];
   s.activa = true;
   refrescar();
 }
@@ -1765,6 +1783,7 @@ async function alClicPanel(e){
       case "seleccionar-equipo-mapa": return seleccionarEquipo(id);
       case "simular-caida":
       case "casilla-caida": return alternarCaida(id);
+      case "casilla-caida-ubicacion": return alternarCaidaUbicacion(id);
       case "alternar-atajo": return alternarAtajo(id);
       case "guardar-atajo": return abrirGuardarAtajo({ equipos: caidosActuales() }, { alGuardar: trasGuardar(nuevo=>{
         // El atajo recién guardado queda encendido y las caídas pasan a ser suyas.

@@ -4267,13 +4267,361 @@ async function escenarioCobertura(browser, base){
   await context.close();
 }
 
+// ------------------------------------------------------------------ v16 (3.11): el equipo abierto como tarjeta y su detalle en cajas
+// Lo que mide la tarjeta del equipo abierto y sus cajas, para comparar.
+async function medirTarjeta(page, equipoId){
+  return page.evaluate(id=>{
+    const li = document.querySelector(`#inventario-tecnologico-mapa-panel li[data-equipo-id="${id}"]`);
+    if(!li) return null;
+    const cs = getComputedStyle(li);
+    const det = li.querySelector(".inventario-tecnologico-mapa-equipo-detalle");
+    const r = li.getBoundingClientRect(), rd = det ? det.getBoundingClientRect() : null;
+    const fila = li.querySelector(":scope > .inventario-tecnologico-mapa-equipo-fila > .inventario-tecnologico-mapa-fila");
+    const bloques = [...li.querySelectorAll("section.inventario-tecnologico-mapa-bloque")].map(b=>{
+      const cab = b.querySelector(":scope > .inventario-tecnologico-mapa-bloque-cab"), cuerpo = b.querySelector(":scope > .inventario-tecnologico-mapa-bloque-cuerpo");
+      return {
+        clase: [...b.classList].find(c=>/mapa-bloque-(servidor|camino|clientes|respaldos)$/.test(c))?.replace("inventario-tecnologico-mapa-bloque-", ""),
+        etiqueta: b.getAttribute("aria-label"),
+        titulo: cab ? cab.querySelector(".inventario-tecnologico-mapa-bloque-titulo").textContent.replace(/\s+/g, " ").trim() : null,
+        icono: !!(cab && cab.querySelector(".inventario-tecnologico-mapa-bloque-icono svg")),
+        borde: getComputedStyle(b).borderTopWidth,
+        fondoCab: cab ? getComputedStyle(cab).backgroundColor : null,
+        fondoCuerpo: cuerpo ? getComputedStyle(b).backgroundColor : null,
+        iconoColor: cab ? getComputedStyle(cab.querySelector(".inventario-tecnologico-mapa-bloque-icono")).backgroundColor : null,
+      };
+    });
+    return {
+      sel: li.classList.contains("inventario-tecnologico-mapa-equipo-sel"),
+      bordeIzq: cs.borderLeftWidth, colorIzq: cs.borderLeftColor, fondo: cs.backgroundColor, sombra: cs.boxShadow !== "none", radio: cs.borderTopLeftRadius,
+      margenAbajo: parseFloat(cs.marginBottom), margenArriba: parseFloat(cs.marginTop),
+      detalleAdentro: !!(rd && rd.top >= r.top && rd.bottom <= r.bottom + 0.5 && rd.left >= r.left && rd.right <= r.right + 0.5),
+      filaBorde: fila ? getComputedStyle(fila).borderTopColor : null, filaFondo: fila ? getComputedStyle(fila).backgroundColor : null,
+      bloques,
+      acciones: !!li.querySelector(".inventario-tecnologico-mapa-equipo-acciones"),
+    };
+  }, equipoId);
+}
+// El ícono de cada fila de equipo del panel, comparado con el que corresponde
+// a su tipo (el de fábrica, el propio o el genérico), con el mismo parser.
+async function iconosDeFilas(page){
+  return page.evaluate(async ()=>{
+    const { GLIFOS_TIPO_EQUIPO } = await import("/assets/js/inventario-tecnologico/ui/mapa/iconos-equipo.js");
+    const { GLIFO_RADIO } = await import("/assets/js/inventario-tecnologico/ui/mapa/leaflet.js");
+    const norm = html=>{ const t = document.createElement("template"); t.innerHTML = html; return t.innerHTML; };
+    return [...document.querySelectorAll("#inventario-tecnologico-mapa-panel li[data-equipo-id]")].map(li=>{
+      const span = li.querySelector(".inventario-tecnologico-mapa-icono-radio");
+      const html = span ? span.innerHTML : "";
+      const tipo = span ? span.dataset.iconoTipo : null;
+      const cual = html === norm(GLIFO_RADIO) ? "generico" : (Object.entries(GLIFOS_TIPO_EQUIPO).find(([, g])=>norm(g) === html)?.[0] || "otro");
+      return { id: Number(li.dataset.equipoId), tipo, cual, titulo: span ? span.getAttribute("title") : null, svg: !!(span && span.querySelector("svg")) };
+    });
+  });
+}
+async function escenarioTarjeta(browser, base){
+  {
+    const { context, page, errores } = await abrirApp(browser, base, fixtureCobertura());
+    await irAlMapa(page);
+    await verificar("v16: en la torre, cada equipo de red con el ícono de su tipo (no el genérico); sin tipo, el genérico", async ()=>{
+      await irAUbicacionDesdePanel(page, 1);
+      const filas = await iconosDeFilas(page);
+      const esperado = { 10: "ptp", 11: "ap", 12: "ptp", 50: "switch", 51: "camara", 52: "camara" };
+      exigir(filas.length === 6 && filas.every(f=>f.svg && f.cual === esperado[f.id] && f.tipo === esperado[f.id]), "íconos: " + JSON.stringify(filas));
+      exigir(filas.find(f=>f.id === 11).titulo === "AP" && filas.find(f=>f.id === 10).titulo === "Punto a Punto", "títulos: " + JSON.stringify(filas.map(f=>f.titulo)));
+      await page.evaluate(()=>document.querySelector('#inventario-tecnologico-mapa-panel li[data-equipo-id]').scrollIntoView({ block: "start" }));
+      await captura(page, "v16-iconos-torre.png");
+      await irAUbicacionDesdePanel(page, 4);
+      const bodega = await iconosDeFilas(page);
+      exigir(bodega.length === 1 && bodega[0].id === 40 && bodega[0].cual === "generico" && bodega[0].titulo === "Sin tipo", "sin tipo: " + JSON.stringify(bodega));
+    });
+    await seleccionarEquipoDesdeSuUbicacion(page, 1, 11);
+    await esperarPanelQuieto(page);
+    await verificar("3.11: el equipo abierto es una sola tarjeta (fila y detalle en el mismo marco), con el borde del color de su red, fondo teñido y sombra", async ()=>{
+      const t = await medirTarjeta(page, 11);
+      exigir(t && t.sel && t.detalleAdentro, "el detalle no va dentro del marco: " + JSON.stringify(t));
+      exigir(t.bordeIzq === "5px" && t.colorIzq === "rgb(0, 77, 171)", "borde (Red Administrativa, #004DAB): " + t.bordeIzq + " " + t.colorIzq);
+      exigir(t.fondo === "rgb(237, 243, 249)" && t.sombra && t.radio === "10px", "fondo o sombra: " + JSON.stringify(t));
+      exigir(t.filaBorde === "rgba(0, 0, 0, 0)", "la fila conserva su borde dentro del marco: " + t.filaBorde);
+      exigir(t.acciones, "sin las acciones al pie");
+    });
+    await verificar("3.11: Servidor, Camino a la raíz, Clientes y Respaldos, cada uno en su caja con barra de título, ícono y su color", async ()=>{
+      const t = await medirTarjeta(page, 11);
+      exigir(JSON.stringify(t.bloques.map(b=>b.clase)) === '["servidor","camino","clientes","respaldos"]', JSON.stringify(t.bloques.map(b=>b.clase)));
+      exigir(t.bloques.every(b=>b.icono && b.borde === "1px" && b.fondoCab !== b.fondoCuerpo), "caja sin ícono, borde o barra: " + JSON.stringify(t.bloques));
+      exigir(/^Clientes \(9\)/.test(t.bloques[2].titulo) && t.bloques[2].etiqueta === "Clientes (9)", "título de Clientes: " + t.bloques[2].titulo);
+      exigir(/^Camino a la raíz/.test(t.bloques[1].titulo) && /^Camino a la raíz \(\d saltos?\)$/.test(t.bloques[1].etiqueta), "camino: " + t.bloques[1].etiqueta);
+      const colores = t.bloques.map(b=>b.iconoColor);
+      exigir(JSON.stringify(colores) === JSON.stringify(["rgb(0, 77, 171)", "rgb(236, 116, 29)", "rgb(0, 126, 178)", "rgb(91, 75, 138)"]), "colores de las cajas: " + colores.join(" | "));
+      // Los botones de la caja siguen funcionando (Fijar sus líneas, en el AP agrupado).
+      exigir(await cuenta(page, `${SEL.panel} section.inventario-tecnologico-mapa-bloque-clientes [data-accion="alternar-expandido"]`) === 1, "falta «Fijar sus líneas» en Clientes");
+    });
+    await verificar("3.11: los demás equipos de la torre se ven igual que siempre", async ()=>{
+      const otro = await medirTarjeta(page, 10);
+      exigir(otro && !otro.sel && otro.bordeIzq === "0px" && !otro.sombra && otro.bloques.length === 0, "otro equipo cambió: " + JSON.stringify(otro));
+      exigir(otro.filaBorde === "rgb(220, 227, 234)" && otro.filaFondo === "rgb(255, 255, 255)", "su fila: " + otro.filaBorde + " " + otro.filaFondo);
+      const t = await medirTarjeta(page, 11);
+      exigir(t.margenAbajo >= 12 && t.margenArriba >= 8, "sin aire con el equipo siguiente: " + t.margenArriba + " / " + t.margenAbajo);
+      await captura(page, "v16-tarjeta.png");
+      // La tarjeta entera, para mirarla (es más alta que la pantalla): con la
+      // ventana alta un momento, para que el panel no la corte.
+      await page.setViewportSize({ width: 1400, height: 2400 });
+      await page.waitForTimeout(300);
+      await page.locator(`${SEL.panel} li[data-equipo-id="11"]`).screenshot({ path: path.join(CAPTURAS, "v16-tarjeta-entera.png") });
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.waitForTimeout(300);
+    });
+    await verificar("3.11: el marco va del color de cada red (Red Cámaras) y, sin red, del de acento", async ()=>{
+      await page.click(SEL.equipo(50));
+      await page.waitForSelector(`${SEL.panel} [data-equipo-id="50"].inventario-tecnologico-mapa-equipo-sel`);
+      await esperarPanelQuieto(page);
+      const t = await medirTarjeta(page, 50);
+      exigir(t.colorIzq === "rgb(236, 116, 29)", "Red Cámaras: " + t.colorIzq);
+      exigir(await cuenta(page, `${SEL.panel} .inventario-tecnologico-mapa-equipo-sel`) === 1 && (await medirTarjeta(page, 11)).bordeIzq === "0px", "quedó otro marco abierto");
+      await seleccionarEquipoDesdeSuUbicacion(page, 4, 40);
+      await esperarPanelQuieto(page);
+      const s = await medirTarjeta(page, 40);
+      exigir(s.colorIzq === "rgb(0, 126, 178)", "sin red, el de acento: " + s.colorIzq);
+    });
+    await verificar("3.11: en la simulación, la fila del equipo abierto conserva el color de su estado", async ()=>{
+      await seleccionarEquipoDesdeSuUbicacion(page, 1, 11);
+      await esperarPanelQuieto(page);
+      await page.click(SEL.simular(11));
+      await page.waitForFunction(()=>document.querySelector('#inventario-tecnologico-mapa-panel li[data-equipo-id="11"]')?.classList.contains("inventario-tecnologico-mapa-equipo-caido"), null, { timeout: 4000 });
+      const t = await medirTarjeta(page, 11);
+      exigir(t.sel && t.filaFondo !== "rgba(0, 0, 0, 0)" && t.filaFondo !== t.fondo, "la fila perdió el color de la caída: " + t.filaFondo);
+      await captura(page, "v16-tarjeta-simulacion.png");
+      await page.click(SEL.simular(11));
+      await page.click("#inventario-tecnologico-mapa-simulacion");
+      await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+    });
+    await verificar("3.11: al elegir otro equipo de la torre, el detalle sigue desplegándose con su transición (acordeón)", async ()=>{
+      await seleccionarEquipoDesdeSuUbicacion(page, 1, 11);
+      await esperarPanelQuieto(page);
+      await page.click(SEL.equipo(12));
+      await page.waitForSelector(`${SEL.panel} [data-equipo-id="12"].inventario-tecnologico-mapa-equipo-sel`);
+      const n = await page.evaluate(()=>document.querySelector('#inventario-tecnologico-mapa-panel [data-equipo-id="12"] .inventario-tecnologico-mapa-equipo-detalle')?.getAnimations().length ?? -1);
+      exigir(n > 0, "sin animación: " + n);
+      await esperarPanelQuieto(page);
+      exigir((await medirTarjeta(page, 12)).detalleAdentro, "después de la transición, el detalle quedó afuera del marco");
+    });
+    await verificar("sin errores de JavaScript (tarjeta del equipo)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    // Con un ícono propio en «Cámara» (013) y sin la 007.
+    const fx = fixtureCobertura();
+    fx.tablas.tipos_equipo_red.find(t=>t.valor === "camara").icono_svg = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="currentColor"/></svg>`;
+    const { context, page, errores } = await abrirApp(browser, base, fx);
+    await irAlMapa(page);
+    await verificar("v16: con un ícono propio en el tipo (013), las filas de ese tipo lo usan, a 16 px", async ()=>{
+      await irAUbicacionDesdePanel(page, 1);
+      const filas = await iconosDeFilas(page);
+      const camaras = filas.filter(f=>f.tipo === "camara");
+      exigir(camaras.length === 2 && camaras.every(f=>f.cual === "otro"), "cámaras: " + JSON.stringify(camaras));
+      const tam = await page.evaluate(()=>{ const s = document.querySelector('#inventario-tecnologico-mapa-panel li[data-equipo-id="51"] .inventario-tecnologico-mapa-icono-radio svg'); return [s.getAttribute("width"), s.getAttribute("height"), !!s.querySelector("circle")]; });
+      exigir(JSON.stringify(tam) === '["16","16",true]', "tamaño o forma: " + JSON.stringify(tam));
+      exigir(filas.filter(f=>f.tipo !== "camara").every(f=>f.cual === f.tipo), "los demás cambiaron: " + JSON.stringify(filas));
+    });
+    await verificar("sin errores de JavaScript (íconos propios en la torre)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    const { context, page, errores } = await abrirApp(browser, base, fixture());
+    await irAlMapa(page);
+    await verificar("v16 sin la 007: los equipos de la torre siguen con el ícono genérico, como antes", async ()=>{
+      await irAUbicacionDesdePanel(page, 1);
+      const filas = await iconosDeFilas(page);
+      exigir(filas.length > 0 && filas.every(f=>f.cual === "generico" && !f.titulo), JSON.stringify(filas));
+    });
+    await verificar("sin errores de JavaScript (íconos sin la 007)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    // En el celular (el detalle es una hoja abajo).
+    const { context, page, errores } = await abrirApp(browser, base, fixtureCobertura(), { viewport: { width: 390, height: 844 }, tactil: true });
+    await irAlMapa(page);
+    await verificar("3.11 en el celular: la tarjeta y sus cajas caben en la pantalla, sin scroll horizontal", async ()=>{
+      await seleccionarEquipoDesdeSuUbicacion(page, 1, 11);
+      await esperarPanelQuieto(page);
+      const t = await medirTarjeta(page, 11);
+      exigir(t && t.sel && t.detalleAdentro && t.bloques.length === 4, JSON.stringify(t));
+      const ancho = await page.evaluate(()=>{
+        const li = document.querySelector('#inventario-tecnologico-mapa-panel li[data-equipo-id="11"]');
+        const r = li.getBoundingClientRect();
+        return { derecha: Math.round(r.right), izquierda: Math.round(r.left), vw: innerWidth, scroll: document.documentElement.scrollWidth };
+      });
+      exigir(ancho.izquierda >= 0 && ancho.derecha <= ancho.vw && ancho.scroll <= ancho.vw, "se sale: " + JSON.stringify(ancho));
+      await page.evaluate(()=>document.querySelector('#inventario-tecnologico-mapa-panel li[data-equipo-id="11"]').scrollIntoView({ block: "start" }));
+      await captura(page, "v16-tarjeta-celular.png");
+    });
+    await verificar("sin errores de JavaScript (tarjeta en el celular)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    // En la pantalla completa (el detalle es una ventana sobre el mapa).
+    const { context, page, errores } = await abrirApp(browser, base, fixtureCobertura());
+    await irAlMapa(page);
+    await verificar("3.11 en la pantalla completa: la tarjeta se ve igual dentro de la ventana del detalle", async ()=>{
+      await page.click(BOTON_COMPLETA);
+      await page.waitForSelector(COMPLETA);
+      await page.click(ALTERNAR("panel"));
+      await page.waitForTimeout(400);
+      await seleccionarEquipoDesdeSuUbicacion(page, 1, 11);
+      await esperarPanelQuieto(page);
+      const t = await medirTarjeta(page, 11);
+      exigir(t && t.sel && t.detalleAdentro && t.colorIzq === "rgb(0, 77, 171)" && t.bloques.length === 4, JSON.stringify(t));
+      await captura(page, "v16-tarjeta-pantalla-completa.png");
+      await page.click(BOTON_COMPLETA);
+    });
+    await verificar("sin errores de JavaScript (tarjeta en la pantalla completa)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+}
+
+// ------------------------------------------------------------------ v16: «Todos los equipos», la caída de toda la torre
+const TODOS = id=>`${SEL.panel} input[data-accion="casilla-caida-ubicacion"][data-id="${id}"]`;
+// El estado de la casilla «Todos los equipos» y el de cada equipo de la ubicación.
+async function estadoTodos(page, ubicacionId){
+  return page.evaluate(id=>{
+    const t = document.querySelector(`#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida-ubicacion"][data-id="${id}"]`);
+    const fila = t ? t.closest(".inventario-tecnologico-mapa-caida-todos") : null;
+    const casillas = [...document.querySelectorAll('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida"]')];
+    return t ? {
+      marcada: t.checked, medias: t.indeterminate, bloqueada: t.disabled,
+      texto: fila.innerText.replace(/\s+/g, " ").trim(), titulo: t.closest("label").getAttribute("title"),
+      antesDeLaLista: !!(fila.nextElementSibling && fila.nextElementSibling.matches("ul.inventario-tecnologico-mapa-lista")),
+      equipos: casillas.map(c=>[Number(c.dataset.id), c.checked, c.disabled]),
+    } : null;
+  }, ubicacionId);
+}
+async function escenarioTodos(browser, base){
+  {
+    const fx = fixtureCobertura();
+    // Un atajo con todos los equipos de Torre Cerro Azul (además del de las cámaras).
+    fx.tablas.atajos_simulacion.push({ id: 2, nombre: "Toda Cerro Azul", equipos: [10, 11, 12, 50, 51, 52], orden: 20 });
+    const { context, page, errores } = await abrirApp(browser, base, fx);
+    await irAlMapa(page);
+    await irAUbicacionDesdePanel(page, 1);
+    await verificar("v16: «Todos los equipos (6)» arriba de la lista de la torre, con su casilla en la columna de las demás", async ()=>{
+      const t = await estadoTodos(page, 1);
+      exigir(t && t.antesDeLaLista && /^Todos los equipos \(6\)$/.test(t.texto) && !t.marcada && !t.medias, JSON.stringify(t));
+      exigir(/Simular la caída de todos los equipos de «Torre Cerro Azul»/.test(t.titulo), t.titulo);
+      const col = await page.evaluate(()=>{
+        const a = document.querySelector('#inventario-tecnologico-mapa-panel .inventario-tecnologico-mapa-caida-todos .inventario-tecnologico-mapa-caida-caja').getBoundingClientRect();
+        const b = document.querySelector('#inventario-tecnologico-mapa-panel li[data-equipo-id] .inventario-tecnologico-mapa-caida-caja').getBoundingClientRect();
+        return Math.abs((a.left + a.right) / 2 - (b.left + b.right) / 2);
+      });
+      exigir(col < 1.5, "no está en la misma columna: " + col);
+      exigir(/o «Todos los equipos»/.test(await texto(page, `${SEL.panel} .inventario-tecnologico-mapa-tarjeta-equipos .inventario-tecnologico-mapa-tarjeta-ayuda`)), "la ayuda no lo menciona");
+    });
+    await verificar("v16: un clic tumba los 6 equipos (y enciende la simulación); otro clic los levanta", async ()=>{
+      await page.click(TODOS(1));
+      await page.waitForFunction(()=>/6 caídos/.test(document.getElementById("inventario-tecnologico-mapa-aviso-sim")?.innerText || ""), null, { timeout: 4000 });
+      let t = await estadoTodos(page, 1);
+      exigir(t.marcada && !t.medias && t.equipos.length === 6 && t.equipos.every(([, c])=>c), "no cayeron todos: " + JSON.stringify(t));
+      exigir(/Levantar todos los equipos/.test(t.titulo), t.titulo);
+      await page.click(TODOS(1));
+      await page.waitForFunction(()=>!document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida"]:checked'), null, { timeout: 4000 });
+      t = await estadoTodos(page, 1);
+      exigir(!t.marcada && !t.medias, "no se levantaron: " + JSON.stringify(t));
+    });
+    await verificar("v16: con algunos caídos se ve a medias (con cuántos); un clic tumba a todos", async ()=>{
+      await page.click(CASILLA(12));
+      await page.waitForFunction(()=>document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida-ubicacion"]')?.indeterminate === true, null, { timeout: 4000 });
+      let t = await estadoTodos(page, 1);
+      exigir(t.medias && !t.marcada && /· 1 caído$/.test(t.texto) && /1 caído de 6: un clic tumba a todos/.test(t.titulo), JSON.stringify(t));
+      const caja = await page.evaluate(()=>getComputedStyle(document.querySelector('#inventario-tecnologico-mapa-panel .inventario-tecnologico-mapa-caida-todos .inventario-tecnologico-mapa-caida-caja')).backgroundColor);
+      exigir(caja === "rgb(139, 30, 18)", "la caja a medias no se pinta: " + caja);
+      await page.evaluate(()=>document.querySelector("#inventario-tecnologico-mapa-panel .inventario-tecnologico-mapa-caida-todos").scrollIntoView({ block: "start" }));
+      await captura(page, "v16-todos-a-medias.png");
+      await page.click(`${SEL.panel} .inventario-tecnologico-mapa-caida-todos-texto`); // también con el texto
+      await page.waitForFunction(()=>document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida-ubicacion"]')?.checked === true, null, { timeout: 4000 });
+      t = await estadoTodos(page, 1);
+      exigir(t.equipos.every(([, c])=>c), "no cayeron todos: " + JSON.stringify(t.equipos));
+      await page.click(TODOS(1));
+      await page.waitForFunction(()=>!document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida"]:checked'), null, { timeout: 4000 });
+    });
+    await verificar("v16: con el teclado (Espacio) y el foco se queda en la casilla", async ()=>{
+      await page.focus(TODOS(1));
+      await page.keyboard.press("Space");
+      await page.waitForFunction(()=>document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida-ubicacion"]')?.checked === true, null, { timeout: 4000 });
+      exigir(await page.evaluate(()=>document.activeElement?.dataset?.accion === "casilla-caida-ubicacion"), "el foco se perdió al repintar");
+      await page.keyboard.press("Space");
+      await page.waitForFunction(()=>document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida-ubicacion"]')?.checked === false, null, { timeout: 4000 });
+    });
+    await verificar("v16: los que tumba un atajo siguen caídos al levantar con «Todos»; si todos son de atajos, queda marcada y bloqueada", async ()=>{
+      // Atajo de las cámaras (solo el switch 50): a medias.
+      await page.click(`${SEL.panel} [data-accion="volver-resumen"]`);
+      await page.click(ATAJO(1));
+      await irAUbicacionDesdePanel(page, 1);
+      let t = await estadoTodos(page, 1);
+      exigir(t.medias && t.equipos.find(([id])=>id === 50)[2] === true, "el atajo de las cámaras: " + JSON.stringify(t));
+      await page.click(TODOS(1));
+      await page.waitForFunction(()=>document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida-ubicacion"]')?.checked === true, null, { timeout: 4000 });
+      await page.click(TODOS(1));
+      await page.waitForFunction(()=>document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida-ubicacion"]')?.indeterminate === true, null, { timeout: 4000 });
+      t = await estadoTodos(page, 1);
+      exigir(JSON.stringify(t.equipos.filter(([, c])=>c).map(([id])=>id)) === "[50]", "deberían quedar solo los del atajo: " + JSON.stringify(t.equipos));
+      // Atajo con los 6: marcada y bloqueada, con la ayuda del atajo.
+      await page.click(`${SEL.panel} [data-accion="volver-resumen"]`);
+      await page.click(ATAJO(1));
+      await page.click(ATAJO(2));
+      await irAUbicacionDesdePanel(page, 1);
+      t = await estadoTodos(page, 1);
+      exigir(t.marcada && t.bloqueada && /Caídos por el atajo «Toda Cerro Azul»: apaga el atajo para levantarlos/.test(t.titulo), JSON.stringify(t));
+      await page.click(`${SEL.panel} [data-accion="volver-resumen"]`);
+      await page.click(ATAJO(2));
+      await irAUbicacionDesdePanel(page, 1);
+      t = await estadoTodos(page, 1);
+      exigir(!t.marcada && !t.medias && !t.bloqueada, "al apagar el atajo: " + JSON.stringify(t));
+      await captura(page, "v16-todos-los-equipos.png");
+    });
+    await verificar("v16: con la simulación apagada, un clic tumba (no levanta lo que quedó de antes), también en la casilla de un equipo", async ()=>{
+      await page.click(TODOS(1));
+      await page.waitForFunction(()=>document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida-ubicacion"]')?.checked === true, null, { timeout: 4000 });
+      await page.click('#inventario-tecnologico-mapa-aviso-sim [data-sim-accion="salir"]');
+      await page.waitForFunction(()=>!document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida"]:checked'), null, { timeout: 4000 });
+      await page.click(CASILLA(11));
+      await page.waitForFunction(()=>document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida"][data-id="11"]')?.checked === true, null, { timeout: 4000 });
+      await page.click('#inventario-tecnologico-mapa-aviso-sim [data-sim-accion="salir"]');
+      await page.waitForFunction(()=>!document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida"]:checked'), null, { timeout: 4000 });
+      await page.click(TODOS(1));
+      await page.waitForFunction(()=>document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida-ubicacion"]')?.checked === true, null, { timeout: 4000 });
+      const t = await estadoTodos(page, 1);
+      exigir(t.equipos.every(([, c])=>c), JSON.stringify(t.equipos));
+      await page.click('#inventario-tecnologico-mapa-aviso-sim [data-sim-accion="restablecer"]');
+      await page.click('#inventario-tecnologico-mapa-aviso-sim [data-sim-accion="salir"]');
+    });
+    await verificar("v16: no aparece en una ubicación con un solo equipo", async ()=>{
+      await irAUbicacionDesdePanel(page, 4);
+      exigir(await cuenta(page, `${SEL.panel} .inventario-tecnologico-mapa-caida-todos`) === 0, "aparece con un solo equipo");
+      exigir(!/Todos los equipos/.test(await texto(page, `${SEL.panel} .inventario-tecnologico-mapa-tarjeta-equipos .inventario-tecnologico-mapa-tarjeta-ayuda`)), "la ayuda lo menciona");
+    });
+    await verificar("sin errores de JavaScript («Todos los equipos»)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    // Un visitante con «Ver mapa»: la simulación es solo en su pantalla, así que también la tiene.
+    const { context, page, errores } = await abrirApp(browser, base, fixture({ rol: "visitante", permitidas: ["ver_mapa"], red007: true }));
+    await verificar("v16: un visitante con «Ver mapa» también tiene «Todos los equipos» (la simulación no se guarda)", async ()=>{
+      await irAlMapa(page);
+      await irAUbicacionDesdePanel(page, 1);
+      exigir(await cuenta(page, TODOS(1)) === 1 && await cuenta(page, `${SEL.panel} [data-accion="nuevo-equipo"]`) === 0, "sin la casilla, o con «+ Equipo»");
+      await page.click(TODOS(1));
+      await page.waitForFunction(()=>document.querySelector('#inventario-tecnologico-mapa-panel input[data-accion="casilla-caida-ubicacion"]')?.checked === true, null, { timeout: 4000 });
+      exigir((await estadoTodos(page, 1)).equipos.every(([, c])=>c), "no cayeron todos");
+    });
+    await verificar("sin errores de JavaScript (visitante con «Ver mapa»)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+}
+
 // ------------------------------------------------------------------ main
 const srv = await servir(RAIZ);
 const base = `http://127.0.0.1:${srv.address().port}`;
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 try{
   // SOLO=plano (u otro nombre) corre un solo escenario, para depurar.
-  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo, campos: escenarioCampos, sin012: escenarioSin012, vacias: escenarioVacias, grosor0: escenarioGrosorCero, filtros: escenarioFiltros, solo: escenarioSoloTabla, buscar: escenarioBuscar, franjas: escenarioFranjas, tooltip: escenarioTooltip, cobertura: escenarioCobertura };
+  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo, campos: escenarioCampos, sin012: escenarioSin012, vacias: escenarioVacias, grosor0: escenarioGrosorCero, filtros: escenarioFiltros, solo: escenarioSoloTabla, buscar: escenarioBuscar, franjas: escenarioFranjas, tooltip: escenarioTooltip, cobertura: escenarioCobertura, tarjeta: escenarioTarjeta, todos: escenarioTodos };
   // SOLO=plano o SOLO=plano,torre (varios, separados por comas).
   const solo = process.env.SOLO ? process.env.SOLO.split(",").map(x=>x.trim()).filter(Boolean) : null;
   for(const [nombre, fn] of Object.entries(escenarios)) if(!solo || solo.includes(nombre)) await fn(browser, base);

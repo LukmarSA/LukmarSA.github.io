@@ -10,6 +10,8 @@ import { colorTipo, iconoTipoTam, tintarClaro } from "../../nucleo/opciones-conf
 import { urlFoto } from "../../negocio/operaciones.js";
 import { GLIFO_RADIO } from "./leaflet.js";
 import { normalizarCobertura, textoCobertura } from "../../nucleo/cobertura.js";
+import { cargarTiposActivo } from "../../nucleo/datos.js";
+import { iconoTipoEquipo } from "./iconos-equipo.js";
 
 const P = "inventario-tecnologico-";
 const MAX_CLIENTES_LISTA = 12;
@@ -72,6 +74,25 @@ function chipRed(ctx, e){
   return desde !== null
     ? `<span class="${P}mapa-red-chip ${P}mapa-red-chip-heredada" style="--red-color:${esc(r.color)}" title="Red ${esc(r.nombre)}, heredada${origen ? ` de «${esc(origen.nombre)}»` : " de su servidor"}">${esc(r.nombre)}</span>`
     : `<span class="${P}mapa-red-chip" style="--red-color:${esc(r.color)}" title="Red ${esc(r.nombre)}">${esc(r.nombre)}</span>`;
+}
+
+// v16 (3.11): el color del marco del equipo abierto: el de su red efectiva
+// (con la herencia), como su chip; sin red, el de acento.
+const COLOR_EQUIPO_SIN_RED = "#007EB2";
+function colorMarcoEquipo(ctx, e){
+  const id = ctx.red007 ? redEfectivaDe(e) : null;
+  const r = id !== null && id !== undefined ? ctx.redPorId.get(id) : null;
+  return r && /^#[0-9A-Fa-f]{6}$/.test(r.color || "") ? r.color : COLOR_EQUIPO_SIN_RED;
+}
+
+// v16: el ícono de cada equipo en la torre es el de su tipo (el mismo del
+// tooltip y de «Redes y tipos»: el propio de la 013, el de fábrica, el del
+// tipo de activo o, sin tipo, el genérico de radio). Antes era siempre el
+// genérico. Sin la 007 no hay tipos: el genérico, como antes.
+function iconoEquipoFila(ctx, e){
+  if(!ctx.red007 || !e.tipo_equipo) return { svg: GLIFO_RADIO, titulo: ctx.red007 ? "Sin tipo" : "" };
+  const tipo = ctx.tipoPorValor.get(e.tipo_equipo) || { valor: e.tipo_equipo };
+  return { svg: iconoTipoEquipo(tipo, { tiposEquipo: [...ctx.tipoPorValor.values()], tiposActivo: cargarTiposActivo() }), titulo: tipo.etiqueta || e.tipo_equipo };
 }
 
 function pillEstado(estado){
@@ -156,6 +177,35 @@ export function htmlPanelResumen(ctx){
 }
 
 // Atajos de simulación (007): cada uno apaga uno o más equipos con un toggle.
+// v16: «Todos los equipos»: una casilla para simular la caída de todos los
+// equipos de la ubicación (con 2 o más), en la misma columna que las de cada
+// equipo. Todos o ninguno: con algunos caídos se ve a medias; un clic tumba a
+// todos y el siguiente los levanta. Los que tumba un atajo siguen caídos hasta
+// que se apague el atajo (si todos están caídos por atajos, la casilla queda
+// marcada y bloqueada, como la de un equipo).
+function htmlCaidaTodos(ctx, u, equipos){
+  if(!ctx.puedeSimular || equipos.length < 2) return "";
+  const caidos = ctx.sim ? equipos.filter(e=>ctx.sim.caidos.has(e.id)) : [];
+  const manuales = new Set(ctx.simEstado.caidos || []);
+  const todos = caidos.length === equipos.length;
+  const parcial = caidos.length > 0 && !todos;
+  const soloAtajos = todos && caidos.every(e=>!manuales.has(e.id));
+  const atajos = soloAtajos ? [...new Set(caidos.flatMap(e=>atajosQueLoApagan(e.id, { atajosActivos: ctx.simEstado.atajos, atajos: ctx.atajos }).map(a=>a.nombre)))] : [];
+  const titulo = soloAtajos
+    ? `Caídos por ${atajos.length === 1 ? "el atajo" : "los atajos"} ${atajos.map(n=>`«${n}»`).join(", ")}: apaga ${atajos.length === 1 ? "el atajo" : "los atajos"} para levantarlos`
+    : (todos ? `Levantar todos los equipos de «${u.nombre}»`
+      : (parcial ? `${plural(caidos.length, "caído", "caídos")} de ${equipos.length}: un clic tumba a todos`
+        : `Simular la caída de todos los equipos de «${u.nombre}» (solo en esta pantalla)`));
+  const id = `${P}caida-todos-${u.id}`;
+  return `<div class="${P}mapa-caida-todos${todos ? ` ${P}mapa-caida-todos-on` : ""}${parcial ? ` ${P}mapa-caida-todos-parcial` : ""}" data-caida-todos="${u.id}">
+      <label class="${P}mapa-caida-check${soloAtajos ? ` ${P}mapa-caida-bloqueada` : ""}" title="${esc(titulo)}">
+        <input type="checkbox" id="${id}" data-accion="casilla-caida-ubicacion" data-id="${u.id}"${todos ? " checked" : ""}${parcial ? ` data-parcial="1"` : ""}${soloAtajos ? " disabled" : ""} aria-label="Simular la caída de todos los equipos de «${esc(u.nombre)}»">
+        <span class="${P}mapa-caida-caja" aria-hidden="true"></span>
+      </label>
+      <label class="${P}mapa-caida-todos-texto" for="${id}" title="${esc(titulo)}">Todos los equipos <span class="${P}mapa-muted">(${equipos.length})</span>${caidos.length && !todos ? `<span class="${P}mapa-caida-todos-cuenta">· ${esc(plural(caidos.length, "caído", "caídos"))}</span>` : ""}</label>
+    </div>`;
+}
+
 function htmlAtajos(ctx){
   const activos = new Set(ctx.simEstado.atajos || []);
   const hayCaidas = !!(ctx.sim && ctx.sim.caidos.size);
@@ -238,9 +288,11 @@ export function htmlPanelUbicacion(ctx, u){
     ${tarjeta({
       tipo: "equipos", icono: GLIFO_RADIO, titulo: "Equipos de red", n: equipos.length,
       accion: ctx.esAdmin ? btn("nuevo-equipo", "+ Equipo", { id: u.id }) : "",
-      ayuda: equipos.length && ctx.puedeSimular ? "Marca la casilla de un equipo para simular su caída (solo en esta pantalla, no se guarda)." : "",
+      ayuda: equipos.length && ctx.puedeSimular ? (equipos.length > 1
+        ? "Marca la casilla de un equipo para simular su caída, o «Todos los equipos» para la de todos (solo en esta pantalla, no se guarda)."
+        : "Marca la casilla de un equipo para simular su caída (solo en esta pantalla, no se guarda).") : "",
       cuerpo: equipos.length
-        ? `<ul class="${P}mapa-lista">${equipos.map(e=>htmlEquipo(ctx, e, s.equipoId === e.id, u)).join("")}</ul>`
+        ? `${htmlCaidaTodos(ctx, u, equipos)}<ul class="${P}mapa-lista">${equipos.map(e=>htmlEquipo(ctx, e, s.equipoId === e.id, u)).join("")}</ul>`
         : `<div class="${P}mapa-vacio">Sin equipos de red.</div>`,
     })}
 
@@ -431,11 +483,15 @@ function htmlEquipo(ctx, e, seleccionado, u = null){
       </label>`
     : "";
   const red = chipRed(ctx, e);
-  return `<li class="${P}mapa-equipo${seleccionado ? ` ${P}mapa-equipo-sel` : ""}${st && st.estado !== "servicio" ? ` ${P}mapa-equipo-${st.estado}` : ""}" data-equipo-id="${e.id}">
+  const icono = iconoEquipoFila(ctx, e);
+  // Abierto, la fila y su detalle van en una sola tarjeta del color de su red (v16, 3.11).
+  const marco = seleccionado ? colorMarcoEquipo(ctx, e) : null;
+  const estiloMarco = marco ? ` style="--equipo-color:${marco};--equipo-suave:${tintarClaro(marco, 0.93)};--equipo-borde:${tintarClaro(marco, 0.55)}"` : "";
+  return `<li class="${P}mapa-equipo${seleccionado ? ` ${P}mapa-equipo-sel` : ""}${st && st.estado !== "servicio" ? ` ${P}mapa-equipo-${st.estado}` : ""}" data-equipo-id="${e.id}"${estiloMarco}>
     <div class="${P}mapa-equipo-fila">
       ${casilla}
       <button type="button" class="${P}mapa-fila" data-accion="seleccionar-equipo" data-id="${e.id}" aria-pressed="${seleccionado}" aria-expanded="${seleccionado}" title="${seleccionado ? "Plegar el detalle de este equipo" : "Desplegar su detalle y su camino hasta la raíz"}">
-        <span class="${P}mapa-icono-radio">${GLIFO_RADIO}</span>
+        <span class="${P}mapa-icono-radio"${icono.titulo ? ` title="${esc(icono.titulo)}"` : ""} data-icono-tipo="${esc(e.tipo_equipo || "")}">${icono.svg}</span>
         <span class="${P}mapa-fila-texto">
           <span class="${P}mapa-fila-titulo" title="${esc(e.nombre)}">${esc(nombreEnUbicacion(ctx, e, u))}</span>
           <span class="${P}mapa-fila-meta">${pillRolOTipo(ctx, e)}${st ? pillEstado(st.estado) : ""}${red}${sub ? `<span class="${P}mapa-fila-sub">${esc(sub)}</span>` : ""}</span>
@@ -488,6 +544,27 @@ function textoSimulacion(ctx, e, st){
   return `En servicio por su camino normal.`;
 }
 
+// v16 (3.11): cada sección del detalle de un equipo (Servidor, Camino a la
+// raíz, Clientes, Respaldos) va en su propia caja, con una barra de título con
+// su ícono y su color (los de las líneas del mapa: backbone, camino, P2MP y
+// respaldo), siempre abierta.
+const ICONOS_BLOQUE = Object.freeze({
+  servidor: `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg>`,
+  camino: `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="5" r="2.2"/><path d="M8.2 19H14a3.5 3.5 0 0 0 0-7h-4a3.5 3.5 0 0 1 0-7h5.8"/></svg>`,
+  clientes: `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.2"/><path d="M12 7.2V12M12 12 5 19M12 12l7 7M12 12v7"/></svg>`,
+  respaldos: `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8.5h14l-3.5-3.5M20 15.5H6l3.5 3.5"/></svg>`,
+});
+function bloqueDetalle(clase, { etiqueta, titulo, accion = "", cuerpo }){
+  return `<section class="${P}mapa-bloque ${P}mapa-bloque-${clase}" aria-label="${esc(etiqueta)}">
+      <div class="${P}mapa-bloque-cab">
+        <span class="${P}mapa-bloque-icono" aria-hidden="true">${ICONOS_BLOQUE[clase]}</span>
+        <span class="${P}mapa-bloque-titulo">${titulo}</span>
+        ${accion ? `<span class="${P}mapa-bloque-accion">${accion}</span>` : ""}
+      </div>
+      <div class="${P}mapa-bloque-cuerpo">${cuerpo}</div>
+    </section>`;
+}
+
 function htmlEquipoDetalle(ctx, e, activo){
   const red = ctx.red;
   const st = ctx.sim ? ctx.sim.estado.get(e.id) : null;
@@ -507,25 +584,22 @@ function htmlEquipoDetalle(ctx, e, activo){
     </div>
     ${st ? `<div class="${P}mapa-sim-estado ${P}mapa-sim-estado-${st.estado}">${textoSimulacion(ctx, e, st)}</div>` : ""}`;
 
-  const servidor = `<div class="${P}mapa-bloque">
-      <div class="${P}mapa-bloque-titulo">Servidor</div>
-      ${principal ? `<div class="${P}mapa-enlace${caido ? ` ${P}mapa-enlace-cortado` : ""}">
+  const servidor = bloqueDetalle("servidor", { etiqueta: "Servidor", titulo: "Servidor", cuerpo: principal ? `<div class="${P}mapa-enlace${caido ? ` ${P}mapa-enlace-cortado` : ""}">
           <div class="${P}mapa-enlace-cab"><span class="${P}mapa-enlace-flecha">↑</span> <button type="button" class="${P}mapa-enlace-texto" data-accion="seleccionar-equipo-mapa" data-id="${principal.servidor.id}"><strong>${esc(principal.servidor.nombre)}</strong></button> <span class="${P}mapa-muted">en ${esc(principal.ubicacionServidor ? principal.ubicacionServidor.nombre : "—")}</span>${caido ? ` <span class="${P}mapa-estado ${P}mapa-estado-caido">cortado</span>` : ""}</div>
           ${htmlDatosConexion(principal)}
         </div>`
-        : `<div class="${P}mapa-vacio">Raíz: punto de entrada de internet (no tiene servidor).</div>`}
-    </div>`;
+        : `<div class="${P}mapa-vacio">Raíz: punto de entrada de internet (no tiene servidor).</div>` });
 
   const pasos = camino.map((id, i)=>{
     const conector = i === 0 ? "" : htmlConectorCamino(ctx, tramos[i - 1]);
     const roto = ctx.sim && i > 0 && !tramos[i - 1].funciona;
     return `<li class="${P}mapa-camino-paso${roto ? ` ${P}mapa-camino-roto` : ""}">${conector}<div class="${P}mapa-camino-nodo"><span class="${P}mapa-camino-punto" aria-hidden="true"></span><button type="button" class="${P}mapa-enlace-texto" data-accion="seleccionar-equipo-mapa" data-id="${id}"${id === e.id ? ` aria-current="true"` : ""}>${esc(nombreEquipo(ctx, id))}</button> <span class="${P}mapa-muted">${esc(nombreUbicacionDe(ctx, id))}</span>${i === camino.length - 1 && red.rol.get(id) === "raiz" ? ` ${pillRol("raiz")}` : ""}</div></li>`;
   }).join("");
-  const caminoHtml = camino.length > 1 || principal ? `<div class="${P}mapa-bloque">
-      <div class="${P}mapa-bloque-titulo">Camino a la raíz ${camino.length > 1 ? `<span class="${P}mapa-muted">(${plural(camino.length - 1, "salto", "saltos")})</span>` : ""}</div>
-      <ol class="${P}mapa-camino">${pasos}</ol>
-      ${!raizAlcanzada ? `<div class="${P}mapa-sim-estado ${P}mapa-sim-estado-sin_conexion">El camino no llega a una raíz con servicio.</div>` : ""}
-    </div>` : "";
+  const caminoHtml = camino.length > 1 || principal ? bloqueDetalle("camino", {
+      etiqueta: `Camino a la raíz${camino.length > 1 ? ` (${plural(camino.length - 1, "salto", "saltos")})` : ""}`,
+      titulo: `Camino a la raíz ${camino.length > 1 ? `<span class="${P}mapa-muted">(${plural(camino.length - 1, "salto", "saltos")})</span>` : ""}`,
+      cuerpo: `<ol class="${P}mapa-camino">${pasos}</ol>
+      ${!raizAlcanzada ? `<div class="${P}mapa-sim-estado ${P}mapa-sim-estado-sin_conexion">El camino no llega a una raíz con servicio.</div>` : ""}` }) : "";
 
   const listaClientes = clientes.slice(0, MAX_CLIENTES_LISTA).map(c=>{
     const cst = ctx.sim ? ctx.sim.estado.get(c.id) : null;
@@ -533,14 +607,12 @@ function htmlEquipoDetalle(ctx, e, activo){
     return `<li><button type="button" class="${P}mapa-enlace-texto" data-accion="seleccionar-equipo-mapa" data-id="${c.id}">${esc(c.nombre)}</button> <span class="${P}mapa-muted">${esc(nombreUbicacionDe(ctx, c.id))}${m !== "inalambrico" ? ` · ${infoMedio(m).badge}` : ""}</span>${cst && cst.estado !== "servicio" ? ` ${pillEstado(cst.estado)}` : ""}</li>`;
   }).join("") + (clientes.length > MAX_CLIENTES_LISTA ? `<li class="${P}mapa-muted">y ${clientes.length - MAX_CLIENTES_LISTA} más</li>` : "");
   const clasePropia = remotos.length === 1 ? "backbone (punto a punto)" : (remotos.length > 1 ? "distribución P2MP" : "");
-  const clientesHtml = `<div class="${P}mapa-bloque">
-      <div class="${P}mapa-bloque-cab">
-        <span class="${P}mapa-bloque-titulo">Clientes (${clientes.length})${clasePropia ? ` <span class="${P}mapa-muted">· ${clasePropia}</span>` : ""}</span>
-        ${agrupado ? btn("alternar-expandido", ctx.expandidos.has(e.id) ? "Agrupar líneas" : "Fijar sus líneas", { id: e.id, pressed: ctx.expandidos.has(e.id), titulo: ctx.expandidos.has(e.id) ? "Volver a mostrar solo el indicador de clientes" : "Mantener sus líneas en el mapa aunque selecciones otra cosa" }) : ""}
-      </div>
-      ${clientes.length ? `<ul class="${P}mapa-sublista">${listaClientes}</ul>` : `<div class="${P}mapa-vacio">No alimenta a ningún equipo.</div>`}
-      ${agrupado ? `<div class="${P}mapa-muted">Tiene más de ${ctx.umbralAgrupar} clientes: en el mapa se muestra agrupado y sus líneas se ven al seleccionarlo.</div>` : ""}
-    </div>`;
+  const clientesHtml = bloqueDetalle("clientes", {
+      etiqueta: `Clientes (${clientes.length})`,
+      titulo: `Clientes (${clientes.length})${clasePropia ? ` <span class="${P}mapa-muted">· ${clasePropia}</span>` : ""}`,
+      accion: agrupado ? btn("alternar-expandido", ctx.expandidos.has(e.id) ? "Agrupar líneas" : "Fijar sus líneas", { id: e.id, pressed: ctx.expandidos.has(e.id), titulo: ctx.expandidos.has(e.id) ? "Volver a mostrar solo el indicador de clientes" : "Mantener sus líneas en el mapa aunque selecciones otra cosa" }) : "",
+      cuerpo: `${clientes.length ? `<ul class="${P}mapa-sublista">${listaClientes}</ul>` : `<div class="${P}mapa-vacio">No alimenta a ningún equipo.</div>`}
+      ${agrupado ? `<div class="${P}mapa-muted">Tiene más de ${ctx.umbralAgrupar} clientes: en el mapa se muestra agrupado y sus líneas se ven al seleccionarlo.</div>` : ""}` });
 
   const filasRespaldo = respaldos.map(r=>{
     const d = describirConexion(red, e.id, r.servidor_alternativo_id);
@@ -554,13 +626,11 @@ function htmlEquipoDetalle(ctx, e, activo){
       ${ctx.esAdmin ? `<span class="${P}mapa-respaldo-acciones">${btn("editar-respaldo", "Editar", { id: r.id })}${btn("eliminar-respaldo", "Quitar", { id: r.id, titulo: "Quitar este respaldo" })}</span>` : ""}
     </li>`;
   }).join("");
-  const respaldosHtml = `<div class="${P}mapa-bloque">
-      <div class="${P}mapa-bloque-cab">
-        <span class="${P}mapa-bloque-titulo">Respaldos (${respaldos.length})</span>
-        ${ctx.esAdmin ? btn("nuevo-respaldo", "+ Respaldo", { id: e.id, titulo: "Registrar a qué otro servidor puede conmutar" }) : ""}
-      </div>
-      ${respaldos.length ? `<ol class="${P}mapa-respaldos">${filasRespaldo}</ol>` : `<div class="${P}mapa-vacio">Sin respaldos: si pierde su servidor, queda sin conectividad.</div>`}
-    </div>`;
+  const respaldosHtml = bloqueDetalle("respaldos", {
+      etiqueta: `Respaldos (${respaldos.length})`,
+      titulo: `Respaldos (${respaldos.length})`,
+      accion: ctx.esAdmin ? btn("nuevo-respaldo", "+ Respaldo", { id: e.id, titulo: "Registrar a qué otro servidor puede conmutar" }) : "",
+      cuerpo: respaldos.length ? `<ol class="${P}mapa-respaldos">${filasRespaldo}</ol>` : `<div class="${P}mapa-vacio">Sin respaldos: si pierde su servidor, queda sin conectividad.</div>` });
 
   return `<div class="${P}mapa-equipo-detalle">
       ${ctx.puedeSimular ? simulacion : ""}
@@ -571,7 +641,7 @@ function htmlEquipoDetalle(ctx, e, activo){
       ${clientesHtml}
       ${respaldosHtml}
       ${e.notas ? `<div class="${P}mapa-panel-notas">${esc(e.notas)}</div>` : ""}
-      <div class="${P}mapa-acciones">
+      <div class="${P}mapa-acciones ${P}mapa-equipo-acciones">
         ${activo ? btn("ver-activo", `Ver activo ${esc(fmtTag(activo))}`, { id: activo.id }) : ""}
         ${ctx.esAdmin ? btn("editar-equipo", "Editar", { id: e.id }) + btn("eliminar-equipo", "Eliminar", { id: e.id, clase: `${P}btn-danger` }) : ""}
       </div>
