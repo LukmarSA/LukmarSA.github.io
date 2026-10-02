@@ -4,6 +4,7 @@
 // módulos igual de puros.
 import { fmtTag, hoyISO } from "./helpers.js";
 import { coordenadasValidas } from "./geo.js";
+import { etiquetaModo } from "./modo-red.js";
 
 export function normalizarTexto(s){
   return String(s ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
@@ -205,6 +206,10 @@ const ERRORES_POR_RESTRICCION = [
   ["equipos_radioenlace_sector_con_radio", "Para guardar la dirección o la apertura hace falta el radio de cobertura."],
   ["equipos_radioenlace_sector_con_direccion", "Un sector (apertura menor que 360°) necesita hacia dónde apunta."],
   ["tipos_equipo_red_icono_valido", "El ícono del tipo de equipo tiene que ser un SVG sin scripts ni eventos (hasta 20 000 caracteres)."],
+  // 014: modo de red y rangos IP
+  ["tipos_equipo_red_modo_valido", "El modo de red del tipo tiene que ser router, bridge, «a elegir» o «no aplica»."],
+  ["equipos_radioenlace_modo_valido", "El modo de red del equipo tiene que ser router o bridge (o el de su tipo)."],
+  ["redes_rangos_ip_validos", "Una red lleva como mucho 20 rangos IP."],
   // 009: piscinas
   ["piscinas_nombre_unico", "Ya hay una piscina con ese nombre."],
   ["piscinas_nombre_valido", "El nombre de la piscina no puede quedar vacío (hasta 40 caracteres)."],
@@ -214,12 +219,25 @@ const ERRORES_POR_RESTRICCION = [
 
 export const TEXTO_FALTA_007 = "Falta la migración 007 en Supabase (tipos de equipo, redes y atajos): hay que correr db/migraciones/007_red_tipos_atajos.sql.";
 export const TEXTO_FALTA_013 = "Falta la migración 013 en Supabase (íconos de los tipos de equipo y cobertura de los AP): hay que correr db/migraciones/013_iconos_equipo_y_cobertura.sql.";
+export const TEXTO_FALTA_014 = "Falta la migración 014 en Supabase (modo de red de los equipos y rangos IP de las redes): hay que correr db/migraciones/014_modo_red_y_rangos_ip.sql.";
 
 export function traducirErrorMapa(error){
   if(!error) return "Error desconocido.";
   const msg = String(error.message || error);
   const code = String(error.code || "");
+  // 014: solo los routers definen red (los triggers traen el equipo o el tipo).
+  const soloRouters = msg.match(/equipos_radioenlace_red_solo_routers: «(.*?)» no define red/);
+  if(soloRouters) return `«${soloRouters[1]}» no define red: trabaja como bridge (o su tipo no tiene modo de red) y va en la red de su servidor. Para darle otra red, ponlo en modo router.`;
+  const modoConRedes = msg.match(/tipos_equipo_red_modo_con_redes: (\d+) equipo\(s\) de tipo «(.*?)» tienen red propia.*? a (\w+)\.?$/);
+  if(modoConRedes){
+    const [, n, tipo, modo] = modoConRedes;
+    const uno = n === "1";
+    return `${uno ? "1 equipo" : `${n} equipos`} de tipo «${tipo}» ${uno ? "tiene" : "tienen"} red propia: ${uno ? "ponlo en modo router o quítale" : "ponlos en modo router o quítales"} la red antes de pasar el tipo a «${etiquetaModo(modo) || modo}».`;
+  }
   for(const [restriccion, texto] of ERRORES_POR_RESTRICCION) if(msg.includes(restriccion)) return texto;
+  // 014: un rango IP mal escrito (cidr) o, sin la migración, sus columnas.
+  if(code === "22P02" && /cidr/i.test(msg)) return "Algún rango IP no es válido: escribe la dirección de la red con su máscara (por ejemplo 10.10.0.0/24).";
+  if((code === "PGRST204" || code === "42703") && /modo_red|rangos_ip|hace_radio|lleva_cobertura/.test(msg)) return TEXTO_FALTA_014;
   // 013: sin la migración, PostgREST no conoce las columnas nuevas (antes que la 007, que también mira tipos_equipo_red).
   if((code === "PGRST204" || code === "42703") && /radio_cobertura_m|azimut_cobertura|apertura_cobertura|'icono_svg' column of 'tipos_equipo_red'|tipos_equipo_red\.icono_svg/.test(msg)) return TEXTO_FALTA_013;
   if(/tipos_equipo_red|atajos_simulacion|public\.redes|'redes'|"redes"/.test(msg) || (code === "PGRST204" && /tipo_equipo|red_id|referencia/.test(msg))){

@@ -3,8 +3,9 @@
 // (abrirModal/cerrarModal) y, al guardar, avisan con mostrarToast y devuelven
 // el control con alGuardar.
 import { cargarActivos, hayCamposConfigurables } from "../../nucleo/datos.js";
-import { cargarAtajos, cargarEquiposRadioenlace, cargarPiscinas, cargarRedes, cargarRespaldos, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, datosNombres, estadoMapa, hayCobertura, hayHerenciaRed, hayMedio, hayNombresConRed, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
-import { TIPO_CON_COBERTURA, normalizarCobertura, textoCobertura, validarCobertura } from "../../nucleo/cobertura.js";
+import { cargarAtajos, cargarEquiposRadioenlace, cargarPiscinas, cargarRedes, cargarRespaldos, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, datosNombres, estadoMapa, hayCobertura, hayHerenciaRed, hayMedio, hayModoRed, hayNombresConRed, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
+import { normalizarCobertura, textoCobertura, validarCobertura } from "../../nucleo/cobertura.js";
+import { MODOS_EQUIPO, MODOS_TIPO, avisosDeCruce, defineRed, haceRadioTipo, llevaCoberturaTipo, modoDelTipo, modoEfectivo, planLote, textoModoDeSuTipo, textoRangos, validarRangos } from "../../nucleo/modo-red.js";
 import { GENEROS, nombreParaGuardar, nombresAutomaticos } from "../../nucleo/mapa-nombres.js";
 import { azimutGrados, distanciaKm, fmtAzimut, fmtCoordenadas, fmtDistancia, parsearCoordenadas } from "../../nucleo/geo.js";
 import { esc, fmtFecha, fmtTag } from "../../nucleo/helpers.js";
@@ -74,6 +75,15 @@ function textoConexion(d){
   }
   if(medio !== "inalambrico") return `Por ${medio === "fibra" ? "fibra óptica" : "cable"} hasta «${d.servidor.nombre}» en ${donde}: ${fmtDistancia(d.distanciaKm)}. En el mapa se dibuja como línea de ${medio === "fibra" ? "fibra" : "cable"}.`;
   return `Radioenlace con «${d.servidor.nombre}» en ${donde}: ${fmtDistancia(d.distanciaKm)} · azimut desde aquí ${fmtAzimut(d.azimutIda)} · desde allá ${fmtAzimut(d.azimutVuelta)}`;
+}
+
+// v17: en el selector de servidor, cada equipo con el ícono de su tipo (el
+// mismo de la torre y del tooltip). Sin la 007 no hay tipos: el genérico.
+function iconoDeServidor(){
+  if(!hayRedFinca()) return null;
+  const tipos = cargarTiposEquipo();
+  const opciones = { tiposEquipo: tipos, tiposActivo: cargarTiposActivo() };
+  return o=>o.origen === "equipo" && o.tipo ? iconoTipoEquipo(tipos.find(t=>t.valor === o.tipo) || { valor: o.tipo }, opciones) : null;
 }
 
 // ===========================================================================
@@ -353,6 +363,20 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
   const redes = conRed ? cargarRedes().filter(r=>r.activa !== false || (actual && r.id === actual.red_id)) : [];
   // 011: la red se hereda del servidor; aquí se elige solo la PROPIA (vacío = heredar).
   const herencia = conRed && hayHerenciaRed();
+  // 014 (v17): el modo de red del equipo (vacío = el de su tipo). Solo los
+  // routers (y los «sin indicar») definen red: un bridge va en la de su servidor.
+  const conModo = conRed && hayModoRed();
+  const tipoFila = v=>v ? (cargarTiposEquipo().find(t=>t.valor === v) || { valor: v }) : null;
+  const campoModo = conModo ? `
+          <div class="${P}field" id="${P}equipo-modo-campo">
+            <label for="${P}equipo-modo">Modo de red</label>
+            <select id="${P}equipo-modo" aria-describedby="${P}equipo-modo-ayuda">
+              <option value="">${esc(textoModoDeSuTipo(tipoFila(actual && actual.tipo_equipo)))}</option>
+              ${MODOS_EQUIPO.map(m=>`<option value="${m.id}" ${actual && actual.modo_red === m.id ? "selected" : ""}>${esc(m.etiqueta)}</option>`).join("")}
+            </select>
+            <div class="${P}hint" id="${P}equipo-modo-ayuda" aria-live="polite"></div>
+            <div class="${P}field-error" data-error="modo_red"></div>
+          </div>` : "";
   const camposNombre = conRed ? `
         <div class="${P}field">
           <label for="${P}equipo-tipo">Tipo de equipo</label>
@@ -375,12 +399,13 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
   const campoRed = conRed ? `
         <div class="${P}field">
           <label for="${P}equipo-red">Red</label>
-          <select id="${P}equipo-red"${herencia ? ` aria-describedby="${P}equipo-red-ayuda"` : ""}>
+          <select id="${P}equipo-red"${herencia || conModo ? ` aria-describedby="${P}equipo-red-ayuda"` : ""}>
             <option value="">— Sin red —</option>
             ${redes.map(r=>`<option value="${r.id}" ${actual && actual.red_id === r.id ? "selected" : ""}>${esc(r.nombre)}${r.activa === false ? " (inactiva)" : ""}</option>`).join("")}
           </select>
           ${redes.length ? "" : `<div class="${P}hint">Todavía no hay redes: se crean en «Redes y tipos», en la barra del mapa.</div>`}
-          ${herencia ? `<div class="${P}hint ${P}mapa-red-ayuda" id="${P}equipo-red-ayuda"></div>` : ""}
+          ${herencia || conModo ? `<div class="${P}hint ${P}mapa-red-ayuda" id="${P}equipo-red-ayuda"></div>` : ""}
+          <div class="${P}field-error" data-error="red_id"></div>
         </div>` : "";
   // 008: medio del enlace con el servidor (vacío = automático).
   const conMedio = hayMedio();
@@ -400,7 +425,7 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
   const numeroCampo = v=>v === null || v === undefined || v === "" ? "" : String(v).replace(".", ",");
   const campoCobertura = conCobertura ? `
         <fieldset class="${P}span-2 ${P}equipo-cobertura" id="${P}equipo-cobertura">
-          <legend>Cobertura <span class="${P}mapa-muted">(de los AP; opcional)</span></legend>
+          <legend>Cobertura <span class="${P}mapa-muted">(${conModo ? "opcional" : "de los AP; opcional"})</span></legend>
           <div class="${P}equipo-cobertura-fila">
             <label>Radio (m)<input type="text" inputmode="decimal" id="${P}equipo-cobertura-radio" value="${esc(numeroCampo(actual && actual.radio_cobertura_m))}" placeholder="Ej.: 300" autocomplete="off"></label>
             <label>Dirección (°)<input type="text" inputmode="decimal" id="${P}equipo-cobertura-azimut" value="${esc(numeroCampo(actual && actual.azimut_cobertura))}" placeholder="0 = norte, 90 = este" autocomplete="off"></label>
@@ -437,11 +462,12 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
           <div class="${P}field-error" data-error="servidor_id"></div>
         </div>
         ${campoMedio}
-        ${campoRed}
-        <div class="${P}field${conRed && !conMedio ? "" : ` ${P}span-2`}">
+        ${conModo ? "" : campoRed}
+        <div class="${P}field${(conRed && !conMedio) || conModo ? "" : ` ${P}span-2`}">
           <label for="${P}equipo-modelo">Modelo <span class="${P}mapa-muted">(opcional)</span></label>
           <input type="text" id="${P}equipo-modelo" maxlength="120" value="${esc(actual && actual.modelo || "")}" placeholder="Ej.: Cambium PTP 550">
         </div>
+        ${conModo ? `<div class="${P}equipo-modo-red">${campoModo}${campoRed}</div>` : ""}
         ${vistaNombre}
         ${campoCobertura}
         <div class="${P}field ${P}span-2">
@@ -503,8 +529,9 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
         candidatos: candidatosServidor(red, id), ubicacionId: Number(selUbic.value), ubicacionPorId: indicesVivos.ubicacionPorId,
         tiposEquipo: conRed ? cargarTiposEquipo() : [], redes: conRed ? cargarRedes() : [],
         conActivos: conRed, activos: cargarActivos().activos, vigentePorActivo: indicesVivos.vigentePorActivo, equipoPorActivo: indicesVivos.equipoPorActivo,
-        excluirActivos: [activoElegido], nombreNuevo: nombreNuevoServidor, tagActivo: fmtTag,
+        excluirActivos: [activoElegido], nombreNuevo: nombreNuevoServidor, tagActivo: fmtTag, conModo,
       }) }),
+      iconoDe: iconoDeServidor(),
       ninguno: { texto: "Ninguno: es una raíz (entrada de internet)", meta: "No recibe la conexión de otro equipo de la red" },
       etiquetaDialogo: "Elegir el servidor del equipo",
       textoVacio: "Ningún equipo coincide con la búsqueda o los filtros.",
@@ -524,7 +551,7 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
     const aplicarSugerenciaMedio = ()=>{
       if(!selMedio) return;
       const op = selector.elegida();
-      const sug = op ? medioSugerido({ clienteTipo: tipoCliente(), servidorTipo: op.tipo, misma: op.ubicacionId === Number(selUbic.value) }) : null;
+      const sug = op ? medioSugerido({ clienteTipo: tipoCliente(), servidorTipo: op.tipo, misma: op.ubicacionId === Number(selUbic.value) }, cargarTiposEquipo()) : null;
       if(sug && (selMedio.value === "" || medioPuestoPorSugerencia)){ selMedio.value = sug; medioPuestoPorSugerencia = true; }
       else if(!sug && medioPuestoPorSugerencia){ selMedio.value = ""; medioPuestoPorSugerencia = false; }
     };
@@ -555,6 +582,22 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
     // que heredaría no se ofrece como propia (la base la dejaría vacía).
     const ayudaRed = $(`#${P}equipo-red-ayuda`);
     let redPropia = actual && actual.red_id !== null && actual.red_id !== undefined ? Number(actual.red_id) : null;
+    // 014: el modo elegido (o el de su tipo) dice si puede tener red propia.
+    const selModo = $(`#${P}equipo-modo`);
+    const ayudaModo = $(`#${P}equipo-modo-ayuda`);
+    const modoAhora = ()=>modoEfectivo({ modo_red: selModo ? (selModo.value || null) : (actual ? actual.modo_red : null) }, tipoFila(tipoCliente()));
+    const defineRedAhora = ()=>!conModo || defineRed(modoAhora());
+    const opcionesRedSinHerencia = selRedEquipo ? selRedEquipo.innerHTML : "";
+    function pintarModo(){
+      if(!selModo) return;
+      selModo.options[0].textContent = textoModoDeSuTipo(tipoFila(tipoCliente()));
+      ayudaModo.textContent = {
+        router: "Enruta (capa 3): define una red para lo que cuelga de él (elígela en «Red»). Su enlace de subida va en la red de arriba.",
+        bridge: "Puentea (capa 2): va en la red de su servidor, igual que lo que cuelga de él.",
+        no_aplica: "Su tipo no tiene modo de red: va en la red de su servidor.",
+        elegir: "Sin indicar: puede tener red propia, como hasta ahora. Indica si enruta o puentea para que el mapa muestre bien sus redes.",
+      }[modoAhora()] || "";
+    }
     const redDeLista = id=>cargarRedes().find(r=>r.id === id) || null;
     const heredable = ()=>{
       const op = selector.elegida();
@@ -565,7 +608,25 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
       return { op, red: rid !== null ? redDeLista(rid) : null, desde: desdeId !== null ? red.equipoPorId.get(desdeId) || null : null };
     };
     function pintarRed(){
-      if(!herencia || !selRedEquipo) return;
+      if(!selRedEquipo) return;
+      // 014: un bridge (o un tipo sin modo) no elige red: va en la de su servidor.
+      if(conModo && !defineRedAhora()){
+        const { op, red: rH } = heredable();
+        selRedEquipo.innerHTML = `<option value="">${esc(op ? (rH ? `La de su servidor: ${rH.nombre}` : "La de su servidor (todavía sin red)") : "— Sin red —")}</option>`;
+        selRedEquipo.value = "";
+        selRedEquipo.disabled = true;
+        if(ayudaRed) ayudaRed.textContent = modoAhora() === "bridge"
+          ? "Un bridge no define red: va en la de su servidor. Para darle otra, ponlo en modo router."
+          : "Su tipo no tiene modo de red: va en la red de su servidor. Para darle otra, ponlo en modo router.";
+        return;
+      }
+      selRedEquipo.disabled = false;
+      if(!herencia){
+        selRedEquipo.innerHTML = opcionesRedSinHerencia;
+        selRedEquipo.value = redPropia !== null ? String(redPropia) : "";
+        if(ayudaRed) ayudaRed.textContent = "";
+        return;
+      }
       const { op, red: rH, desde } = heredable();
       if(redPropia !== null && rH && redPropia === rH.id) redPropia = null;
       const vacia = op ? (rH ? `Heredada del servidor: ${rH.nombre}` : "Heredada del servidor (todavía sin red)") : "— Sin red —";
@@ -587,6 +648,7 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
         ayudaRed.textContent = n ? `Sin red. Si le pones una, la heredan ${cuelgan} (salvo los que tienen otra propia).` : "Sin red. Si le pones una, la heredan los equipos que cuelguen de él.";
       }
     }
+    pintarModo();
     pintarRed();
     selServ.addEventListener("change", ()=>{ aplicarSugerenciaMedio(); pintarCalculoServ(); pintarRed(); pintarNombre(); });
 
@@ -628,7 +690,7 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
     function pintarCoberturaForm(){
       if(!bloqueCobertura) return;
       const algo = camposCobertura.some(x=>x.value.trim());
-      bloqueCobertura.hidden = !(tipoCliente() === TIPO_CON_COBERTURA || algo || cobActual);
+      bloqueCobertura.hidden = !(llevaCoberturaTipo(tipoFila(tipoCliente())) || algo || cobActual);
       const v = validarCobertura(leerCobertura());
       ayudaCobertura.textContent = !v.ok ? "Revisa los valores marcados."
         : v.valores.radio_cobertura_m === null ? "Sin cobertura. Con el radio se dibuja un círculo alrededor del equipo; con dirección y apertura, un sector."
@@ -636,10 +698,12 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
     }
     camposCobertura.forEach(x=>x.addEventListener("input", pintarCoberturaForm));
     pintarCoberturaForm();
-    if(selTipo) selTipo.addEventListener("change", ()=>{ aplicarSugerenciaMedio(); pintarCalculoServ(); pintarNombre(); pintarCoberturaForm(); });
+    if(selTipo) selTipo.addEventListener("change", ()=>{ aplicarSugerenciaMedio(); pintarCalculoServ(); pintarModo(); pintarRed(); pintarNombre(); pintarCoberturaForm(); });
+    if(selModo) selModo.addEventListener("change", ()=>{ pintarModo(); pintarRed(); pintarNombre(); });
     if(inputRef) inputRef.addEventListener("input", pintarNombre);
     if(selRedEquipo) selRedEquipo.addEventListener("change", ()=>{
-      if(herencia){ redPropia = selRedEquipo.value ? Number(selRedEquipo.value) : null; pintarRed(); }
+      redPropia = selRedEquipo.value ? Number(selRedEquipo.value) : null;
+      if(herencia) pintarRed();
       pintarNombre();
     });
     if(selMedio) selMedio.addEventListener("change", ()=>{ medioPuestoPorSugerencia = false; pintarCalculoServ(); pintarNombre(); });
@@ -699,8 +763,9 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
       if(conRed){
         campos.tipo_equipo = selTipo.value || null;
         campos.referencia = inputRef.value;
-        campos.red_id = selRedEquipo.value ? Number(selRedEquipo.value) : null;
+        campos.red_id = !selRedEquipo.disabled && selRedEquipo.value ? Number(selRedEquipo.value) : null;
       }
+      if(conModo) campos.modo_red = selModo.value || null;
       if(conMedio) campos.medio = campos.servidor_id === null ? null : (selMedio.value || null);
       // 013: la cobertura viaja solo si su bloque está a la vista (un equipo que no la lleva no la toca).
       if(conCobertura && bloqueCobertura && !bloqueCobertura.hidden){
@@ -784,7 +849,8 @@ export function abrirFormRespaldo({ id = null, equipoId = null } = {}, { alGuard
       const conRed = hayRedFinca();
       const selectorResp = montarSelectorServidor(sel, {
         id: `${P}respaldo-servidor`,
-        obtener: ()=>({ opciones: opcionesServidor({ candidatos: candidatosResp, ubicacionId: equipo.ubicacion_id, ubicacionPorId: red.ubicacionPorId, tiposEquipo: conRed ? cargarTiposEquipo() : [], redes: conRed ? cargarRedes() : [] }) }),
+        obtener: ()=>({ opciones: opcionesServidor({ candidatos: candidatosResp, ubicacionId: equipo.ubicacion_id, ubicacionPorId: red.ubicacionPorId, tiposEquipo: conRed ? cargarTiposEquipo() : [], redes: conRed ? cargarRedes() : [], conModo: conRed && hayModoRed() }) }),
+        iconoDe: iconoDeServidor(),
         placeholder: "— Elige un equipo —",
         etiquetaDialogo: "Elegir el servidor de respaldo",
         etiquetaLista: "Posibles servidores de respaldo",
@@ -1134,6 +1200,19 @@ export function abrirRedesYTipos({ alCambiar } = {}){
     const propios = cuenta(e=>e.red_id === r.id);
     return plural(total, "equipo", "equipos") + (hayHerenciaRed() && total > propios ? ` (${propios} con la red propia)` : "");
   };
+  // 014 (v17): los rangos IP de cada red (uno o varios, CIDR); si se cruzan
+  // con los de otra red se avisa sin impedirlo. Y el modo de red de cada tipo.
+  const con014 = hayModoRed();
+  const redesGuardadas = cargarRedes();
+  const htmlAvisosRangos = (errores, avisos, cruces)=>[
+    ...errores.map(x=>`<div class="${P}catalogo-aviso ${P}catalogo-aviso-error">${esc(x)}</div>`),
+    ...avisos.map(x=>`<div class="${P}catalogo-aviso">${esc(x)}</div>`),
+    ...cruces.map(x=>`<div class="${P}catalogo-aviso ${P}catalogo-aviso-cruce">⚠ ${esc(x)}</div>`),
+  ].join("");
+  const campoRangos = (r, id)=>con014 ? `<div class="${P}catalogo-extra">
+        <label class="${P}catalogo-campo"><span>Rangos IP</span><input type="text" data-campo="rangos"${id ? ` id="${id}"` : ""} value="${esc(r ? textoRangos(r.rangos_ip) : "")}" maxlength="400" placeholder="Ej.: 10.10.0.0/24, 10.20.0.0/24 (opcional)" spellcheck="false" autocomplete="off" aria-label="Rangos IP de ${esc(r ? r.nombre : "la red nueva")}"></label>
+        <div class="${P}catalogo-avisos" data-avisos-rangos aria-live="polite">${r ? htmlAvisosRangos([], [], avisosDeCruce(r.id, redesGuardadas)) : ""}</div>
+      </div>` : "";
   const filaRed = r=>`<li class="${P}catalogo-fila" data-red-id="${r.id}">
       <input type="color" value="${esc(r.color)}" aria-label="Color de ${esc(r.nombre)}" data-campo="color">
       <input type="text" value="${esc(r.nombre)}" maxlength="60" aria-label="Nombre de la red" data-campo="nombre">
@@ -1141,6 +1220,7 @@ export function abrirRedesYTipos({ alCambiar } = {}){
       <span class="${P}mapa-muted ${P}catalogo-cuenta">${cuentaRed(r)}</span>
       <button type="button" class="${P}btn ${P}btn-sm" data-cat="guardar-red">Guardar</button>
       <button type="button" class="${P}btn ${P}btn-sm ${P}btn-ghost" data-cat="eliminar-red" title="Eliminar la red (sus equipos quedan sin red)">Eliminar</button>
+      ${campoRangos(r)}
     </li>`;
   // 013 (v15, 3.10): el ícono de cada tipo, que se ve en el tooltip de las ubicaciones.
   const conIconos = hayCobertura();
@@ -1149,6 +1229,11 @@ export function abrirRedesYTipos({ alCambiar } = {}){
     const origen = TEXTO_ORIGEN_ICONO[origenIconoTipoEquipo(x, opcionesIcono)];
     return `<button type="button" class="${P}tipo-icono-btn" data-cat="icono-tipo" title="${esc(`${origen}. Clic para cambiarlo`)}" aria-label="${esc(`Ícono de «${x.etiqueta}» (${origen.toLowerCase()}): cambiar`)}">${iconoTipoEquipo(x, opcionesIcono)}</button>`;
   };
+  const camposModoTipo = x=>con014 ? `<div class="${P}catalogo-extra">
+        <label class="${P}catalogo-campo"><span>Modo de red</span><select data-campo="modo_red" aria-label="Modo de red de «${esc(x.etiqueta)}»">${MODOS_TIPO.map(m=>`<option value="${m.id}"${modoDelTipo(x) === m.id ? " selected" : ""}>${esc(m.etiqueta)}</option>`).join("")}</select></label>
+        <label class="${P}catalogo-check" title="Hace radioenlaces: su rol (backbone, distribución) tiene sentido; si no, el enlace con otra ubicación se sugiere por cable"><input type="checkbox" data-campo="hace_radio"${haceRadioTipo(x) ? " checked" : ""}> Hace radio</label>
+        <label class="${P}catalogo-check" title="Pide la cobertura (radio, dirección y apertura) en el formulario del equipo"><input type="checkbox" data-campo="lleva_cobertura"${llevaCoberturaTipo(x) ? " checked" : ""}> Lleva cobertura</label>
+      </div>` : "";
   const filaTipo = x=>`<li class="${P}catalogo-fila" data-tipo-valor="${esc(x.valor)}">
       ${conIconos ? botonIcono(x) : ""}
       <input type="text" value="${esc(x.etiqueta)}" maxlength="40" aria-label="Nombre del tipo" data-campo="etiqueta">
@@ -1156,23 +1241,25 @@ export function abrirRedesYTipos({ alCambiar } = {}){
       <label class="${P}catalogo-check"><input type="checkbox" data-campo="activo"${x.activo !== false ? " checked" : ""}> Activo</label>
       <span class="${P}mapa-muted ${P}catalogo-cuenta">${plural(cuenta(e=>e.tipo_equipo === x.valor), "equipo", "equipos")}</span>
       <button type="button" class="${P}btn ${P}btn-sm" data-cat="guardar-tipo">Guardar</button>
+      ${camposModoTipo(x)}
     </li>`;
   const html = `<div class="${P}modal ${P}modal-wide">
     ${cabecera("Redes y tipos de equipo")}
     <div class="${P}modal-body">
       <section class="${P}catalogo" aria-label="Redes de la finca">
         <div class="${P}section-title">Redes de la finca</div>
-        <div class="${P}hint">Cada equipo de red pertenece a una red. Para apagar una red entera en la simulación, guarda un atajo con su router.</div>
+        <div class="${P}hint">${con014 ? "Los routers definen las redes: lo que cuelga de un router va en su red hasta el siguiente router. Los rangos IP son opcionales (uno o varios, como 10.10.0.0/24); si se cruzan con los de otra red se avisa." : "Cada equipo de red pertenece a una red."} Para apagar una red entera en la simulación, guarda un atajo con su router.</div>
         <ul class="${P}catalogo-lista">${cargarRedes().map(filaRed).join("") || `<li class="${P}mapa-vacio">Todavía no hay redes.</li>`}</ul>
         <div class="${P}catalogo-fila ${P}catalogo-nueva">
           <input type="color" value="#007EB2" id="${P}red-nueva-color" aria-label="Color de la red nueva">
           <input type="text" id="${P}red-nueva-nombre" maxlength="60" placeholder="Nombre de la red nueva (ej.: Red Cámaras)">
           <button type="button" class="${P}btn ${P}btn-sm ${P}btn-primary" data-cat="crear-red">+ Agregar red</button>
+          ${campoRangos(null, `${P}red-nueva-rangos`)}
         </div>
       </section>
       <section class="${P}catalogo" aria-label="Tipos de equipo">
         <div class="${P}section-title">Tipos de equipo</div>
-        <div class="${P}hint">El nombre del tipo arma el nombre automático de cada equipo («Estación en Torre K enlazada a Punto a Punto en Torre L»); el género hace concordar «enlazado/enlazada».${conIconos ? " El ícono se ve al pasar el mouse por una ubicación del mapa." : ""}</div>
+        <div class="${P}hint">El nombre del tipo arma el nombre automático de cada equipo («Estación en Torre K enlazada a Punto a Punto en Torre L»); el género hace concordar «enlazado/enlazada».${conIconos ? " El ícono se ve al pasar el mouse por una ubicación del mapa." : ""}${con014 ? " El modo de red es el de fábrica de sus equipos: router (define red), bridge (va en la red de su servidor), «a elegir» en cada equipo o «no aplica»; cada equipo puede tener el suyo." : ""}</div>
         <ul class="${P}catalogo-lista">${cargarTiposEquipo().map(filaTipo).join("")}</ul>
         <div class="${P}catalogo-fila ${P}catalogo-nueva">
           <input type="text" id="${P}tipo-nuevo-etiqueta" maxlength="40" placeholder="Tipo nuevo (ej.: Cámara PTZ)">
@@ -1182,7 +1269,7 @@ export function abrirRedesYTipos({ alCambiar } = {}){
       </section>
     </div>
     <div class="${P}modal-footer">
-      ${equipos.length ? `<button type="button" class="${P}btn" data-cat="lote" title="Elegir el tipo y la red de varios equipos a la vez">Asignar a varios equipos…</button>` : ""}
+      ${equipos.length ? `<button type="button" class="${P}btn" data-cat="lote" title="${con014 ? "Elegir el tipo, el modo de red y la red de varios equipos a la vez" : "Elegir el tipo y la red de varios equipos a la vez"}">Asignar a varios equipos…</button>` : ""}
       <span class="${P}fb-spacer"></span>
       <button type="button" class="${P}btn ${P}modal-close">Cerrar</button>
     </div>
@@ -1198,6 +1285,25 @@ export function abrirRedesYTipos({ alCambiar } = {}){
     });
     const valor = (fila, campo)=>{ const el = fila.querySelector(`[data-campo="${campo}"]`); return el.type === "checkbox" ? el.checked : el.value; };
     const hecho = mensaje=>{ mostrarToast(mensaje, "success"); if(alCambiar) alCambiar(); abrirRedesYTipos({ alCambiar }); };
+    // 014: lo escrito en «Rangos IP», revisado al vuelo (errores, lo que se
+    // corrige y los cruces con las demás redes, como quedarían al guardar).
+    const revisarRangos = fila=>{
+      const input = fila.querySelector('[data-campo="rangos"]');
+      const caja = fila.querySelector("[data-avisos-rangos]");
+      if(!input || !caja) return { ok: true, cruces: [] };
+      const v = validarRangos(input.value);
+      const id = fila.dataset.redId ? Number(fila.dataset.redId) : "nueva";
+      const nombre = id === "nueva" ? (raiz.querySelector(`#${P}red-nueva-nombre`).value.trim() || "la red nueva") : valor(fila, "nombre");
+      const redes = [...cargarRedes().filter(r=>r.id !== id), { id, nombre, rangos_ip: v.rangos }];
+      const cruces = avisosDeCruce(id, redes);
+      caja.innerHTML = htmlAvisosRangos(v.errores, v.avisos, cruces);
+      input.setAttribute("aria-invalid", String(!v.ok));
+      return { ok: v.ok, cruces };
+    };
+    raiz.addEventListener("input", e=>{
+      if(e.target.matches('[data-campo="rangos"]')) revisarRangos(e.target.closest(`.${P}catalogo-fila`));
+    });
+    const avisarCruces = cruces=>{ if(cruces.length) mostrarToast(`Ojo: ${cruces[0]}${cruces.length > 1 ? ` (y ${cruces.length - 1} cruce${cruces.length > 2 ? "s" : ""} más)` : ""} Se guardó igual.`, "info"); };
     raiz.addEventListener("click", async e=>{
       const b = e.target.closest("[data-cat]");
       if(!b) return;
@@ -1208,12 +1314,17 @@ export function abrirRedesYTipos({ alCambiar } = {}){
         switch(b.dataset.cat){
           case "crear-red": {
             const nombre = raiz.querySelector(`#${P}red-nueva-nombre`).value;
-            await conBotonOcupado(b, "Agregando…", ()=>crearRed({ nombre, color: raiz.querySelector(`#${P}red-nueva-color`).value }));
-            return hecho(`Red «${nombre.trim()}» creada.`);
+            const { cruces } = revisarRangos(fila);
+            await conBotonOcupado(b, "Agregando…", ()=>crearRed({ nombre, color: raiz.querySelector(`#${P}red-nueva-color`).value, ...(con014 ? { rangos: valor(fila, "rangos") } : {}) }));
+            hecho(`Red «${nombre.trim()}» creada.`);
+            return avisarCruces(cruces);
           }
-          case "guardar-red":
-            await conBotonOcupado(b, "Guardando…", ()=>editarRed(Number(fila.dataset.redId), { nombre: valor(fila, "nombre"), color: valor(fila, "color"), activa: valor(fila, "activa") }));
-            return hecho("Red guardada.");
+          case "guardar-red": {
+            const { cruces } = revisarRangos(fila);
+            await conBotonOcupado(b, "Guardando…", ()=>editarRed(Number(fila.dataset.redId), { nombre: valor(fila, "nombre"), color: valor(fila, "color"), activa: valor(fila, "activa"), ...(con014 ? { rangos: valor(fila, "rangos") } : {}) }));
+            hecho("Red guardada.");
+            return avisarCruces(cruces);
+          }
           case "eliminar-red":
             if(b.dataset.confirmar !== "1"){ b.dataset.confirmar = "1"; b.textContent = "¿Eliminar? Confirmar"; return; }
             await conBotonOcupado(b, "Eliminando…", ()=>eliminarRed(Number(fila.dataset.redId)));
@@ -1224,7 +1335,8 @@ export function abrirRedesYTipos({ alCambiar } = {}){
             return hecho(`Tipo «${etiqueta.trim()}» creado.`);
           }
           case "guardar-tipo":
-            await conBotonOcupado(b, "Guardando…", ()=>editarTipoEquipo(fila.dataset.tipoValor, { etiqueta: valor(fila, "etiqueta"), genero: valor(fila, "genero"), activo: valor(fila, "activo") }));
+            await conBotonOcupado(b, "Guardando…", ()=>editarTipoEquipo(fila.dataset.tipoValor, { etiqueta: valor(fila, "etiqueta"), genero: valor(fila, "genero"), activo: valor(fila, "activo"),
+              ...(con014 ? { modo_red: valor(fila, "modo_red"), hace_radio: valor(fila, "hace_radio"), lleva_cobertura: valor(fila, "lleva_cobertura") } : {}) }));
             return hecho("Tipo guardado: los nombres automáticos ya lo usan.");
         }
       }catch(err){
@@ -1307,8 +1419,17 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
   // ponerle una red a un equipo la pasa a lo que cuelga de él.
   const herencia = hayHerenciaRed();
   const porIdEq = new Map(equipos.map(e=>[e.id, e]));
+  // 014 (v17): también el modo de red. Un bridge (o un tipo sin modo) no se
+  // queda con red propia: no se le pone la red y, si tenía, la deja.
+  const conModo = hayModoRed();
+  const modoCorto = e=>{
+    const t = e.tipo_equipo ? tipoPorValor.get(e.tipo_equipo) || { valor: e.tipo_equipo } : null;
+    const m = modoEfectivo(e, t);
+    const texto = { router: "Router", bridge: "Bridge", elegir: "sin indicar", no_aplica: "no aplica" }[m];
+    return m === "router" || m === "bridge" ? `${esc(texto)}${e.modo_red ? "" : ` <span class="${P}mapa-muted">(su tipo)</span>`}` : `<span class="${P}mapa-muted">${esc(texto)}</span>`;
+  };
   const html = `<div class="${P}modal ${P}modal-wide">
-    ${cabecera("Tipo y red en lote")}
+    ${cabecera(conModo ? "Tipo, modo y red en lote" : "Tipo y red en lote")}
     <div class="${P}modal-body">
       <div class="${P}alert ${P}alert-error" data-alerta hidden></div>
       <div class="${P}hint">Marca los equipos y elige qué ponerles. Lo que dejes en «No cambiar» queda como está.</div>
@@ -1322,7 +1443,7 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
         <table>
           <thead><tr>
             <th class="${P}lote-col-check"><input type="checkbox" id="${P}lote-todos" aria-label="Marcar todos los que se ven"></th>
-            <th>Equipo</th><th>Ubicación</th><th>Tipo</th><th>Red</th>
+            <th>Equipo</th><th>Ubicación</th><th>Tipo</th>${conModo ? "<th>Modo</th>" : ""}<th>Red</th>
           </tr></thead>
           <tbody id="${P}lote-filas"></tbody>
         </table>
@@ -1332,6 +1453,11 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
           <label for="${P}lote-tipo">Tipo</label>
           <select id="${P}lote-tipo"><option value="${NO_CAMBIAR}">— No cambiar —</option>${tipos.filter(t=>t.activo !== false).map(t=>`<option value="${esc(t.valor)}">${esc(t.etiqueta)}</option>`).join("")}</select>
         </div>
+        ${conModo ? `<div class="${P}field">
+          <label for="${P}lote-modo">Modo de red</label>
+          <select id="${P}lote-modo"><option value="${NO_CAMBIAR}">— No cambiar —</option><option value="">— El de su tipo —</option>${MODOS_EQUIPO.map(m=>`<option value="${m.id}">${esc(m.etiqueta)}</option>`).join("")}</select>
+          <div class="${P}hint">Un bridge va en la red de su servidor: no se le pone red propia.</div>
+        </div>` : ""}
         <div class="${P}field">
           <label for="${P}lote-red">Red</label>
           <select id="${P}lote-red"><option value="${NO_CAMBIAR}">— No cambiar —</option><option value="">${herencia ? "— Quitar la propia (hereda la del servidor) —" : "— Quitar la red —"}</option>${redes.filter(r=>r.activa !== false).map(r=>`<option value="${r.id}">${esc(r.nombre)}</option>`).join("")}</select>
@@ -1350,7 +1476,7 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
     const raiz = raizModal();
     const $ = sel=>raiz.querySelector(sel);
     const buscar = $(`#${P}lote-buscar`), selUbic = $(`#${P}lote-ubicacion`), sinTipo = $(`#${P}lote-sin-tipo`), sinRed = $(`#${P}lote-sin-red`);
-    const todos = $(`#${P}lote-todos`), cuerpo = $(`#${P}lote-filas`), selTipo = $(`#${P}lote-tipo`), selRed = $(`#${P}lote-red`);
+    const todos = $(`#${P}lote-todos`), cuerpo = $(`#${P}lote-filas`), selTipo = $(`#${P}lote-tipo`), selRed = $(`#${P}lote-red`), selModo = $(`#${P}lote-modo`);
     const vista = $(`#${P}lote-vista`), aplicar = $(`#${P}lote-aplicar`);
     const clave = t=>String(t ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
     const visibles = ()=>{
@@ -1375,9 +1501,10 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
           <td>${esc(e.nombre)}${e.modelo ? `<div class="${P}mapa-muted">${esc(e.modelo)}</div>` : ""}</td>
           <td>${esc(u ? u.nombre : "—")}</td>
           <td>${t ? esc(t.etiqueta) : `<span class="${P}mapa-muted">sin tipo</span>`}</td>
+          ${conModo ? `<td>${modoCorto(e)}</td>` : ""}
           <td>${r ? `<span class="${P}mapa-red-chip${desde !== null ? ` ${P}mapa-red-chip-heredada` : ""}" style="--red-color:${esc(r.color)}"${desde !== null ? ` title="Heredada${origen ? ` de «${esc(origen.nombre)}»` : ""}"` : ""}>${esc(r.nombre)}</span>${desde !== null ? `<div class="${P}mapa-muted">heredada</div>` : ""}` : `<span class="${P}mapa-muted">sin red</span>`}</td>
         </tr>`;
-      }).join("") : `<tr><td colspan="5" class="${P}mapa-vacio">Ningún equipo coincide con el filtro.</td></tr>`;
+      }).join("") : `<tr><td colspan="${conModo ? 6 : 5}" class="${P}mapa-vacio">Ningún equipo coincide con el filtro.</td></tr>`;
       const marcados = lista.filter(e=>elegidos.has(e.id)).length;
       todos.checked = !!lista.length && marcados === lista.length;
       todos.indeterminate = marcados > 0 && marcados < lista.length;
@@ -1386,8 +1513,12 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
       const c = {};
       if(selTipo.value !== NO_CAMBIAR) c.tipo_equipo = selTipo.value;
       if(selRed.value !== NO_CAMBIAR) c.red_id = selRed.value ? Number(selRed.value) : null;
+      if(selModo && selModo.value !== NO_CAMBIAR) c.modo_red = selModo.value || null;
       return c;
     };
+    // Cómo queda cada elegido (con la 014, sin red propia si queda como bridge).
+    const planActual = c=>conModo ? planLote(equipos, [...elegidos], c, tipos) : { grupos: [{ ids: [...elegidos], parche: c }], sinLaRed: [], dejanRed: [], sinCambio: [] };
+    const parchesDe = plan=>{ const m = new Map(); for(const g of plan.grupos) for(const id of g.ids) m.set(id, g.parche); return m; };
     const pintarVista = ()=>{
       const n = elegidos.size;
       const c = cambios();
@@ -1397,31 +1528,39 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
       if(!n){ vista.innerHTML = `<span class="${P}mapa-muted">Marca uno o más equipos.</span>`; return; }
       const partes = [`<strong>${plural(n, "equipo elegido", "equipos elegidos")}</strong>`];
       if("red_id" in c) partes.push(c.red_id === null ? (herencia ? "heredarán la red de su servidor" : "quedarán sin red") : `pasarán a la red «${esc(redPorId.get(c.red_id).nombre)}»`);
+      if("modo_red" in c) partes.push(c.modo_red ? `trabajarán como ${esc(MODOS_EQUIPO.find(m=>m.id === c.modo_red).corta.toLowerCase())}` : "seguirán el modo de su tipo");
+      const plan = planActual(c);
+      const parches = parchesDe(plan);
+      const despuesDe = e=>parches.has(e.id) ? { ...e, ...parches.get(e.id) } : e;
+      // 014: los que quedan como bridge no se quedan con red propia.
+      let porModo = "";
+      if(plan.sinLaRed.length) porModo += `<div class="${P}lote-aviso">${esc(`${plan.sinLaRed.length === 1 ? "A 1 de ellos no se le pone" : `A ${plan.sinLaRed.length} de ellos no se les pone`} la red: trabaja${plan.sinLaRed.length === 1 ? "" : "n"} como bridge (o su tipo no tiene modo de red) y va${plan.sinLaRed.length === 1 ? "" : "n"} en la red de su servidor.`)}</div>`;
+      const pierden = plan.dejanRed.filter(id=>!plan.sinLaRed.includes(id));
+      if(pierden.length) porModo += `<div class="${P}lote-aviso">${esc(`${pierden.length === 1 ? "1 deja" : `${pierden.length} dejan`} su red propia: como bridge (o con un tipo sin modo de red) va${pierden.length === 1 ? "" : "n"} en la red de su servidor.`)}</div>`;
       // Con la 011, lo que cuelga de ellos (y no tiene red propia) también cambia de red.
       let porHerencia = "";
-      if("red_id" in c && herencia){
+      if(("red_id" in c || plan.dejanRed.length) && herencia){
         const antes = redesEfectivas(equipos);
-        const despues = redesEfectivas(equipos.map(e=>elegidos.has(e.id) ? { ...e, red_id: c.red_id } : e));
+        const despues = redesEfectivas(equipos.map(despuesDe));
         const arrastrados = equipos.filter(e=>!elegidos.has(e.id) && (antes.get(e.id) || {}).redId !== (despues.get(e.id) || {}).redId);
         if(arrastrados.length) porHerencia = `<div class="${P}mapa-muted">Por herencia también cambian de red ${plural(arrastrados.length, "equipo que cuelga", "equipos que cuelgan")} de ellos.</div>`;
       }
       let lista = "";
       if("tipo_equipo" in c) partes.push(`serán «${esc(tipoPorValor.get(c.tipo_equipo).etiqueta)}»`);
       // Con la 010 la red también está en el nombre.
-      if("tipo_equipo" in c || ("red_id" in c && hayNombresConRed())){
+      if("tipo_equipo" in c || (("red_id" in c || plan.dejanRed.length) && hayNombresConRed())){
         // Cómo quedan los nombres automáticos (los de los demás también pueden correrse en la numeración).
-        const cambio = { ...("tipo_equipo" in c ? { tipo_equipo: c.tipo_equipo } : {}), ...("red_id" in c ? { red_id: c.red_id } : {}) };
-        const copia = equipos.map(e=>({ ...e, nombre: e.nombre_guardado ?? e.nombre, ...(elegidos.has(e.id) ? cambio : {}) }));
+        const copia = equipos.map(e=>({ ...despuesDe(e), nombre: e.nombre_guardado ?? e.nombre }));
         const nuevos = nombresAutomaticos(datosNombres(copia));
         const cambian = equipos.filter(e=>nuevos.get(e.id) !== e.nombre);
         lista = cambian.length ? `<div class="${P}mapa-muted">Nombres que cambian:</div><ul class="${P}lote-nombres">${cambian.slice(0, 8).map(e=>`<li><span class="${P}lote-antes">${esc(e.nombre)}</span> → <strong>${esc(nuevos.get(e.id))}</strong></li>`).join("")}${cambian.length > 8 ? `<li class="${P}mapa-muted">y ${cambian.length - 8} más</li>` : ""}</ul>` : `<div class="${P}mapa-muted">Ningún nombre cambia.</div>`;
       }
-      vista.innerHTML = `<div>${partes.join(" · ")}${hayCambio ? "" : ` · <span class="${P}mapa-muted">elige el tipo, la red o los dos</span>`}</div>${porHerencia}${lista}`;
+      vista.innerHTML = `<div>${partes.join(" · ")}${hayCambio ? "" : ` · <span class="${P}mapa-muted">${conModo ? "elige el tipo, el modo de red o la red" : "elige el tipo, la red o los dos"}</span>`}</div>${porModo}${porHerencia}${lista}`;
     };
     const repintar = ()=>{ pintarFilas(); pintarVista(); };
     buscar.addEventListener("input", pintarFilas);
     [selUbic, sinTipo, sinRed].forEach(el=>el.addEventListener("change", pintarFilas));
-    [selTipo, selRed].forEach(el=>el.addEventListener("change", pintarVista));
+    [selTipo, selRed, selModo].filter(Boolean).forEach(el=>el.addEventListener("change", pintarVista));
     cuerpo.addEventListener("change", e=>{
       const c = e.target.closest("[data-lote-id]");
       if(!c) return;
@@ -1441,9 +1580,13 @@ export function abrirAsignacionEnLote({ alGuardar, seleccion = [] } = {}){
     aplicar.addEventListener("click", async e=>{
       mostrarErrores(raiz, {}, "");
       try{
-        const n = await conBotonOcupado(e.currentTarget, "Aplicando…", ()=>asignarEnLote([...elegidos], cambios()));
+        const c = cambios();
+        const r = await conBotonOcupado(e.currentTarget, "Aplicando…", ()=>asignarEnLote([...elegidos], c));
         cerrarModal();
-        mostrarToast(`Listo: ${plural(n, "equipo actualizado", "equipos actualizados")}.`, "success");
+        mostrarToast(r.cambiados ? `Listo: ${plural(r.cambiados, "equipo actualizado", "equipos actualizados")}.` : "Ningún equipo cambió.", r.cambiados ? "success" : "info");
+        const uno = r.sinLaRed.length === 1;
+        if(r.sinLaRed.length) mostrarToast(`${uno ? "A 1 equipo no se le puso" : `A ${r.sinLaRed.length} equipos no se les puso`} la red: no define${uno ? "" : "n"} red (bridge o tipo sin modo de red) y va${uno ? "" : "n"} en la de su servidor.`, "info");
+        else if(r.dejanRed.length) mostrarToast(`${r.dejanRed.length === 1 ? "1 equipo dejó" : `${r.dejanRed.length} equipos dejaron`} su red propia: como bridge va${r.dejanRed.length === 1 ? "" : "n"} en la red de su servidor.`, "info");
         if(alGuardar) alGuardar();
       }catch(err){
         manejarErrorGuardado(raiz, err);

@@ -32,7 +32,11 @@
 // Migración 013 (v15): el ícono de cada tipo de equipo de red (icono_svg, se
 // limpia al cargar) y la cobertura de los equipos (radio, dirección y
 // apertura); se detecta pidiendo la columna radio_cobertura_m
-// (m.cobertura013.disponible).
+// (m.cobertura013.disponible). Migración 014 (v17): el modo de red de cada
+// equipo (router o bridge; NULL = el de su tipo), el modo de fábrica de cada
+// tipo, si hace radio y si lleva cobertura, y los rangos IP de cada red; se
+// detecta pidiendo la columna modo_red (m.modoRed014.disponible). Sin ella
+// todo sale de los valores de fábrica (nucleo/modo-red.js), como en la v16.
 import { sb } from "./config.js";
 import { cargarActivos } from "./datos.js";
 import { state } from "./estado.js";
@@ -74,6 +78,7 @@ export function crearEstadoMapa(){
     nombres010: { disponible: false },             // la red va en el nombre automático (010)
     herencia011: { disponible: false },            // la red se hereda del servidor (011)
     cobertura013: { disponible: false },           // íconos de los tipos de equipo y cobertura de los AP (013)
+    modoRed014: { disponible: false },             // modo de red (router/bridge), tipos configurables y rangos IP (014)
     foco: null,           // { ubicacionId, activoId } pendiente de aplicar al abrir el mapa (p. ej. "Ver en mapa")
     plano: null,          // capa "Plano" (migración 006): normalizarPlano(fila) + error (null si se leyó bien)
   };
@@ -89,7 +94,7 @@ const opcional = consulta=>Promise.resolve(consulta).then(r=>r, err=>({ data: nu
 
 export async function refrescarDatosMapa(){
   const m = estadoMapa();
-  const [t, u, e, r, h, te, rd, at, me, pi, vn, co] = await Promise.all([
+  const [t, u, e, r, h, te, rd, at, me, pi, vn, co, mr] = await Promise.all([
     sb.from("tipos_ubicacion").select("*").order("orden"),
     sb.from("ubicaciones").select("*").order("nombre"),
     sb.from("equipos_radioenlace").select("*").order("nombre"),
@@ -102,6 +107,7 @@ export async function refrescarDatosMapa(){
     opcional(sb.from("piscinas").select("*").order("orden").order("nombre")),
     opcional(sb.rpc("version_nombres_equipos")),
     opcional(sb.from("equipos_radioenlace").select("id, radio_cobertura_m").limit(1)),
+    opcional(sb.from("equipos_radioenlace").select("id, modo_red").limit(1)),
   ]);
   const error = t.error || u.error || e.error || r.error || h.error;
   if(error){ m.error = error; throw error; }
@@ -120,6 +126,7 @@ export async function refrescarDatosMapa(){
   m.nombres010 = { disponible: !vn.error && Number(vn.data) >= 2 };
   m.herencia011 = { disponible: !vn.error && Number(vn.data) >= 3 };
   m.cobertura013 = { disponible: !co.error && !te.error };
+  m.modoRed014 = { disponible: !mr.error && !te.error };
   anotarRedesEfectivas(m.equipos, m.herencia011.disponible);
   aplicarNombres(m.equipos, { ubicaciones: m.ubicaciones, tipos: m.tiposEquipo, redes: m.redes, conRed: m.nombres010.disponible, herencia: m.herencia011.disponible });
   m.equipos.sort((a, b)=>String(a.nombre).localeCompare(String(b.nombre), "es"));
@@ -207,6 +214,9 @@ export function hayHerenciaRed(){ return hayNombresConRed() && !!(estadoMapa().h
 
 // ¿Está la migración 013 (íconos de los tipos de equipo y cobertura de los AP)?
 export function hayCobertura(){ return hayRedFinca() && !!(estadoMapa().cobertura013 || {}).disponible; }
+
+// ¿Está la migración 014 (modo de red de los equipos, tipos configurables y rangos IP)?
+export function hayModoRed(){ return hayRedFinca() && !!(estadoMapa().modoRed014 || {}).disponible; }
 
 // Lo que necesitan nombreParaGuardar / nombresAutomaticos (mapa-nombres.js)
 // para armar los nombres igual que la base.

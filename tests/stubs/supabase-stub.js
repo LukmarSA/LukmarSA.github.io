@@ -33,6 +33,13 @@
 // equipos_radioenlace (radio_cobertura_m, azimut_cobertura, apertura_cobertura)
 // con sus reglas (23514). Sin ella, pedir esas columnas da 42703 y escribirlas,
 // PGRST204.
+// De la 014 (fixture.m014): equipos_radioenlace.modo_red, tipos_equipo_red
+// .modo_red / hace_radio / lleva_cobertura (con los valores de fábrica si el
+// fixture no los trae) y redes.rangos_ip (cidr[]: un rango mal escrito o con
+// bits de host da 22P02; más de 20, 23514). Y sus dos reglas: solo los
+// routers definen red (un bridge o un tipo «no aplica» con red propia, 23514)
+// y no se puede pasar un tipo a bridge o «no aplica» si sus equipos sin modo
+// propio tienen red propia (23514). Sin ella, como con la 013.
 // Como en la base real, tipos_activo, propiedad_opciones, estado_opciones y
 // tipos_ubicacion no tienen "id": filtrar por una columna que no existe da
 // el error 42703.
@@ -56,6 +63,8 @@
   const hay012 = !!(fixture.tablas && "campos_activo" in fixture.tablas);
   const hay013 = !!fixture.m013;
   const COLUMNAS_013 = { equipos_radioenlace: ["radio_cobertura_m", "azimut_cobertura", "apertura_cobertura"], tipos_equipo_red: ["icono_svg"] };
+  const hay014 = !!fixture.m014;
+  const COLUMNAS_014 = { equipos_radioenlace: ["modo_red"], tipos_equipo_red: ["modo_red", "hace_radio", "lleva_cobertura"], redes: ["rangos_ip"] };
   const COLUMNAS_REALES = {
     tipos_activo: ["nombre","icono_svg","color","campos_pertinentes","orden","creado_en","creado_por","activo", ...(hay012 ? ["campos_obligatorios"] : [])],
     propiedad_opciones: ["valor","etiqueta","orden","activo","creado_en","creado_por"],
@@ -270,6 +279,59 @@
     if(r === null && (a !== null || ap !== null)) throw regla("equipos_radioenlace_sector_con_radio");
     if(ap !== null && ap !== 360 && a === null) throw regla("equipos_radioenlace_sector_con_direccion");
   }
+  // --- imitación de la 014 ---
+  const MODO_FABRICA = { router: "router", switch: "bridge", camara: "no_aplica", nvr: "no_aplica", inyector_poe: "no_aplica" };
+  function columnas014SinMigracion(t, datos){
+    if(hay014 || !COLUMNAS_014[t]) return null;
+    const filas = Array.isArray(datos) ? datos : [datos];
+    const c = COLUMNAS_014[t].find(k=>filas.some(f=>f && k in f));
+    return c ? { code:"PGRST204", message:`Could not find the '${c}' column of '${t}' in the schema cache` } : null;
+  }
+  // Como la columna cidr: la dirección de la red con su máscara, sin bits de host.
+  function cidrValido(texto){
+    const m = String(texto).trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/);
+    if(!m) throw { code:"22P02", message:`invalid input syntax for type cidr: "${texto}"` };
+    const oct = m.slice(1, 5).map(Number), pref = Number(m[5]);
+    if(oct.some(o=>o > 255) || pref > 32) throw { code:"22P02", message:`invalid input syntax for type cidr: "${texto}"` };
+    const n = oct.reduce((a, o)=>a * 256 + o, 0), tam = 2 ** (32 - pref);
+    if(n % tam !== 0) throw { code:"22P02", message:`invalid cidr value: "${texto}"`, details:"Value has bits set to right of mask." };
+    return `${oct.join(".")}/${pref}`;
+  }
+  const modoEfectivo = e=>{
+    if(e.modo_red === "router" || e.modo_red === "bridge") return e.modo_red;
+    const t = vacio(e.tipo_equipo) ? null : tabla("tipos_equipo_red").find(x=>x.valor === e.tipo_equipo);
+    return t ? (t.modo_red || "elegir") : "elegir";
+  };
+  function validar014(t, f, vieja = null){
+    if(!hay014) return;
+    const regla = nombre=>({ code:"23514", message:`new row for relation "${t}" violates check constraint "${nombre}"` });
+    if(t === "tipos_equipo_red"){
+      if(!["router", "bridge", "elegir", "no_aplica"].includes(f.modo_red)) throw regla("tipos_equipo_red_modo_valido");
+      if(vieja && f.modo_red !== vieja.modo_red && ["bridge", "no_aplica"].includes(f.modo_red)){
+        const n = tabla("equipos_radioenlace").filter(e=>e.tipo_equipo === f.valor && vacio(e.modo_red) && !vacio(e.red_id)).length;
+        if(n) throw { code:"23514", message:`tipos_equipo_red_modo_con_redes: ${n} equipo(s) de tipo «${f.etiqueta}» tienen red propia: ponlos en modo router o quítales la red antes de pasar el tipo a ${f.modo_red}.` };
+      }
+    }
+    if(t === "equipos_radioenlace"){
+      if(!vacio(f.modo_red) && !["router", "bridge"].includes(f.modo_red)) throw regla("equipos_radioenlace_modo_valido");
+      if(!vacio(f.red_id) && ["bridge", "no_aplica"].includes(modoEfectivo(f))) throw { code:"23514", message:`equipos_radioenlace_red_solo_routers: «${f.nombre}» no define red (trabaja como bridge o su tipo no tiene modo de red): va en la red de su servidor. Para darle otra red, ponlo en modo router.` };
+    }
+    if(t === "redes"){
+      if(!Array.isArray(f.rangos_ip)) f.rangos_ip = [];
+      if(f.rangos_ip.length > 20 || f.rangos_ip.some(x=>x === null || x === undefined)) throw regla("redes_rangos_ip_validos");
+      f.rangos_ip = f.rangos_ip.map(cidrValido);
+    }
+  }
+  // Con la 014, los tipos arrancan con sus valores de fábrica (como los deja la migración).
+  if(hay014){
+    for(const x of tabla("tipos_equipo_red")){
+      if(x.modo_red === undefined) x.modo_red = MODO_FABRICA[x.valor] || "elegir";
+      if(x.hace_radio === undefined) x.hace_radio = ["ptp", "ap", "estacion"].includes(x.valor);
+      if(x.lleva_cobertura === undefined) x.lleva_cobertura = x.valor === "ap";
+    }
+    for(const e of tabla("equipos_radioenlace")) if(e.modo_red === undefined) e.modo_red = null;
+    for(const r of tabla("redes")) if(r.rangos_ip === undefined) r.rangos_ip = [];
+  }
   function columna008SinMigracion(t, datos){
     if(hay008 || t !== "equipos_radioenlace") return null;
     const filas = Array.isArray(datos) ? datos : [datos];
@@ -379,6 +441,12 @@
         const c = COLUMNAS_013[this.t].find(k=>new RegExp(`\\b${k}\\b`).test(String(this.sel)));
         if(c) return { data: null, error: { code:"42703", message:`column ${this.t}.${c} does not exist` }, count: null };
       }
+      if(!hay014 && this.op === "select" && COLUMNAS_014[this.t]){
+        const c = COLUMNAS_014[this.t].find(k=>new RegExp(`\\b${k}\\b`).test(String(this.sel)));
+        if(c) return { data: null, error: { code:"42703", message:`column ${this.t}.${c} does not exist` }, count: null };
+      }
+      const sin014 = (this.op === "insert" || this.op === "update") ? columnas014SinMigracion(this.t, this.datos) : null;
+      if(sin014) return { data: null, error: sin014, count: null };
       const sin013 = (this.op === "insert" || this.op === "update") ? columnas013SinMigracion(this.t, this.datos) : null;
       if(sin013) return { data: null, error: sin013, count: null };
       const sin007 = (this.op === "insert" || this.op === "update") ? (columnas007SinMigracion(this.t, this.datos) || columna008SinMigracion(this.t, this.datos)) : null;
@@ -398,8 +466,9 @@
             if(this.t === "ubicaciones"){ fila.fotos ||= []; if(fila.activa === undefined) fila.activa = true; }
             if(this.t === "historial_ubicacion"){ if(fila.hasta === undefined) fila.hasta = null; if(!fila.desde) fila.desde = hoy; antesDeInsertarTramo(fila); }
             if(this.t === "tipos_ubicacion" && fila.activo === undefined) fila.activo = true;
-            if(this.t === "equipos_radioenlace"){ if(fila.servidor_id === undefined) fila.servidor_id = null; if(hay008 && fila.medio === undefined) fila.medio = null; validarJerarquia(fila); validar008(this.t, fila); validar013(this.t, fila); }
-            if(this.t === "tipos_equipo_red") validar013(this.t, fila);
+            if(this.t === "equipos_radioenlace"){ if(fila.servidor_id === undefined) fila.servidor_id = null; if(hay008 && fila.medio === undefined) fila.medio = null; if(hay014 && fila.modo_red === undefined) fila.modo_red = null; validarJerarquia(fila); validar008(this.t, fila); validar013(this.t, fila); validar014(this.t, fila); }
+            if(this.t === "tipos_equipo_red"){ if(hay014){ fila.modo_red ??= "elegir"; fila.hace_radio ??= false; fila.lleva_cobertura ??= false; } validar013(this.t, fila); validar014(this.t, fila); }
+            if(this.t === "redes" && hay014) validar014(this.t, fila);
             if(this.t === "piscinas"){ if(fila.activa === undefined) fila.activa = true; if(fila.orden === undefined) fila.orden = 0; if(fila.revisar === undefined) fila.revisar = false; if(fila.fuente === undefined) fila.fuente = "manual"; validarPiscina(fila, null); fila.actualizado_en = new Date().toISOString(); }
             if(this.t === "enlaces_respaldo"){ if(fila.prioridad === undefined) fila.prioridad = 1; validarRespaldo(fila, null); }
             if(this.t === "planos_mapa"){ if(fila.activo === undefined) fila.activo = true; fila.actualizado_en = new Date().toISOString(); validarPlano(fila); }
@@ -436,6 +505,8 @@
             validar007(this.t, nueva, this.t === "tipos_equipo_red" ? r.valor : r.id);
             validar008(this.t, nueva);
             validar013(this.t, nueva);
+            validar014(this.t, nueva, r);
+            if(this.t === "redes" && hay014 && "rangos_ip" in this.datos) this.datos = { ...this.datos, rangos_ip: nueva.rangos_ip };
             if(this.t === "atajos_simulacion") this.datos = { ...this.datos, equipos: nueva.equipos };
           }
           resultado.forEach(r=>{

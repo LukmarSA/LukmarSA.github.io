@@ -19,9 +19,10 @@
 // dentro de <main>. Como Leaflet engancha listeners a window, renderMain()
 // llama a destruirVistaMapa() al salir de la pestaña.
 import { cargarActivos } from "../nucleo/datos.js";
-import { cargarPiscinas, cargarPlanoMapa, estadoMapa, hayCobertura, hayMedio, hayPiscinas, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa, simulacionMapa } from "../nucleo/datos-mapa.js";
+import { cargarPiscinas, cargarPlanoMapa, estadoMapa, hayCobertura, hayMedio, hayModoRed, hayPiscinas, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa, simulacionMapa } from "../nucleo/datos-mapa.js";
 import { cargarTiposActivo } from "../nucleo/datos.js";
 import { normalizarCobertura, puntosSector, textoCobertura } from "../nucleo/cobertura.js";
+import { llevaMarcaRouter } from "../nucleo/modo-red.js";
 import { MODOS_TOOLTIP, conRedes, conTipos, resumenUbicacion, textoActivos, textoOcultos, textoSinEquipos } from "../nucleo/tooltip-ubicacion.js";
 import { cajaPiscinas } from "../nucleo/piscinas.js";
 import { caidosEfectivos } from "../nucleo/mapa-nombres.js";
@@ -348,6 +349,7 @@ function contextoPanel(c){
     // Red de la finca (007)
     red007: hayRedFinca(),
     cobertura013: hayCobertura(),
+    modoRed014: hayModoRed(),   // v17: la marca «Router» y la red que define cada router
     atajos: m.atajos,
     simEstado: m.simulacion,
     redPorId: new Map(m.redes.map(r=>[r.id, r])),
@@ -366,7 +368,16 @@ function refrescar(){
   const botonRedes = document.getElementById(`${P}mapa-redes-tipos`);
   if(botonRedes) botonRedes.hidden = !hayRedFinca();
   const botonLote = document.getElementById(`${P}mapa-lote`);
-  if(botonLote) botonLote.hidden = !hayRedFinca() || !estadoMapa().equipos.length;
+  if(botonLote){
+    botonLote.hidden = !hayRedFinca() || !estadoMapa().equipos.length;
+    // v17 (014): en lote también el modo de red.
+    const texto = hayModoRed() ? "Tipo, modo y red en lote" : "Tipo y red en lote";
+    if(botonLote.textContent !== texto){
+      botonLote.textContent = texto;
+      botonLote.setAttribute("aria-label", texto);
+      botonLote.title = hayModoRed() ? "Elegir el tipo, el modo de red y la red de varios equipos a la vez" : "Elegir el tipo y la red de varios equipos a la vez";
+    }
+  }
   pintarFiltros(c);
   pintarAvisoSimulacion(c);
   if(vista){
@@ -604,7 +615,7 @@ function pintarFiltros(c){
   const grupoRedes = document.getElementById(`${P}mapa-grupo-redes`);
   if(grupoRedes) grupoRedes.hidden = !hayRedes;
   const colorRed = document.getElementById(`${P}mapa-color-red`);
-  if(colorRed){ colorRed.hidden = !hayRedes; colorRed.setAttribute("aria-pressed", String(!!f.colorPorRed)); }
+  if(colorRed){ colorRed.hidden = !hayRedes; colorRed.setAttribute("aria-pressed", String(!!f.colorPorRed)); colorRed.title = hayModoRed() ? "Pintar cada línea con el color de su red (la de arriba: la de su servidor)" : "Pintar cada línea con el color de la red de su equipo"; }
   // v15 (3.10): «Al pasar el mouse» (con la 007: sin tipos ni redes no hay nada que mostrar).
   const grupoTooltip = document.getElementById(`${P}mapa-tooltip-modo-grupo`);
   if(grupoTooltip) grupoTooltip.hidden = !hayRedFinca() || sinHover();
@@ -633,7 +644,9 @@ function pintarFiltros(c){
     leyendaRedes.hidden = !(hayRedes && f.colorPorRed);
     // v14 (3.8): con dos redes o más, cómo se ve un tramo que llevan varias.
     const franjas = m.redes.length > 1 ? `<li class="${P}mapa-leyenda-nota"><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-franjas" style="--franja-1:${esc(m.redes[0].color)};--franja-2:${esc(m.redes[1].color)}"></span>Varias redes en un tramo: una franja por red</li>` : "";
-    leyendaRedes.innerHTML = hayRedes && f.colorPorRed ? `<li class="${P}mapa-leyenda-subtitulo">Líneas por red</li>` + m.redes.map(r=>`<li><span class="${P}mapa-leyenda-linea" style="border-top:4px solid ${esc(r.color)}"></span>${esc(r.nombre)}</li>`).join("") + franjas : "";
+    // v17 (014): cada enlace va con la red de su servidor (la de arriba).
+    const arriba = hayModoRed() ? `<li class="${P}mapa-leyenda-nota" data-leyenda-arriba>Cada enlace va con la red de arriba (la de su servidor)</li>` : "";
+    leyendaRedes.innerHTML = hayRedes && f.colorPorRed ? `<li class="${P}mapa-leyenda-subtitulo">Líneas por red</li>` + m.redes.map(r=>`<li><span class="${P}mapa-leyenda-linea" style="border-top:4px solid ${esc(r.color)}"></span>${esc(r.nombre)}</li>`).join("") + franjas + arriba : "";
   }
 
   // Tipos de equipo de red (v12, 3.4): con la 007 y si hay equipos o
@@ -756,21 +769,25 @@ function pintarMarcadores(c){
 // v15 (3.10): el tooltip de una ubicación: su nombre y su tipo y, según «Al
 // pasar el mouse», cuántos equipos hay de cada tipo (con su ícono), de cada
 // red, o las dos. Cuenta todo lo que hay en la ubicación y avisa cuántos
-// ocultan los filtros. Con la 013, también la cobertura de sus AP.
+// ocultan los filtros. v17: ya no lista la cobertura de sus AP (lo pidió la
+// persona: lo agrandaba mucho; la cobertura se ve en el mapa y en el detalle
+// del equipo). Con la 014, junto al tipo, cuántos de ellos son routers.
 function htmlTooltipUbicacion(c, u){
   const m = c.m;
   const equipos = c.idx.equiposPorUbicacion.get(u.id) || [];
   const activos = (c.idx.activosPorUbicacion.get(u.id) || []).filter(a=>{ const e = c.idx.equipoPorActivo.get(a.id); return !(e && e.ubicacion_id === u.id); }).length;
-  const r = resumenUbicacion({ equipos, visibleEquipo: c.visibleEquipo, tipos: m.tiposEquipo, redes: m.redes, redDe: e=>{ const id = redEfectivaDe(e); return id === null || id === undefined ? null : id; }, activos });
-  const tipoU = infoTipoUbicacion(m.tiposUbicacion, u.tipo);
   const tipoPorValor = new Map(m.tiposEquipo.map(t=>[t.valor, t]));
+  const routerDe = hayModoRed() ? e=>llevaMarcaRouter(e, e.tipo_equipo ? tipoPorValor.get(e.tipo_equipo) || { valor: e.tipo_equipo } : null) : ()=>false;
+  const r = resumenUbicacion({ equipos, visibleEquipo: c.visibleEquipo, tipos: m.tiposEquipo, redes: m.redes, redDe: e=>{ const id = redEfectivaDe(e); return id === null || id === undefined ? null : id; }, activos, routerDe });
+  const tipoU = infoTipoUbicacion(m.tiposUbicacion, u.tipo);
   const tiposActivo = cargarTiposActivo();
-  const fila = (icono, etiqueta, n, clase = "")=>`<tr${clase ? ` class="${P}${clase}"` : ""}><td class="${P}mapa-tt-ico">${icono}</td><td class="${P}mapa-tt-etq">${esc(etiqueta)}</td><td class="${P}mapa-tt-n">${n}</td></tr>`;
+  const fila = (icono, etiqueta, n, clase = "", extra = "")=>`<tr${clase ? ` class="${P}${clase}"` : ""}><td class="${P}mapa-tt-ico">${icono}</td><td class="${P}mapa-tt-etq">${extra ? `<span class="${P}mapa-tt-etq-texto">${esc(etiqueta)}</span>${extra}` : esc(etiqueta)}</td><td class="${P}mapa-tt-n">${n}</td></tr>`;
+  const marcaRouters = n=>n ? `<span class="${P}mapa-tt-router" title="${esc(n === 1 ? "1 de ellos trabaja como router" : `${n} de ellos trabajan como router`)}">${n === 1 ? "1 router" : `${n} routers`}</span>` : "";
   let cuerpo = "";
   if(!r.total) cuerpo += `<div class="${P}mapa-tt-nota">${esc(textoSinEquipos())}</div>`;
   if(r.total && conTipos(modoTooltip)){
     cuerpo += `<table class="${P}mapa-tt-tabla" aria-label="Equipos por tipo">`
-      + r.tipos.map(t=>fila(iconoTipoEquipo(tipoPorValor.get(t.valor) || { valor: t.valor }, { tiposEquipo: m.tiposEquipo, tiposActivo }), t.etiqueta, t.n)).join("")
+      + r.tipos.map(t=>fila(iconoTipoEquipo(tipoPorValor.get(t.valor) || { valor: t.valor }, { tiposEquipo: m.tiposEquipo, tiposActivo }), t.etiqueta, t.n, "", marcaRouters(t.routers))).join("")
       + (r.sinTipo ? fila(iconoTipoEquipo(null), "Sin tipo", r.sinTipo, "mapa-tt-especial") : "")
       + `</table>`;
   }
@@ -783,11 +800,6 @@ function htmlTooltipUbicacion(c, u){
   }
   if(r.ocultos) cuerpo += `<div class="${P}mapa-tt-nota ${P}mapa-tt-ocultos">${esc(textoOcultos(r.ocultos))}</div>`;
   if(r.activos) cuerpo += `<div class="${P}mapa-tt-nota">${esc(textoActivos(r.activos))}</div>`;
-  if(hayCobertura()){
-    const conCobertura = equipos.map(e=>[e, normalizarCobertura(e)]).filter(([, cob])=>cob);
-    for(const [e, cob] of conCobertura.slice(0, 3)) cuerpo += `<div class="${P}mapa-tt-nota ${P}mapa-tt-cobertura">${esc(`${e.nombre}: ${textoCobertura(cob)}`)}</div>`;
-    if(conCobertura.length > 3) cuerpo += `<div class="${P}mapa-tt-nota">${esc(`y ${conCobertura.length - 3} más con cobertura`)}</div>`;
-  }
   return `<div class="${P}mapa-tt"><div class="${P}mapa-tt-titulo"><strong>${esc(u.nombre)}</strong><span class="${P}mapa-tt-tipo">${esc(tipoU.etiqueta)}</span></div>${cuerpo}</div>`;
 }
 
@@ -878,10 +890,14 @@ function pintarLineas(c){
   const colorRed = new Map(c.m.redes.map(r=>[r.id, r.color]));
   const nombreRed = new Map(c.m.redes.map(r=>[r.id, r.nombre]));
   // La línea va con la red del cliente (con la 011, la efectiva: una red
-  // aparte sale con su color desde el enlace de su primer equipo).
+  // aparte sale con su color desde el enlace de su primer equipo). v17 (014):
+  // con el modo de red, va en la red de arriba (la de su servidor): el enlace
+  // de subida de un router que define otra red es de la red en la que se
+  // conecta (lo decidió la persona el 2-oct).
+  const conModo = hayModoRed();
   const redDe = d=>{
     const e = c.red.equipoPorId.get(d.clienteId), s = c.red.equipoPorId.get(d.servidorId);
-    const id = redEfectivaDe(e) ?? redEfectivaDe(s);
+    const id = conModo ? (s ? redEfectivaDe(s) : redEfectivaDe(e)) : (redEfectivaDe(e) ?? redEfectivaDe(s));
     return id !== null && id !== undefined ? id : null;
   };
   const nombreEquipo = id=>{ const e = c.red.equipoPorId.get(id); return e ? e.nombre : "?"; };

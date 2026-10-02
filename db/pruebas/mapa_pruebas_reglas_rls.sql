@@ -1,5 +1,5 @@
 -- =====================================================================
--- Pruebas de las reglas del mapa y de los activos (migraciones 002 a 004, 006 a 013) contra la base
+-- Pruebas de las reglas del mapa y de los activos (migraciones 002 a 004, 006 a 014) contra la base
 -- REAL, sin dejar rastro. Sirven antes y después de correr la 005.
 -- =====================================================================
 -- Todo corre dentro de un único bloque DO que termina con RAISE EXCEPTION:
@@ -101,6 +101,19 @@ DECLARE
   y_txt    text;
   y_nom    text;
   y_caso   text;
+  z_u      bigint;
+  z_r      bigint;
+  z_r2     bigint;
+  z_s      bigint;
+  z_a      bigint;
+  z_c      bigint;
+  z_red    bigint;
+  z_red2   bigint;
+  z_red3   bigint;
+  z_n      integer;
+  z_m      integer;
+  z_txt    text;
+  z_nom    text;
 BEGIN
   IF to_regprocedure('public.equipo_radio_de_activo(integer)') IS NULL THEN
     RAISE EXCEPTION 'Falta la migración 004 (public.equipo_radio_de_activo no existe): aplícala antes de correr estas pruebas.';
@@ -116,6 +129,13 @@ BEGIN
   -- chocarían con él). Como todo se revierte al final, no quedan tocados.
   UPDATE public.equipos_radioenlace SET activo_id = NULL WHERE activo_id IN (v_x, v_y);
   DELETE FROM public.historial_ubicacion WHERE activo_id IN (v_x, v_y);
+  -- Con la 014, solo los routers definen red. Las secciones R a X prueban
+  -- redes en switches y cámaras, como era antes: dentro de esta transacción
+  -- (que se revierte) todos los tipos quedan «a elegir». La sección Y crea
+  -- sus propios tipos con cada modo.
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'tipos_equipo_red' AND column_name = 'modo_red') THEN
+    EXECUTE 'UPDATE public.tipos_equipo_red SET modo_red = ''elegir'' WHERE modo_red <> ''elegir''';
+  END IF;
 
   -- Permisos fijos para la prueba (se revierten con todo lo demás): el
   -- visitante ve el listado, pero no el mapa ni puede asignar ubicaciones; el
@@ -1534,6 +1554,149 @@ BEGIN
     PERFORM set_config('role', 'postgres', true);
     SELECT count(*) INTO y_n FROM public.auditoria WHERE accion = 'UPDATE_equipos_radioenlace' AND detalle = format('equipos_radioenlace: actualizado id=%s', y_e) AND fecha >= now() - interval '1 minute';
     r := r || jsonb_build_object('t', 'X6 los cambios de cobertura quedan en la auditoría', 'ok', y_n >= 3, 'det', format('%s filas', y_n));
+  END IF;
+
+  -- ================= Y. Migración 014: modo de red, solo los routers definen red, rangos IP y tipos configurables =================
+  PERFORM set_config('role', 'postgres', true);
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'equipos_radioenlace' AND column_name = 'modo_red') THEN
+    r := r || jsonb_build_object('t', 'Y0 migración 014 aplicada (equipos_radioenlace.modo_red existe)', 'ok', false, 'det', 'falta correr db/migraciones/014_modo_red_y_rangos_ip.sql');
+  ELSE
+    SELECT count(*) INTO z_n FROM information_schema.columns WHERE table_schema = 'public'
+       AND ((table_name = 'equipos_radioenlace' AND column_name = 'modo_red') OR (table_name = 'redes' AND column_name = 'rangos_ip')
+         OR (table_name = 'tipos_equipo_red' AND column_name IN ('modo_red', 'hace_radio', 'lleva_cobertura')));
+    SELECT count(*) INTO z_m FROM pg_constraint WHERE conname IN ('tipos_equipo_red_modo_valido', 'equipos_radioenlace_modo_valido', 'redes_rangos_ip_validos');
+    r := r || jsonb_build_object('t', 'Y0 migración 014: 5 columnas, 3 reglas y 2 triggers',
+      'ok', z_n = 5 AND z_m = 3
+        AND (SELECT count(*) FROM pg_trigger WHERE tgname IN ('trg_equipos_radioenlace_red_solo_routers', 'trg_tipos_equipo_red_modo_con_redes')) = 2,
+      'det', format('columnas %s, reglas %s', z_n, z_m));
+    -- Tipos propios de la prueba, uno por modo (los de semilla quedaron «a elegir» arriba).
+    INSERT INTO public.tipos_equipo_red (valor, etiqueta, genero, orden, modo_red, hace_radio, lleva_cobertura) VALUES
+      ('ty_ruteador', '[TY] Ruteador', 'm', 901, 'router', false, false),
+      ('ty_puente', '[TY] Puente', 'm', 902, 'bridge', false, false),
+      ('ty_antena', '[TY] Antena', 'f', 903, 'elegir', true, true),
+      ('ty_cam', '[TY] Cam', 'f', 904, 'no_aplica', false, false);
+
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('role', 'authenticated', true);
+    BEGIN
+      INSERT INTO public.redes (nombre, color, orden) VALUES ('[TY] Red Router', '#00A19A', 90) RETURNING id INTO z_red;
+      INSERT INTO public.redes (nombre, color, orden) VALUES ('[TY] Red AP', '#5B4B8A', 91) RETURNING id INTO z_red2;
+      INSERT INTO public.redes (nombre, color, orden) VALUES ('[TY] Red Switch', '#1E8A5A', 92) RETURNING id INTO z_red3;
+      INSERT INTO public.ubicaciones (nombre, tipo, lat, lng) VALUES ('[TY] Torre Y', 'torre', -2.32, -79.72) RETURNING id INTO z_u;
+      -- Un router (raíz) define su red; un AP «a elegir» debajo también puede definir otra.
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, red_id) VALUES (z_u, '[TY] R', 'ty_ruteador', z_red) RETURNING id INTO z_r;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, servidor_id) VALUES (z_u, '[TY] S', 'ty_puente', z_r) RETURNING id INTO z_s;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, servidor_id, red_id) VALUES (z_u, '[TY] A', 'ty_antena', z_s, z_red2) RETURNING id INTO z_a;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, servidor_id) VALUES (z_u, '[TY] C', 'ty_cam', z_a) RETURNING id INTO z_c;
+      SELECT format('%s/%s/%s/%s', public.f_red_efectiva(z_r) = z_red, public.f_red_efectiva(z_s) = z_red, public.f_red_efectiva(z_a) = z_red2, public.f_red_efectiva(z_c) = z_red2) INTO z_txt;
+      r := r || jsonb_build_object('t', 'Y1 un router y una antena «a elegir» definen red; un puente (bridge) y una cámara (no aplica) heredan la de su servidor',
+        'ok', z_txt = 't/t/t/t', 'det', z_txt);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'Y1 un router y una antena «a elegir» definen red; un puente (bridge) y una cámara (no aplica) heredan la de su servidor', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    IF z_c IS NOT NULL THEN
+      -- Lo que se tiene que rechazar (23514, con el nombre de la regla en el mensaje).
+      z_txt := ''; z_n := 0;
+      FOREACH y_caso IN ARRAY ARRAY[
+        format('UPDATE public.equipos_radioenlace SET red_id = %s WHERE id = %s', z_red2, z_s),
+        format('UPDATE public.equipos_radioenlace SET red_id = %s WHERE id = %s', z_red, z_c),
+        format('UPDATE public.equipos_radioenlace SET modo_red = %L WHERE id = %s', 'bridge', z_a),
+        format('UPDATE public.equipos_radioenlace SET tipo_equipo = %L WHERE id = %s', 'ty_puente', z_a),
+        format('INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, servidor_id, red_id, modo_red) VALUES (%s, %L, %L, %s, %s, %L)', z_u, '[TY] P', 'ty_antena', z_r, z_red2, 'bridge')] LOOP
+        BEGIN
+          EXECUTE y_caso;
+          z_txt := z_txt || ' aceptado: ' || y_caso;
+        EXCEPTION WHEN check_violation THEN
+          IF SQLERRM LIKE 'equipos_radioenlace_red_solo_routers:%' THEN z_n := z_n + 1; ELSE z_txt := z_txt || ' otro mensaje: ' || SQLERRM; END IF;
+        WHEN others THEN z_txt := z_txt || ' ' || SQLSTATE || ' ' || SQLERRM;
+        END;
+      END LOOP;
+      r := r || jsonb_build_object('t', 'Y2 se rechaza red propia en un puente (bridge) o en una cámara, y pasar a bridge (o a un tipo bridge) un equipo que define red',
+        'ok', z_n = 5 AND z_txt = '', 'det', format('rechazados %s de 5%s', z_n, z_txt));
+      BEGIN
+        SELECT nombre INTO z_nom FROM public.equipos_radioenlace WHERE id = z_s;
+        UPDATE public.equipos_radioenlace SET modo_red = 'router', red_id = z_red3 WHERE id = z_s;      -- un switch de capa 3, con su red
+        UPDATE public.equipos_radioenlace SET modo_red = 'router' WHERE id = z_a;                         -- el AP, router
+        UPDATE public.equipos_radioenlace SET modo_red = NULL, red_id = NULL WHERE id = z_s;              -- vuelve a bridge (el de su tipo)
+        SELECT format('%s/%s/%s', (SELECT modo_red FROM public.equipos_radioenlace WHERE id = z_a), public.f_modo_red_efectivo(NULL, 'ty_puente'), (SELECT nombre FROM public.equipos_radioenlace WHERE id = z_s) = z_nom) INTO z_txt;
+        r := r || jsonb_build_object('t', 'Y3 un puente en modo router puede definir red y volver a bridge sin ella; una antena en modo router; el nombre no cambia por el modo',
+          'ok', z_txt = 'router/bridge/t', 'det', z_txt);
+      EXCEPTION WHEN others THEN
+        r := r || jsonb_build_object('t', 'Y3 un puente en modo router puede definir red y volver a bridge sin ella; una antena en modo router; el nombre no cambia por el modo', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+      END;
+      -- Pasar un tipo a bridge con equipos suyos (sin modo propio) que definen red: no.
+      BEGIN
+        UPDATE public.equipos_radioenlace SET modo_red = NULL WHERE id = z_a;   -- el AP vuelve a «a elegir», con su red
+        z_txt := '';
+        BEGIN
+          UPDATE public.tipos_equipo_red SET modo_red = 'bridge' WHERE valor = 'ty_antena';
+          z_txt := 'aceptado';
+        EXCEPTION WHEN check_violation THEN
+          IF SQLERRM NOT LIKE 'tipos_equipo_red_modo_con_redes:%' THEN z_txt := 'otro mensaje: ' || SQLERRM; END IF;
+        END;
+        UPDATE public.equipos_radioenlace SET modo_red = 'router' WHERE id = z_a;   -- con modo propio, el del tipo ya no lo afecta
+        UPDATE public.tipos_equipo_red SET modo_red = 'bridge' WHERE valor = 'ty_antena';
+        UPDATE public.tipos_equipo_red SET modo_red = 'elegir' WHERE valor = 'ty_antena';
+        r := r || jsonb_build_object('t', 'Y4 no se puede pasar un tipo a bridge si equipos suyos sin modo propio definen red; con modo propio, sí',
+          'ok', z_txt = '', 'det', coalesce(nullif(z_txt, ''), 'bien'));
+      EXCEPTION WHEN others THEN
+        r := r || jsonb_build_object('t', 'Y4 no se puede pasar un tipo a bridge si equipos suyos sin modo propio definen red; con modo propio, sí', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+      END;
+      -- Un router debajo de otro con la misma red: la 011 la deja vacía (heredada), sin chocar con la regla.
+      BEGIN
+        INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo, servidor_id, red_id) VALUES (z_u, '[TY] R2', 'ty_ruteador', z_r, z_red) RETURNING id INTO z_r2;
+        SELECT red_id IS NULL AND public.f_red_efectiva(z_r2) = z_red INTO v_her FROM public.equipos_radioenlace WHERE id = z_r2;
+        r := r || jsonb_build_object('t', 'Y5 un subrouter con la misma red que la de arriba queda con la red heredada (la 011 sigue igual)', 'ok', v_her, 'det', '');
+      EXCEPTION WHEN others THEN
+        r := r || jsonb_build_object('t', 'Y5 un subrouter con la misma red que la de arriba queda con la red heredada (la 011 sigue igual)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+      END;
+    END IF;
+    -- Rangos IP de las redes.
+    IF z_red IS NOT NULL THEN
+      BEGIN
+        UPDATE public.redes SET rangos_ip = '{10.10.0.0/24,192.168.88.0/24}' WHERE id = z_red;
+        SELECT array_to_string(rangos_ip, ' ') INTO z_txt FROM public.redes WHERE id = z_red;
+        z_n := 0; z_nom := '';
+        BEGIN UPDATE public.redes SET rangos_ip = '{192.168.88.1/24}' WHERE id = z_red; z_nom := z_nom || ' bits-de-host-aceptado'; EXCEPTION WHEN invalid_text_representation THEN z_n := z_n + 1; END;
+        BEGIN UPDATE public.redes SET rangos_ip = '{no-es-un-rango}' WHERE id = z_red; z_nom := z_nom || ' texto-aceptado'; EXCEPTION WHEN invalid_text_representation THEN z_n := z_n + 1; END;
+        BEGIN UPDATE public.redes SET rangos_ip = array_fill('10.0.0.0/8'::cidr, ARRAY[21]) WHERE id = z_red; z_nom := z_nom || ' 21-aceptados'; EXCEPTION WHEN check_violation THEN z_n := z_n + 1; END;
+        BEGIN UPDATE public.redes SET rangos_ip = ARRAY['10.0.0.0/8'::cidr, NULL] WHERE id = z_red; z_nom := z_nom || ' nulo-aceptado'; EXCEPTION WHEN check_violation THEN z_n := z_n + 1; END;
+        UPDATE public.redes SET rangos_ip = '{}' WHERE id = z_red2;
+        r := r || jsonb_build_object('t', 'Y6 una red guarda sus rangos (CIDR); se rechazan uno con bits de host, uno mal escrito, más de 20 y uno vacío',
+          'ok', z_txt = '10.10.0.0/24 192.168.88.0/24' AND z_n = 4 AND z_nom = '', 'det', format('%s; rechazados %s de 4%s', z_txt, z_n, z_nom));
+      EXCEPTION WHEN others THEN
+        r := r || jsonb_build_object('t', 'Y6 una red guarda sus rangos (CIDR); se rechazan uno con bits de host, uno mal escrito, más de 20 y uno vacío', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+      END;
+    END IF;
+    -- El tipo: modo, radio y cobertura los cambia el administrador.
+    BEGIN
+      UPDATE public.tipos_equipo_red SET hace_radio = true, lleva_cobertura = true, modo_red = 'router' WHERE valor = 'ty_cam';
+      GET DIAGNOSTICS z_n = ROW_COUNT;
+      z_txt := '';
+      BEGIN UPDATE public.tipos_equipo_red SET modo_red = 'capa7' WHERE valor = 'ty_cam'; z_txt := 'modo-raro-aceptado'; EXCEPTION WHEN check_violation THEN NULL; END;
+      BEGIN UPDATE public.equipos_radioenlace SET modo_red = 'elegir' WHERE id = z_r; z_txt := z_txt || ' elegir-en-equipo-aceptado'; EXCEPTION WHEN check_violation THEN NULL; END;
+      r := r || jsonb_build_object('t', 'Y7 el administrador cambia el modo, el radio y la cobertura de un tipo; un modo que no existe se rechaza (en el tipo y en el equipo)',
+        'ok', z_n = 1 AND z_txt = '', 'det', format('filas %s %s', z_n, z_txt));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'Y7 el administrador cambia el modo, el radio y la cobertura de un tipo; un modo que no existe se rechaza (en el tipo y en el equipo)', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    -- Quien no es administrador no cambia nada de esto (RLS: 0 filas).
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_visit, 'role', 'authenticated')::text, true);
+    BEGIN
+      UPDATE public.equipos_radioenlace SET modo_red = 'bridge' WHERE id = z_r;
+      GET DIAGNOSTICS z_n = ROW_COUNT;
+      UPDATE public.redes SET rangos_ip = '{172.16.0.0/12}' WHERE id = z_red;
+      GET DIAGNOSTICS z_m = ROW_COUNT;
+      UPDATE public.tipos_equipo_red SET modo_red = 'bridge' WHERE valor = 'ty_ruteador';
+      GET DIAGNOSTICS y_n = ROW_COUNT;
+      r := r || jsonb_build_object('t', 'Y8 quien no es administrador no cambia el modo de un equipo ni de un tipo, ni los rangos de una red (0 filas)', 'ok', z_n = 0 AND z_m = 0 AND y_n = 0, 'det', format('equipos %s, redes %s, tipos %s', z_n, z_m, y_n));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'Y8 quien no es administrador no cambia el modo de un equipo ni de un tipo, ni los rangos de una red (0 filas)', 'ok', SQLSTATE = '42501', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    PERFORM set_config('role', 'postgres', true);
+    SELECT count(*) INTO z_n FROM public.auditoria WHERE accion = 'UPDATE_equipos_radioenlace' AND detalle IN (format('equipos_radioenlace: actualizado id=%s', z_a), format('equipos_radioenlace: actualizado id=%s', z_s)) AND fecha >= now() - interval '1 minute';
+    SELECT count(*) INTO z_m FROM public.auditoria WHERE accion = 'UPDATE_redes' AND detalle = format('redes: actualizado id=%s', z_red) AND fecha >= now() - interval '1 minute';
+    r := r || jsonb_build_object('t', 'Y9 los cambios de modo y de rangos quedan en la auditoría', 'ok', z_n >= 3 AND z_m >= 1, 'det', format('equipos %s, redes %s', z_n, z_m));
   END IF;
 
   -- ================= G. GRANT explícito (sin él, la API responde "permission denied") =================

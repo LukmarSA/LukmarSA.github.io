@@ -3866,7 +3866,7 @@ function fixtureCobertura({ m013 = true, conCobertura = true, red007 = true } = 
   return fx;
 }
 // Las filas de la tablita del tooltip abierto: [etiqueta, cantidad, ¿tiene ícono?].
-const filasTooltip = (page, cual = "")=>page.locator(`${TT_UBIC} table${cual}`).last().evaluate(t=>[...t.querySelectorAll("tr")].map(tr=>[tr.querySelector(".inventario-tecnologico-mapa-tt-etq").textContent, Number(tr.querySelector(".inventario-tecnologico-mapa-tt-n").textContent), !!tr.querySelector("svg, .inventario-tecnologico-mapa-tt-punto")]));
+const filasTooltip = (page, cual = "")=>page.locator(`${TT_UBIC} table${cual}`).last().evaluate(t=>[...t.querySelectorAll("tr")].map(tr=>[(tr.querySelector(".inventario-tecnologico-mapa-tt-etq-texto") || tr.querySelector(".inventario-tecnologico-mapa-tt-etq")).textContent, Number(tr.querySelector(".inventario-tecnologico-mapa-tt-n").textContent), !!tr.querySelector("svg, .inventario-tecnologico-mapa-tt-punto")]));
 async function tooltipDe(page, ubicacionId, { teclado = false } = {}){
   const sel = `.leaflet-marker-icon[data-ubicacion-id="${ubicacionId}"]`;
   if(teclado) await page.focus(sel); else await page.hover(sel);
@@ -3901,7 +3901,8 @@ async function escenarioTooltip(browser, base){
       await tooltipDe(page, 1, { teclado: true });
       const filas = await filasTooltip(page);
       exigir(JSON.stringify(filas) === '[["Switch",1,true],["Punto a Punto",2,true],["AP",1,true],["Cámara",2,true]]', JSON.stringify(filas));
-      exigir(/AP en Torre Cerro Azul[^:]*: 800 m a la redonda/.test(await page.locator(TT_UBIC).last().innerText()), "sin la cobertura de su AP: " + await page.locator(TT_UBIC).last().innerText());
+      // v17: la cobertura de sus AP ya no va en el tooltip (lo agrandaba mucho; lo pidió la persona).
+      exigir(!/a la redonda|con cobertura|sector de/.test(await page.locator(TT_UBIC).last().innerText()) && !(await cuenta(page, `${TT_UBIC} .inventario-tecnologico-mapa-tt-cobertura`)), "con la cobertura de su AP: " + await page.locator(TT_UBIC).last().innerText());
       await soltarTooltip(page);
     });
     await verificar("3.10: cerca del borde de arriba del mapa, la tablita se abre hacia abajo, no se corta y tapa lo que queda debajo", async ()=>{
@@ -4267,6 +4268,370 @@ async function escenarioCobertura(browser, base){
   await context.close();
 }
 
+// ------------------------------------------------------------------ v17 (014): modo de red (router/bridge) y rangos IP
+// PTP SA ← CA (20) enruta (modo router) y define «Red Santa Ana» (10.30.0.0/24):
+// la heredan AP Santa Ana y sus clientes. El Switch CA (50) es de capa 3 (modo
+// router) y define «Red Cámaras». «Equipo Bodega» (60, tipo «Equipo», a elegir)
+// tiene red propia. Las redes 1 y 2 tienen rangos que se cruzan.
+function fixtureCapa3({ m014 = true } = {}){
+  const fx = fixture({ red007: true, red008: true, red011: true, servidor: true });
+  fx.m013 = true;
+  const buscar = id=>fx.tablas.equipos_radioenlace.find(e=>e.id === id);
+  for(const e of fx.tablas.equipos_radioenlace) Object.assign(e, { radio_cobertura_m: null, azimut_cobertura: null, apertura_cobertura: null });
+  for(const t of fx.tablas.tipos_equipo_red) t.icono_svg = null;
+  Object.assign(buscar(21), { radio_cobertura_m: 600, azimut_cobertura: 135, apertura_cobertura: 90, red_id: null }); // AP Santa Ana: con cobertura (antes salía en el tooltip)
+  buscar(32).red_id = null;
+  fx.tablas.redes[0].rangos_ip = ["10.10.0.0/16"];
+  fx.tablas.redes[1].rangos_ip = ["10.10.5.0/24"];
+  fx.tablas.redes.push({ id:3, nombre:"Red Santa Ana", color:"#2E9E5B", orden:30, activa:true, rangos_ip:["10.30.0.0/24"] });
+  Object.assign(buscar(20), { red_id: 3, modo_red: "router" });
+  buscar(50).modo_red = "router";
+  fx.tablas.equipos_radioenlace.push(eq(60, 4, "Equipo Bodega", 40, { tipo_equipo:"otro", red_id:2, referencia:null, medio:null, radio_cobertura_m:null, azimut_cobertura:null, apertura_cobertura:null }));
+  fx.m014 = m014;
+  if(!m014){ for(const e of fx.tablas.equipos_radioenlace) delete e.modo_red; for(const r of fx.tablas.redes) delete r.rangos_ip; }
+  return fx;
+}
+async function escenarioCapa3(browser, base){
+  const MARCA = id=>`${SEL.panel} li[data-equipo-id="${id}"] > .inventario-tecnologico-mapa-equipo-fila .inventario-tecnologico-mapa-marca-router`;
+  const FILA_RED = id=>`#inventario-tecnologico-modal-host [data-red-id="${id}"]`;
+  const FILA_TIPO = v=>`#inventario-tecnologico-modal-host [data-tipo-valor="${v}"]`;
+  const LINEA = cliente=>`path.inventario-tecnologico-mapa-linea[data-cliente-id="${cliente}"]`;
+  const eqDb = async (page, id)=>(await db(page, "equipos_radioenlace")).find(e=>e.id === id);
+  const editar = async (page, ubicacionId, id)=>{
+    await seleccionarEquipoDesdeSuUbicacion(page, ubicacionId, id);
+    await page.click(`${SEL.panel} [data-accion="editar-equipo"][data-id="${id}"]`);
+    await page.waitForSelector("#inventario-tecnologico-equipo-servidor-boton");
+  };
+  const linea = (page, cliente)=>page.locator(LINEA(cliente)).first().evaluate(p=>({ red: p.dataset.red ?? null, color: (p.getAttribute("stroke") || "").toLowerCase() }));
+  // Sin nada elegido (el camino resaltado se dibuja aparte, sin colorear por red; el lote arranca con los de la ubicación abierta).
+  const soltar = async page=>{
+    if(await cuenta(page, `${SEL.panel} [data-accion="volver-resumen"]`)) await page.click(`${SEL.panel} [data-accion="volver-resumen"]`);
+    await page.waitForSelector(`${SEL.panel} .inventario-tecnologico-mapa-cifras`, { timeout: 3000 });
+    await page.waitForFunction(()=>!document.querySelector("#inventario-tecnologico-mapa-panel .inventario-tecnologico-mapa-equipo-sel"), null, { timeout: 3000 });
+  };
+  // El ícono de cada opción del selector de servidor: de qué tipo es (comparado con los de fábrica).
+  const iconosSelector = page=>page.evaluate(async ()=>{
+    const { GLIFOS_TIPO_EQUIPO } = await import("/assets/js/inventario-tecnologico/ui/mapa/iconos-equipo.js");
+    const norm = html=>{ const t = document.createElement("template"); t.innerHTML = html; return t.innerHTML; };
+    const out = {};
+    for(const li of document.querySelectorAll("#inventario-tecnologico-equipo-servidor-lista [data-clave]")){
+      const span = li.querySelector(".inventario-tecnologico-serv-op-icono");
+      const html = span ? span.innerHTML : "";
+      out[li.dataset.clave || "ninguno"] = {
+        tipo: span ? span.dataset.iconoTipo ?? null : null,
+        cual: /M2\.5 4\.8 8 2\.2/.test(html) ? "activo" : /<circle cx="8" cy="8" r="6\.2"/.test(html) ? "raiz" : (Object.entries(GLIFOS_TIPO_EQUIPO).find(([, g])=>norm(g) === html)?.[0] || "otro"),
+        router: !!li.querySelector(".inventario-tecnologico-serv-marca-router"),
+      };
+    }
+    return out;
+  });
+  {
+    const { context, page, errores } = await abrirApp(browser, base, fixtureCapa3());
+    await irAlMapa(page);
+    await verificar("v17 (014): la marca «Router» va junto al equipo que enruta (PTP en modo router, switch de capa 3), no en un Router ni en los sin indicar", async ()=>{
+      await irAUbicacionDesdePanel(page, 2);
+      exigir(await cuenta(page, MARCA(20)) === 1 && await cuenta(page, MARCA(21)) === 0, "Santa Ana: " + JSON.stringify([await cuenta(page, MARCA(20)), await cuenta(page, MARCA(21))]));
+      exigir(/router \(capa 3\)/i.test(await page.getAttribute(MARCA(20), "title")), await page.getAttribute(MARCA(20), "title"));
+      await irAUbicacionDesdePanel(page, 1);
+      exigir(await cuenta(page, MARCA(50)) === 1 && await cuenta(page, MARCA(10)) === 0 && await cuenta(page, MARCA(51)) === 0, "Cerro Azul");
+      await captura(page, "v17-marca-router.png");
+      await irAUbicacionDesdePanel(page, 3);
+      exigir(await cuenta(page, MARCA(30)) === 0, "el Router lleva la marca");
+    });
+    await verificar("v17: el detalle de un router dice qué red define y sus rangos; la chip de la red lleva los rangos en su title", async ()=>{
+      await seleccionarEquipoDesdeSuUbicacion(page, 2, 20);
+      const t = await texto(page, `${SEL.panel} [data-define-red="3"]`);
+      exigir(/Define la red/.test(t) && /Red Santa Ana/.test(t) && /10\.30\.0\.0\/24/.test(t), t);
+      await seleccionarEquipoDesdeSuUbicacion(page, 2, 21);
+      exigir(await cuenta(page, `${SEL.panel} [data-define-red]`) === 0, "el AP que la hereda dice que la define");
+      const titulo = await page.getAttribute(`${SEL.panel} li[data-equipo-id="21"] > .inventario-tecnologico-mapa-equipo-fila .inventario-tecnologico-mapa-red-chip`, "title");
+      exigir(/Red Santa Ana · 10\.30\.0\.0\/24, heredada/.test(titulo), titulo);
+      await seleccionarEquipoDesdeSuUbicacion(page, 4, 60);
+      exigir(/Red Cámaras\s*10\.10\.5\.0\/24/.test(await texto(page, `${SEL.panel} [data-define-red="2"]`)), "un «a elegir» con red propia también la define");
+    });
+    await verificar("v17: el tooltip ya no trae la cobertura de los AP y cuenta los routers junto a su tipo", async ()=>{
+      await tooltipDe(page, 2);
+      const tt = await page.locator(TT_UBIC).last().innerText();
+      exigir(!/sector de|a la redonda|con cobertura/.test(tt), "con la cobertura: " + tt);
+      const filas = await filasTooltip(page);
+      exigir(JSON.stringify(filas) === '[["Punto a Punto",1,true],["AP",1,true]]', JSON.stringify(filas));
+      const marca = await page.locator(`${TT_UBIC} .inventario-tecnologico-mapa-tt-router`).allTextContents();
+      exigir(JSON.stringify(marca) === '["1 router"]', JSON.stringify(marca));
+      await soltarTooltip(page);
+      await tooltipDe(page, 1);
+      exigir(JSON.stringify(await page.locator(`${TT_UBIC} tr:has(.inventario-tecnologico-mapa-tt-router) .inventario-tecnologico-mapa-tt-etq-texto`).allTextContents()) === '["Switch"]', "Cerro Azul: el switch de capa 3");
+      await captura(page, "v17-tooltip.png");
+      await soltarTooltip(page);
+    });
+    await verificar("v17: al colorear por red, cada enlace va con la red de arriba (la subida del router, en la red de su servidor) y la leyenda lo dice", async ()=>{
+      await soltar(page);
+      await page.click("#inventario-tecnologico-mapa-color-red");
+      await page.waitForFunction(sel=>document.querySelector(sel)?.dataset.red !== undefined, LINEA(20), { timeout: 3000 });
+      const subida = await linea(page, 20), cliente = await linea(page, 32);
+      exigir(subida.red === "1" && subida.color === "#004dab", "subida del router: " + JSON.stringify(subida));
+      exigir(cliente.red === "3" && cliente.color === "#2e9e5b", "lo que cuelga del router: " + JSON.stringify(cliente));
+      exigir(/Cada enlace va con la red de arriba/.test(await page.locator("#inventario-tecnologico-mapa-leyenda-redes [data-leyenda-arriba]").evaluate(n=>n.textContent)), "sin la nota en la leyenda");
+      exigir(/la de arriba/.test(await page.getAttribute("#inventario-tecnologico-mapa-color-red", "title")), await page.getAttribute("#inventario-tecnologico-mapa-color-red", "title"));
+      await captura(page, "v17-lineas-red-de-arriba.png");
+      await page.click("#inventario-tecnologico-mapa-color-red");
+    });
+    await verificar("v17: en el selector de servidor cada equipo lleva el ícono de su tipo (y la marca «Router»); los activos y la raíz, los suyos", async ()=>{
+      await irAUbicacionDesdePanel(page, 2);
+      await page.click(`${SEL.panel} [data-accion="nuevo-equipo"][data-id="2"]`);
+      await page.waitForSelector("#inventario-tecnologico-equipo-servidor-boton");
+      await page.click("#inventario-tecnologico-equipo-servidor-boton");
+      await page.waitForSelector("#inventario-tecnologico-equipo-servidor-panel:not([hidden])");
+      const ic = await iconosSelector(page);
+      const resumen = JSON.stringify(["20", "21", "30", "50", "51", "12", "a:4", "ninguno"].map(k=>[k, ic[k] && ic[k].cual, ic[k] && ic[k].router]));
+      exigir(resumen === JSON.stringify([["20", "ptp", true], ["21", "ap", false], ["30", "router", false], ["50", "switch", true], ["51", "camara", false], ["12", "ptp", false], ["a:4", "activo", false], ["ninguno", "raiz", false]]), resumen);
+      exigir(ic["40"] && ic["40"].cual === "otro" && ic["40"].tipo === "", "sin tipo: el genérico de siempre (" + JSON.stringify(ic["40"]) + ")");
+      // La marca va al principio de su línea de datos: se ve aunque el nombre se corte.
+      const visible = await page.locator('#inventario-tecnologico-equipo-servidor-lista [data-clave="20"] .inventario-tecnologico-serv-marca-router').evaluate(m=>{ const r = m.getBoundingClientRect(), c = m.closest(".inventario-tecnologico-serv-op-meta").getBoundingClientRect(); return r.width > 0 && r.left >= c.left && r.right <= c.right; });
+      exigir(visible, "la marca «Router» queda cortada");
+      await page.locator('#inventario-tecnologico-equipo-servidor-lista [data-clave="20"]').scrollIntoViewIfNeeded();
+      await captura(page, "v17-selector-iconos.png");
+    });
+    await verificar("v17: buscar «router» en el selector encuentra también lo que enruta; al elegirlo, el botón muestra su ícono y la marca", async ()=>{
+      await page.fill("#inventario-tecnologico-equipo-servidor-filtro", "router");
+      const claves = await page.locator("#inventario-tecnologico-equipo-servidor-lista [data-clave]").evaluateAll(l=>l.map(x=>x.dataset.clave));
+      exigir(claves.includes("20") && claves.includes("50") && !claves.includes("21"), JSON.stringify(claves));
+      await page.click('#inventario-tecnologico-equipo-servidor-lista [data-clave="20"]');
+      await page.waitForSelector("#inventario-tecnologico-equipo-servidor-panel[hidden]", { state: "attached" });
+      exigir(await page.getAttribute("#inventario-tecnologico-equipo-servidor-boton .inventario-tecnologico-combo-icono", "data-icono-tipo") === "ptp", "ícono del botón");
+      exigir(await cuenta(page, "#inventario-tecnologico-equipo-servidor-boton .inventario-tecnologico-serv-marca-router") === 1, "sin la marca en el botón");
+      await cerrarModales(page);
+    });
+    await verificar("v17: «Modo de red» en el equipo: el switch de capa 3 muestra Router y su red; al volver al de su tipo (bridge) la red queda en la de su servidor", async ()=>{
+      await editar(page, 1, 50);
+      exigir(await page.inputValue("#inventario-tecnologico-equipo-modo") === "router", "modo: " + await page.inputValue("#inventario-tecnologico-equipo-modo"));
+      exigir(await page.locator("#inventario-tecnologico-equipo-modo option").first().textContent() === "El de su tipo: Bridge (capa 2)", await page.locator("#inventario-tecnologico-equipo-modo option").first().textContent());
+      exigir(!(await page.isDisabled("#inventario-tecnologico-equipo-red")) && await page.inputValue("#inventario-tecnologico-equipo-red") === "2", "red: " + await page.inputValue("#inventario-tecnologico-equipo-red"));
+      exigir(/Enruta \(capa 3\)/.test(await texto(page, "#inventario-tecnologico-equipo-modo-ayuda")), await texto(page, "#inventario-tecnologico-equipo-modo-ayuda"));
+      await page.selectOption("#inventario-tecnologico-equipo-modo", "");
+      exigir(await page.isDisabled("#inventario-tecnologico-equipo-red"), "la red se puede elegir en un bridge");
+      exigir(await page.locator("#inventario-tecnologico-equipo-red option").allTextContents().then(x=>JSON.stringify(x)) === '["La de su servidor: Red Administrativa"]', "opciones de la red");
+      exigir(/Un bridge no define red/.test(await texto(page, "#inventario-tecnologico-equipo-red-ayuda")) && /Puentea \(capa 2\)/.test(await texto(page, "#inventario-tecnologico-equipo-modo-ayuda")), "ayudas");
+      await page.selectOption("#inventario-tecnologico-equipo-modo", "router");
+      exigir(!(await page.isDisabled("#inventario-tecnologico-equipo-red")) && await page.inputValue("#inventario-tecnologico-equipo-red") === "2", "al volver a router no recuperó su red");
+      await page.selectOption("#inventario-tecnologico-equipo-modo", "");
+      await captura(page, "v17-modo-bridge.png");
+      await page.click("#inventario-tecnologico-equipo-guardar");
+      await esperarSinModal(page);
+      await toast(page, /Equipo actualizado/);
+      const e = await eqDb(page, 50);
+      exigir(e.modo_red === null && e.red_id === null, "guardó: " + JSON.stringify([e.modo_red, e.red_id]));
+      await page.waitForFunction(sel=>!document.querySelector(sel), MARCA(50), { timeout: 3000 });
+    });
+    await verificar("v17: una cámara (tipo «no aplica») va en la red de su servidor; un AP sin indicar pasa a router y define otra red", async ()=>{
+      await editar(page, 1, 51);
+      exigir(await page.locator("#inventario-tecnologico-equipo-modo option").first().textContent() === "No aplica a su tipo", "primera opción");
+      exigir(await page.isDisabled("#inventario-tecnologico-equipo-red") && /La de su servidor: Red Administrativa/.test(await page.locator("#inventario-tecnologico-equipo-red option").first().textContent()), "la red de la cámara");
+      await cerrarModales(page);
+      await editar(page, 1, 11);
+      exigir(await page.locator("#inventario-tecnologico-equipo-modo option").first().textContent() === "Sin indicar" && !(await page.isDisabled("#inventario-tecnologico-equipo-red")), "un AP sin indicar puede tener red propia");
+      await page.selectOption("#inventario-tecnologico-equipo-modo", "router");
+      await page.selectOption("#inventario-tecnologico-equipo-red", "2");
+      exigir(/Red aparte de «Red Administrativa»/.test(await texto(page, "#inventario-tecnologico-equipo-red-ayuda")), await texto(page, "#inventario-tecnologico-equipo-red-ayuda"));
+      await page.click("#inventario-tecnologico-equipo-guardar");
+      await esperarSinModal(page);
+      const e = await eqDb(page, 11);
+      exigir(e.modo_red === "router" && e.red_id === 2, JSON.stringify([e.modo_red, e.red_id]));
+      await page.waitForSelector(MARCA(11), { timeout: 3000 });
+      const parche = await page.evaluate(()=>window.__ESCRITURAS__.filter(x=>x.tabla === "equipos_radioenlace" && x.op === "update").pop()?.parche);
+      exigir(parche && parche.modo_red === "router" && parche.red_id === 2, "parche: " + JSON.stringify(parche));
+    });
+    await verificar("v17: «Redes y tipos»: los rangos IP de cada red y el aviso de los que se cruzan; el modo, «Hace radio» y «Lleva cobertura» de cada tipo", async ()=>{
+      await page.click("#inventario-tecnologico-mapa-redes-tipos");
+      await page.waitForSelector(`${FILA_RED(3)} [data-campo="rangos"]`);
+      const rangos = [];
+      for(const id of [1, 2, 3]) rangos.push(await page.inputValue(`${FILA_RED(id)} [data-campo="rangos"]`));
+      exigir(JSON.stringify(rangos) === '["10.10.0.0/16","10.10.5.0/24","10.30.0.0/24"]', JSON.stringify(rangos));
+      exigir(/10\.10\.0\.0\/16 se cruza con 10\.10\.5\.0\/24, de «Red Cámaras»/.test(await texto(page, `${FILA_RED(1)} [data-avisos-rangos]`)), await texto(page, `${FILA_RED(1)} [data-avisos-rangos]`));
+      exigir(/10\.10\.5\.0\/24 se cruza con 10\.10\.0\.0\/16, de «Red Administrativa»/.test(await texto(page, `${FILA_RED(2)} [data-avisos-rangos]`)), "el aviso de la otra red");
+      exigir(await page.locator(`${FILA_RED(3)} [data-avisos-rangos]`).evaluate(n=>n.textContent.trim() === ""), "red 3 sin cruces");
+      const tipo = async v=>[await page.inputValue(`${FILA_TIPO(v)} [data-campo="modo_red"]`), await page.isChecked(`${FILA_TIPO(v)} [data-campo="hace_radio"]`), await page.isChecked(`${FILA_TIPO(v)} [data-campo="lleva_cobertura"]`)];
+      const t = { router: await tipo("router"), switch: await tipo("switch"), ap: await tipo("ap"), estacion: await tipo("estacion"), camara: await tipo("camara"), otro: await tipo("otro") };
+      exigir(JSON.stringify(t) === JSON.stringify({ router:["router", false, false], switch:["bridge", false, false], ap:["elegir", true, true], estacion:["elegir", true, false], camara:["no_aplica", false, false], otro:["elegir", false, false] }), JSON.stringify(t));
+      await captura(page, "v17-redes-y-tipos.png");
+      await page.locator(FILA_TIPO("ap")).scrollIntoViewIfNeeded();
+      await captura(page, "v17-tipos-modo.png");
+    });
+    await verificar("v17: un rango con bits de host se guarda como su red (avisa antes); uno mal escrito avisa y no se guarda", async ()=>{
+      await page.fill(`${FILA_RED(3)} [data-campo="rangos"]`, "10.30.0.1/24, 10.30.1.0/24");
+      exigir(/10\.30\.0\.1\/24 se guarda como 10\.30\.0\.0\/24/.test(await texto(page, `${FILA_RED(3)} [data-avisos-rangos]`)), await texto(page, `${FILA_RED(3)} [data-avisos-rangos]`));
+      await page.click(`${FILA_RED(3)} [data-cat="guardar-red"]`);
+      await toast(page, /Red guardada/);
+      exigir(JSON.stringify((await db(page, "redes")).find(r=>r.id === 3).rangos_ip) === '["10.30.0.0/24","10.30.1.0/24"]', JSON.stringify((await db(page, "redes")).find(r=>r.id === 3).rangos_ip));
+      await page.waitForSelector(`${FILA_RED(3)} [data-campo="rangos"]`);
+      exigir(await page.inputValue(`${FILA_RED(3)} [data-campo="rangos"]`) === "10.30.0.0/24, 10.30.1.0/24", "al volver a abrir");
+      await page.fill(`${FILA_RED(3)} [data-campo="rangos"]`, "10.30.0.0");
+      exigir(/le falta la máscara/.test(await texto(page, `${FILA_RED(3)} [data-avisos-rangos]`)) && await page.getAttribute(`${FILA_RED(3)} [data-campo="rangos"]`, "aria-invalid") === "true", "no avisa al escribir");
+      await page.click(`${FILA_RED(3)} [data-cat="guardar-red"]`);
+      await toast(page, /le falta la máscara/);
+      exigir(JSON.stringify((await db(page, "redes")).find(r=>r.id === 3).rangos_ip) === '["10.30.0.0/24","10.30.1.0/24"]', "se guardó el rango malo");
+    });
+    await verificar("v17: si los rangos se cruzan con los de otra red, avisa al escribir y al guardar, pero se guarda", async ()=>{
+      await page.fill(`${FILA_RED(3)} [data-campo="rangos"]`, "10.10.7.0/24");
+      exigir(/10\.10\.7\.0\/24 se cruza con 10\.10\.0\.0\/16, de «Red Administrativa»/.test(await texto(page, `${FILA_RED(3)} [data-avisos-rangos]`)), await texto(page, `${FILA_RED(3)} [data-avisos-rangos]`));
+      await page.click(`${FILA_RED(3)} [data-cat="guardar-red"]`);
+      await toast(page, /Ojo: 10\.10\.7\.0\/24 se cruza con 10\.10\.0\.0\/16, de «Red Administrativa»\. Se guardó igual/);
+      exigir(JSON.stringify((await db(page, "redes")).find(r=>r.id === 3).rangos_ip) === '["10.10.7.0/24"]', "no se guardó");
+    });
+    await verificar("v17: una red nueva puede nacer con sus rangos", async ()=>{
+      await page.waitForSelector("#inventario-tecnologico-red-nueva-rangos");
+      await page.fill("#inventario-tecnologico-red-nueva-nombre", "Red Pruebas");
+      await page.fill("#inventario-tecnologico-red-nueva-rangos", "172.16.0.0/24 172.16.1.0/24");
+      await page.click('#inventario-tecnologico-modal-host [data-cat="crear-red"]');
+      await toast(page, /Red «Red Pruebas» creada/);
+      const r = (await db(page, "redes")).find(x=>x.nombre === "Red Pruebas");
+      exigir(r && JSON.stringify(r.rangos_ip) === '["172.16.0.0/24","172.16.1.0/24"]', JSON.stringify(r));
+    });
+    await verificar("v17: un tipo no pasa a bridge si alguno de sus equipos (sin modo propio) tiene red propia", async ()=>{
+      await page.waitForSelector(`${FILA_TIPO("otro")} [data-campo="modo_red"]`);
+      await page.selectOption(`${FILA_TIPO("otro")} [data-campo="modo_red"]`, "bridge");
+      await page.click(`${FILA_TIPO("otro")} [data-cat="guardar-tipo"]`);
+      await toast(page, /tiene red propia: ponlo en modo router o quítale la red antes de pasar el tipo a «Bridge \(capa 2\)»/);
+      exigir((await db(page, "tipos_equipo_red")).find(t=>t.valor === "otro").modo_red === "elegir", "se cambió");
+    });
+    await verificar("v17: «Lleva cobertura» en Estación muestra la cobertura en su formulario; sin «Hace radio», un PTP muestra su tipo en vez del rol", async ()=>{
+      await page.check(`${FILA_TIPO("estacion")} [data-campo="lleva_cobertura"]`);
+      await page.click(`${FILA_TIPO("estacion")} [data-cat="guardar-tipo"]`);
+      await toast(page, /Tipo guardado/);
+      exigir((await db(page, "tipos_equipo_red")).find(t=>t.valor === "estacion").lleva_cobertura === true, "no se guardó");
+      await page.waitForSelector(`${FILA_TIPO("ptp")} [data-campo="hace_radio"]`);
+      await page.uncheck(`${FILA_TIPO("ptp")} [data-campo="hace_radio"]`);
+      await page.click(`${FILA_TIPO("ptp")} [data-cat="guardar-tipo"]`);
+      await toast(page, /Tipo guardado/);
+      const ptp = (await db(page, "tipos_equipo_red")).find(t=>t.valor === "ptp");
+      exigir(ptp.hace_radio === false && ptp.modo_red === "elegir", JSON.stringify(ptp));
+      const parche = await page.evaluate(()=>window.__ESCRITURAS__.filter(x=>x.tabla === "tipos_equipo_red" && x.op === "update").pop()?.parche);
+      exigir(parche && !("modo_red" in parche) && !("lleva_cobertura" in parche) && parche.hace_radio === false, "envió de más: " + JSON.stringify(parche));
+      await cerrarModales(page);
+      await irAUbicacionDesdePanel(page, 1);
+      exigir(await texto(page, `${SEL.panel} li[data-equipo-id="12"] .inventario-tecnologico-mapa-rol`) === "Punto a Punto", "pill: " + await texto(page, `${SEL.panel} li[data-equipo-id="12"] .inventario-tecnologico-mapa-rol`));
+      await editar(page, 3, 32);
+      exigir(await page.locator("#inventario-tecnologico-equipo-cobertura").isVisible(), "la estación no pide la cobertura");
+      await cerrarModales(page);
+      await page.click("#inventario-tecnologico-mapa-redes-tipos");
+      await page.waitForSelector(`${FILA_TIPO("ptp")} [data-campo="hace_radio"]`);
+      await page.check(`${FILA_TIPO("ptp")} [data-campo="hace_radio"]`);
+      await page.click(`${FILA_TIPO("ptp")} [data-cat="guardar-tipo"]`);
+      await toast(page, /Tipo guardado/);
+      await cerrarModales(page);
+    });
+    await verificar("v17: en lote, el modo de cada equipo a la vista; a una cámara no se le pone red (no define) y se avisa", async ()=>{
+      await soltar(page);
+      await page.click("#inventario-tecnologico-mapa-lote");
+      await page.waitForSelector("#inventario-tecnologico-lote-filas");
+      exigir(/Tipo, modo y red en lote/.test(await texto(page, "#inventario-tecnologico-modal-host h3")), "título");
+      const modo = id=>page.locator(`#inventario-tecnologico-lote-filas tr[data-id="${id}"] td:nth-child(5)`).innerText();
+      const m = [await modo(20), await modo(30), await modo(51), await modo(21), await modo(11)];
+      exigir(JSON.stringify(m) === JSON.stringify(["Router", "Router (su tipo)", "no aplica", "sin indicar", "Router"]), JSON.stringify(m));
+      await page.check('[data-lote-id="21"]');
+      await page.check('[data-lote-id="51"]');
+      await page.selectOption("#inventario-tecnologico-lote-red", "2");
+      exigir(/A 1 de ellos no se le pone la red/.test(await texto(page, "#inventario-tecnologico-lote-vista")), await texto(page, "#inventario-tecnologico-lote-vista"));
+      await page.click("#inventario-tecnologico-lote-aplicar");
+      await esperarSinModal(page);
+      await toast(page, /Listo: 1 equipo actualizado/);
+      await toast(page, /A 1 equipo no se le puso la red: no define red/);
+      exigir((await eqDb(page, 21)).red_id === 2 && (await eqDb(page, 51)).red_id === null, JSON.stringify([(await eqDb(page, 21)).red_id, (await eqDb(page, 51)).red_id]));
+    });
+    await verificar("v17: en lote, pasar un router a bridge le quita la red propia (avisa antes y después)", async ()=>{
+      await soltar(page);
+      await page.click("#inventario-tecnologico-mapa-lote");
+      await page.waitForSelector("#inventario-tecnologico-lote-filas");
+      await page.check('[data-lote-id="20"]');
+      await page.selectOption("#inventario-tecnologico-lote-modo", "bridge");
+      exigir(/1 deja su red propia/.test(await texto(page, "#inventario-tecnologico-lote-vista")), await texto(page, "#inventario-tecnologico-lote-vista"));
+      await page.click("#inventario-tecnologico-lote-aplicar");
+      await esperarSinModal(page);
+      await toast(page, /1 equipo dejó su red propia/);
+      const e = await eqDb(page, 20);
+      exigir(e.modo_red === "bridge" && e.red_id === null, JSON.stringify([e.modo_red, e.red_id]));
+    });
+    await verificar("sin errores de JavaScript (v17, modo de red)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    // En el celular: «Modo de red» y «Red» uno debajo del otro, y «Redes y tipos» sin desbordar.
+    const { context, page, errores } = await abrirApp(browser, base, fixtureCapa3(), { viewport: { width: 390, height: 844 }, tactil: true });
+    const desborda = ()=>page.evaluate(()=>{
+      const m = document.querySelector("#inventario-tecnologico-modal-host .inventario-tecnologico-modal-body");
+      return document.documentElement.scrollWidth > window.innerWidth + 1 || (m && m.scrollWidth > m.clientWidth + 1);
+    });
+    await page.tap(SEL.tab("mapa"));
+    await page.waitForSelector(".leaflet-marker-icon", { timeout: 10000 });
+    await verificar("v17 en el celular: «Modo de red» y «Red» apilados y sin desbordar; «Redes y tipos» tampoco desborda", async ()=>{
+      await page.evaluate(async ()=>{ const { abrirFormEquipo } = await import("/assets/js/inventario-tecnologico/ui/mapa/formularios.js"); abrirFormEquipo({ id: 50 }); });
+      await page.waitForSelector("#inventario-tecnologico-equipo-modo");
+      const a = await page.locator("#inventario-tecnologico-equipo-modo").boundingBox(), b = await page.locator("#inventario-tecnologico-equipo-red").boundingBox();
+      exigir(b.y > a.y + a.height && Math.abs(a.x - b.x) < 2, "no quedaron apilados: " + JSON.stringify([a, b]));
+      exigir(!(await desborda()), "el formulario desborda");
+      await page.locator("#inventario-tecnologico-equipo-modo").scrollIntoViewIfNeeded();
+      await captura(page, "v17-celular-modo.png");
+      await cerrarModales(page);
+      await page.evaluate(async ()=>{ const { abrirRedesYTipos } = await import("/assets/js/inventario-tecnologico/ui/mapa/formularios.js"); abrirRedesYTipos({}); });
+      await page.waitForSelector('#inventario-tecnologico-modal-host [data-red-id="1"] [data-campo="rangos"]');
+      exigir(!(await desborda()), "«Redes y tipos» desborda");
+      await captura(page, "v17-celular-redes.png");
+      await cerrarModales(page);
+    });
+    await verificar("sin errores de JavaScript (v17 en el celular)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    const { context, page, errores } = await abrirApp(browser, base, fixtureCapa3({ m014: false }));
+    await irAlMapa(page);
+    await verificar("v17 sin la 014: sin «Modo de red» ni marcas «Router»; la red del equipo como en la v16 y se guarda sin columnas nuevas", async ()=>{
+      await irAUbicacionDesdePanel(page, 1);
+      exigir(await cuenta(page, `${SEL.panel} .inventario-tecnologico-mapa-marca-router`) === 0, "con marcas");
+      await editar(page, 1, 50);
+      exigir(await cuenta(page, "#inventario-tecnologico-equipo-modo") === 0, "con el modo");
+      exigir(!(await page.isDisabled("#inventario-tecnologico-equipo-red")) && await page.inputValue("#inventario-tecnologico-equipo-red") === "2", "red");
+      await page.click("#inventario-tecnologico-equipo-guardar");
+      await esperarSinModal(page);
+      await toast(page, /Equipo actualizado/);
+      const parche = await page.evaluate(()=>window.__ESCRITURAS__.filter(x=>x.tabla === "equipos_radioenlace" && x.op === "update").pop()?.parche);
+      exigir(parche && !("modo_red" in parche), "mandó el modo: " + JSON.stringify(parche));
+    });
+    await verificar("v17 sin la 014: «Redes y tipos» sin rangos ni modo; el lote, como antes", async ()=>{
+      await page.click("#inventario-tecnologico-mapa-redes-tipos");
+      await page.waitForSelector(FILA_RED(1));
+      exigir(await cuenta(page, '#inventario-tecnologico-modal-host [data-campo="rangos"]') === 0 && await cuenta(page, '#inventario-tecnologico-modal-host [data-campo="modo_red"]') === 0, "con campos de la 014");
+      await page.click(`${FILA_RED(1)} [data-cat="guardar-red"]`);
+      await toast(page, /Red guardada/);
+      const parche = await page.evaluate(()=>window.__ESCRITURAS__.filter(x=>x.tabla === "redes" && x.op === "update").pop()?.parche);
+      exigir(parche && !("rangos_ip" in parche), "mandó los rangos: " + JSON.stringify(parche));
+      await cerrarModales(page);
+      await page.click("#inventario-tecnologico-mapa-lote");
+      await page.waitForSelector("#inventario-tecnologico-lote-filas");
+      exigir(await cuenta(page, "#inventario-tecnologico-lote-modo") === 0 && /Tipo y red en lote/.test(await texto(page, "#inventario-tecnologico-modal-host h3")), "lote con el modo");
+      await cerrarModales(page);
+    });
+    await verificar("v17 sin la 014: el enlace va con la red del cliente (como en la v16); el selector igual muestra el ícono de cada tipo; el tooltip, sin la cobertura", async ()=>{
+      await soltar(page);
+      await page.click("#inventario-tecnologico-mapa-color-red");
+      await page.waitForFunction(sel=>document.querySelector(sel)?.dataset.red !== undefined, LINEA(20), { timeout: 3000 });
+      exigir((await linea(page, 20)).red === "3", "subida: " + JSON.stringify(await linea(page, 20)));
+      await page.click("#inventario-tecnologico-mapa-color-red");
+      await irAUbicacionDesdePanel(page, 2);
+      await page.click(`${SEL.panel} [data-accion="nuevo-equipo"][data-id="2"]`);
+      await page.waitForSelector("#inventario-tecnologico-equipo-servidor-boton");
+      await page.click("#inventario-tecnologico-equipo-servidor-boton");
+      await page.waitForSelector("#inventario-tecnologico-equipo-servidor-panel:not([hidden])");
+      const ic = await iconosSelector(page);
+      exigir(ic["20"].cual === "ptp" && !ic["20"].router && ic["50"].cual === "switch", JSON.stringify([ic["20"], ic["50"]]));
+      await cerrarModales(page);
+      await tooltipDe(page, 2);
+      exigir(!/sector de|a la redonda/.test(await page.locator(TT_UBIC).last().innerText()) && await cuenta(page, `${TT_UBIC} .inventario-tecnologico-mapa-tt-router`) === 0, await page.locator(TT_UBIC).last().innerText());
+      await soltarTooltip(page);
+    });
+    await verificar("sin errores de JavaScript (v17 sin la 014)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+}
+
 // ------------------------------------------------------------------ v16 (3.11): el equipo abierto como tarjeta y su detalle en cajas
 // Lo que mide la tarjeta del equipo abierto y sus cajas, para comparar.
 async function medirTarjeta(page, equipoId){
@@ -4621,7 +4986,7 @@ const base = `http://127.0.0.1:${srv.address().port}`;
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 try{
   // SOLO=plano (u otro nombre) corre un solo escenario, para depurar.
-  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo, campos: escenarioCampos, sin012: escenarioSin012, vacias: escenarioVacias, grosor0: escenarioGrosorCero, filtros: escenarioFiltros, solo: escenarioSoloTabla, buscar: escenarioBuscar, franjas: escenarioFranjas, tooltip: escenarioTooltip, cobertura: escenarioCobertura, tarjeta: escenarioTarjeta, todos: escenarioTodos };
+  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo, campos: escenarioCampos, sin012: escenarioSin012, vacias: escenarioVacias, grosor0: escenarioGrosorCero, filtros: escenarioFiltros, solo: escenarioSoloTabla, buscar: escenarioBuscar, franjas: escenarioFranjas, tooltip: escenarioTooltip, cobertura: escenarioCobertura, tarjeta: escenarioTarjeta, todos: escenarioTodos, capa3: escenarioCapa3 };
   // SOLO=plano o SOLO=plano,torre (varios, separados por comas).
   const solo = process.env.SOLO ? process.env.SOLO.split(",").map(x=>x.trim()).filter(Boolean) : null;
   for(const [nombre, fn] of Object.entries(escenarios)) if(!solo || solo.includes(nombre)) await fn(browser, base);

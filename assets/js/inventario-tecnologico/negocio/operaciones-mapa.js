@@ -7,8 +7,9 @@
 // equipos, respaldos y tipos: solo administrador; historial_ubicacion: acción
 // "asignar_ubicacion" de la matriz). La UI solo esconde los botones.
 import { sb } from "../nucleo/config.js";
-import { cargarAtajos, cargarPiscinas, cargarRedes, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, datosNombres, estadoMapa, hayCobertura, hayMedio, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa, refrescarTiposUbicacion } from "../nucleo/datos-mapa.js";
+import { cargarAtajos, cargarPiscinas, cargarRedes, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, datosNombres, estadoMapa, hayCobertura, hayMedio, hayModoRed, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa, refrescarTiposUbicacion } from "../nucleo/datos-mapa.js";
 import { validarCobertura } from "../nucleo/cobertura.js";
+import { defineRed, esModoEquipo, esModoTipo, etiquetaModo, modoEfectivo, planLote, validarRangos } from "../nucleo/modo-red.js";
 import { hayCamposConfigurables } from "../nucleo/datos.js";
 import { validarSvg } from "../nucleo/svg-seguro.js";
 import { numeroHectareas, redondearPunto, validarPiscina } from "../nucleo/piscinas.js";
@@ -222,6 +223,8 @@ function filaEquipo(c){
   if("referencia" in c) fila.referencia = textoOpcional(c.referencia);
   // 008: medio del enlace con el servidor (sin servidor no aplica).
   if("medio" in c) fila.medio = fila.servidor_id !== null && esMedio(c.medio) ? c.medio : null;
+  // 014 (v17): el modo de red propio (router o bridge; vacío = el de su tipo).
+  if("modo_red" in c) fila.modo_red = esModoEquipo(c.modo_red) ? c.modo_red : null;
   // 013 (v15): la cobertura (radio, dirección y apertura), si el formulario la
   // trae; lo escrito se valida en validarFilaEquipo.
   if("radio_cobertura_m" in c){
@@ -236,6 +239,17 @@ function validarFilaEquipo(fila, idActual){
   const v = validarEquipo(fila, cargarEquiposRadioenlace(), idActual);
   const errores = { ...v.errores, ...(fila.erroresCobertura || {}) };
   if(("radio_cobertura_m" in fila || fila.erroresCobertura) && !hayCobertura()) errores.radio_cobertura_m = "Para guardar la cobertura hace falta la migración 013.";
+  if("modo_red" in fila && !hayModoRed()) errores.modo_red = "Para guardar el modo de red hace falta la migración 014.";
+  // 014: solo los routers definen red (la base también lo revisa).
+  if(hayModoRed() && fila.red_id !== null && fila.red_id !== undefined && !errores.red_id){
+    const actual = idActual ? cargarEquiposRadioenlace().find(e=>e.id === idActual) : null;
+    const valorTipo = "tipo_equipo" in fila ? fila.tipo_equipo : (actual ? actual.tipo_equipo : null);
+    const tipo = valorTipo ? (cargarTiposEquipo().find(t=>t.valor === valorTipo) || { valor: valorTipo }) : null;
+    const modo = modoEfectivo({ modo_red: "modo_red" in fila ? fila.modo_red : (actual ? actual.modo_red : null) }, tipo);
+    if(!defineRed(modo)) errores.red_id = modo === "bridge"
+      ? "Un bridge va en la red de su servidor: para darle otra red, ponlo en modo router."
+      : "Su tipo no tiene modo de red: va en la red de su servidor. Para darle otra red, ponlo en modo router.";
+  }
   const errorServidor = validarServidor(redMapa(), idActual, fila.servidor_id);
   if(errorServidor && !errores.servidor_id) errores.servidor_id = errorServidor;
   if(Number.isNaN(fila.frecuencia_mhz)) errores.frecuencia_mhz = "La frecuencia debe ser un número mayor que cero.";
@@ -384,17 +398,33 @@ export async function guardarAjustePlano(plano, esquinas){
 function exigirValido(v){ if(!v.ok) throw new ErrorValidacion(v.errores); }
 const siguienteOrden = filas=>filas.length ? Math.max(...filas.map(f=>Number(f.orden) || 0)) + 10 : 10;
 
-export async function crearRed({ nombre, color }){
+// 014 (v17): los rangos IP de una red (texto con comas o espacios, o una
+// lista). undefined = no se tocan. Sin la 014 no se pueden guardar.
+function rangosParaGuardar(rangos){
+  if(rangos === undefined) return undefined;
+  const v = validarRangos(Array.isArray(rangos) ? rangos.join(", ") : rangos);
+  if(!v.ok) throw new ErrorValidacion({ rangos_ip: v.errores[0] });
+  if(!hayModoRed()){
+    if(!v.rangos.length) return undefined;
+    throw new ErrorValidacion({ rangos_ip: "Para guardar los rangos IP hace falta la migración 014." });
+  }
+  return v.rangos;
+}
+
+export async function crearRed({ nombre, color, rangos }){
   exigirValido(validarRed({ nombre, color }, cargarRedes()));
-  const { id } = exigir(await sb.from("redes").insert({ nombre: nombre.trim(), color, orden: siguienteOrden(cargarRedes()) }).select("id").single());
+  const rangos_ip = rangosParaGuardar(rangos);
+  const { id } = exigir(await sb.from("redes").insert({ nombre: nombre.trim(), color, orden: siguienteOrden(cargarRedes()), ...(rangos_ip && rangos_ip.length ? { rangos_ip } : {}) }).select("id").single());
   await refrescarDatosMapa();
   return id;
 }
 
-export async function editarRed(id, { nombre, color, activa }){
+export async function editarRed(id, { nombre, color, activa, rangos }){
   exigirValido(validarRed({ nombre, color }, cargarRedes(), id));
   const parche = { nombre: nombre.trim(), color };
   if(activa !== undefined) parche.activa = !!activa;
+  const rangos_ip = rangosParaGuardar(rangos);
+  if(rangos_ip !== undefined) parche.rangos_ip = rangos_ip;
   exigirFilas(await sb.from("redes").update(parche).eq("id", id).select("id"), "guardó la red");
   await refrescarDatosMapa();
 }
@@ -412,7 +442,7 @@ export async function crearTipoEquipo({ etiqueta, genero }){
   return v.valor;
 }
 
-export async function editarTipoEquipo(valor, { etiqueta, genero, activo, icono_svg }){
+export async function editarTipoEquipo(valor, { etiqueta, genero, activo, icono_svg, modo_red, hace_radio, lleva_cobertura }){
   const actual = cargarTiposEquipo().find(t=>t.valor === valor);
   if(!actual) throw new Error("Ese tipo de equipo ya no existe. Recarga el mapa.");
   const parche = {};
@@ -431,6 +461,22 @@ export async function editarTipoEquipo(valor, { etiqueta, genero, activo, icono_
     if(!hayCobertura()) throw new ErrorValidacion({ icono_svg: "Para guardar el ícono de un tipo de equipo hace falta la migración 013." });
     parche.icono_svg = v.svg || null;
   }
+  // 014 (v17): el modo de red de fábrica del tipo, si hace radio y si lleva
+  // cobertura. Solo viaja lo que cambia.
+  if(modo_red !== undefined || hace_radio !== undefined || lleva_cobertura !== undefined){
+    if(!hayModoRed()) throw new ErrorValidacion({ modo_red: "Para guardar el modo de red de un tipo hace falta la migración 014." });
+  }
+  if(modo_red !== undefined && modo_red !== actual.modo_red){
+    if(!esModoTipo(modo_red)) throw new ErrorValidacion({ modo_red: "Elige el modo de red del tipo." });
+    // Pasar a bridge o «no aplica» no puede dejar equipos de este tipo (sin modo propio) con red propia (la base también lo revisa).
+    if(modo_red === "bridge" || modo_red === "no_aplica"){
+      const conRed = cargarEquiposRadioenlace().filter(e=>e.tipo_equipo === valor && !esModoEquipo(e.modo_red) && e.red_id !== null && e.red_id !== undefined);
+      if(conRed.length) throw new ErrorValidacion({ modo_red: `${conRed.length === 1 ? `«${conRed[0].nombre}» tiene` : `${conRed.length} equipos de este tipo tienen`} red propia: ${conRed.length === 1 ? "ponlo en modo router o quítale" : "ponlos en modo router o quítales"} la red antes de pasar el tipo a «${etiquetaModo(modo_red)}».` });
+    }
+    parche.modo_red = modo_red;
+  }
+  if(hace_radio !== undefined && !!hace_radio !== actual.hace_radio) parche.hace_radio = !!hace_radio;
+  if(lleva_cobertura !== undefined && !!lleva_cobertura !== actual.lleva_cobertura) parche.lleva_cobertura = !!lleva_cobertura;
   if(!Object.keys(parche).length) return;
   exigirFilas(await sb.from("tipos_equipo_red").update(parche).eq("valor", valor).select("valor"), "guardó el tipo de equipo");
   await refrescarDatosMapa();
@@ -460,10 +506,12 @@ export async function eliminarAtajo(id){
 
 // ---------------------------------------------------------------------------
 // Asignación en lote (007): tipo y/o red para varios equipos a la vez.
-// cambios = { tipo_equipo?, red_id? }: solo viaja lo que se cambia (red_id
-// null = quitar la red). Devuelve cuántos equipos cambiaron.
+// cambios = { tipo_equipo?, red_id?, modo_red? }: solo viaja lo que se cambia
+// (red_id null = quitar la red; modo_red null = el de su tipo, con la 014).
+// Devuelve { cambiados, sinLaRed, dejanRed } (ids; ver planLote).
 //   * Con la 008 (o si el tipo no cambia): un solo UPDATE; los nombres los
-//     pone al día la base.
+//     pone al día la base. Con la 014, un UPDATE por grupo de equipos con el
+//     mismo cambio: un bridge (o un tipo sin modo) no se queda con red propia.
 //   * Sin la 008 y con cambio de tipo: un UPDATE por equipo, en orden de id,
 //     con su nombre automático (así no choca con el índice único de nombres).
 // ---------------------------------------------------------------------------
@@ -473,7 +521,11 @@ export async function asignarEnLote(ids, cambios = {}){
   const parche = {};
   if("tipo_equipo" in cambios) parche.tipo_equipo = textoOpcional(cambios.tipo_equipo);
   if("red_id" in cambios) parche.red_id = cambios.red_id === null || cambios.red_id === "" || cambios.red_id === undefined ? null : Number(cambios.red_id);
-  if(!Object.keys(parche).length) throw new Error("Elige qué cambiar: el tipo, la red o los dos.");
+  if("modo_red" in cambios){
+    if(!hayModoRed()) throw new Error("Para cambiar el modo de red hace falta la migración 014.");
+    parche.modo_red = esModoEquipo(cambios.modo_red) ? cambios.modo_red : null;
+  }
+  if(!Object.keys(parche).length) throw new Error(hayModoRed() ? "Elige qué cambiar: el tipo, el modo de red o la red." : "Elige qué cambiar: el tipo, la red o los dos.");
   if("tipo_equipo" in parche && !parche.tipo_equipo) throw new Error("Elige el tipo de equipo (el nombre automático lo necesita).");
   if(parche.tipo_equipo && !cargarTiposEquipo().some(t=>t.valor === parche.tipo_equipo)) throw new Error("Ese tipo de equipo ya no existe. Recarga el mapa.");
   if(parche.red_id !== undefined && parche.red_id !== null && !cargarRedes().some(r=>r.id === parche.red_id)) throw new Error("Esa red ya no existe. Recarga el mapa.");
@@ -481,10 +533,23 @@ export async function asignarEnLote(ids, cambios = {}){
   const faltan = lista.filter(id=>!existentes.has(id));
   if(faltan.length) throw new Error("Algún equipo ya no existe. Recarga el mapa.");
 
+  if(hayModoRed()){
+    const plan = planLote(cargarEquiposRadioenlace(), lista, parche, cargarTiposEquipo());
+    let cambiados = 0;
+    try{
+      for(const g of plan.grupos) cambiados += exigirFilas(await sb.from("equipos_radioenlace").update(g.parche).in("id", g.ids).select("id"), "aplicó el cambio").length;
+    }catch(err){
+      await refrescarDatosMapa().catch(()=>{});
+      if(cambiados) err.message = `${err.message} Se alcanzaron a cambiar ${cambiados} de ${lista.length}.`;
+      throw err;
+    }
+    await refrescarDatosMapa();
+    return { cambiados, sinLaRed: plan.sinLaRed, dejanRed: plan.dejanRed };
+  }
   if(hayMedio() || !("tipo_equipo" in parche)){
     const filas = exigirFilas(await sb.from("equipos_radioenlace").update(parche).in("id", lista).select("id"), "aplicó el cambio");
     await refrescarDatosMapa();
-    return filas.length;
+    return { cambiados: filas.length, sinLaRed: [], dejanRed: [] };
   }
   // Sin la 008: copia local que se va poniendo al día equipo por equipo.
   const copia = cargarEquiposRadioenlace().map(e=>({ ...e }));
@@ -509,7 +574,7 @@ export async function asignarEnLote(ids, cambios = {}){
     throw err;
   }
   await refrescarDatosMapa();
-  return hechos;
+  return { cambiados: hechos, sinLaRed: [], dejanRed: [] };
 }
 
 // ---------------------------------------------------------------------------

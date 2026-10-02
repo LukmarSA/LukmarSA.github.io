@@ -78,12 +78,17 @@ function metaDe(o){
 
 // obtener() → { opciones }. ninguno = { texto, meta } para ofrecer "sin
 // servidor" (null en el respaldo, que exige elegir uno). placeholder = texto
-// del botón cuando no hay nada elegido y no hay "ninguno".
+// del botón cuando no hay nada elegido y no hay "ninguno". iconoDe(o) = el
+// SVG de una opción (v17: el de su tipo, como en la torre; null = el genérico).
 export function montarSelectorServidor(select, {
   id, obtener, ninguno = null, placeholder = "— Elige un equipo —",
   etiquetaDialogo = "Elegir el servidor", etiquetaLista = "Posibles servidores",
-  textoVacio = "Ningún equipo coincide.", ayudaVacio = "",
+  textoVacio = "Ningún equipo coincide.", ayudaVacio = "", iconoDe = null,
 } = {}){
+  const iconoDeOpcion = o=>(o.origen === "equipo" && iconoDe && iconoDe(o)) || (o.origen === "activo" ? ICONO_ACTIVO : ICONO_EQUIPO);
+  // v17 (014): la marca «Router» de un equipo que enruta (si su tipo no lo dice
+  // ya), al principio de su línea de datos: el nombre largo se corta en dos líneas.
+  const marcaRouter = o=>o.router ? `<span class="${P}serv-marca ${P}serv-marca-router" title="Trabaja como router (capa 3)">Router</span>` : "";
   let orden = leerOrden();
   let abierto = false;
   let activo = -1;
@@ -140,8 +145,8 @@ export function montarSelectorServidor(select, {
   function pintarBoton(){
     const o = opcionPorClave(select.value);
     if(o){
-      boton.innerHTML = `<span class="${P}combo-icono ${P}serv-icono-${o.origen}">${o.origen === "activo" ? ICONO_ACTIVO : ICONO_EQUIPO}</span>`
-        + `<span class="${P}serv-boton-texto"><span class="${P}serv-boton-nombre">${esc(o.nombre)}</span><span class="${P}serv-boton-meta">${esc(metaDe(o))}${o.origen === "activo" ? " · se registra al guardar" : ""}</span></span>`
+      boton.innerHTML = `<span class="${P}combo-icono ${P}serv-icono-${o.origen}" data-icono-tipo="${esc(o.tipo || "")}">${iconoDeOpcion(o)}</span>`
+        + `<span class="${P}serv-boton-texto"><span class="${P}serv-boton-nombre">${esc(o.nombre)}</span><span class="${P}serv-boton-meta">${marcaRouter(o)}${esc(metaDe(o))}${o.origen === "activo" ? " · se registra al guardar" : ""}</span></span>`
         + `<span class="${P}combo-flecha" aria-hidden="true"></span>`;
     }else if(ninguno){
       boton.innerHTML = `<span class="${P}combo-icono ${P}serv-icono-raiz">${ICONO_RAIZ}</span>`
@@ -248,8 +253,8 @@ export function montarSelectorServidor(select, {
         o.redNombre ? `<span class="${P}mapa-red-chip${o.redHeredada ? ` ${P}mapa-red-chip-heredada` : ""}" style="--red-color:${esc(o.redColor || "#57697C")}"${o.redHeredada ? ` title="Red ${esc(o.redNombre)}, heredada de su servidor"` : ""}>${esc(o.redNombre)}</span>` : "",
       ].join("");
       html += `<li role="option" id="${id}-op-${i}" class="${clases}" data-indice="${i}" data-clave="${esc(o.clave)}" aria-selected="${elegido}" title="${esc(`${o.nombre} — ${metaDe(o)}`)}">`
-        + `<span class="${P}serv-op-icono ${P}serv-icono-${o.origen}">${o.origen === "activo" ? ICONO_ACTIVO : ICONO_EQUIPO}</span>`
-        + `<span class="${P}serv-op-texto"><span class="${P}serv-op-nombre">${resaltar(o.nombre, texto)}</span><span class="${P}serv-op-meta">${resaltar(metaDe(o), texto)}</span></span>`
+        + `<span class="${P}serv-op-icono ${P}serv-icono-${o.origen}" data-icono-tipo="${esc(o.tipo || "")}">${iconoDeOpcion(o)}</span>`
+        + `<span class="${P}serv-op-texto"><span class="${P}serv-op-nombre">${resaltar(o.nombre, texto)}</span><span class="${P}serv-op-meta">${marcaRouter(o)}${resaltar(metaDe(o), texto)}</span></span>`
         + (marcas ? `<span class="${P}serv-op-marcas">${marcas}</span>` : "")
         + (elegido ? `<span class="${P}combo-check" aria-hidden="true">✓</span>` : "") + `</li>`;
     });

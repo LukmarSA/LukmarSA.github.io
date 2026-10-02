@@ -10,12 +10,18 @@
 import { distanciaKm } from "./geo.js";
 import { normalizarBusqueda } from "./formulario-activo.js";
 import { redEfectivaDe, redHeredadaDe } from "./mapa-jerarquia.js";
+import { haceRadioTipo, llevaMarcaRouter } from "./modo-red.js";
 
-// Tipos que hacen radioenlaces (su rol calculado tiene sentido). El resto
-// (router, switch, cámara, NVR…) se conecta por cable o fibra.
+// Tipos que hacen radioenlaces de fábrica (su rol calculado tiene sentido). El
+// resto (router, switch, cámara, NVR…) se conecta por cable o fibra. Con la 014
+// cada tipo lo dice (tipos_equipo_red.hace_radio, editable en «Redes y tipos»).
 export const TIPOS_RADIO = new Set(["ptp", "ap", "estacion"]);
-// true = hace radio; false = no; null = no se sabe (sin tipo).
-export function haceRadio(tipo){ return tipo ? TIPOS_RADIO.has(tipo) : null; }
+// true = hace radio; false = no; null = no se sabe (sin tipo). tiposEquipo =
+// las filas de tipos_equipo_red (con la 014 traen hace_radio).
+export function haceRadio(tipo, tiposEquipo = []){
+  if(!tipo) return null;
+  return haceRadioTipo(tiposEquipo.find(t=>t.valor === tipo) || { valor: tipo });
+}
 
 export const ORDENES_SERVIDOR = [
   { id: "cerca", etiqueta: "Más cerca primero" },
@@ -56,7 +62,7 @@ export function tipoEquipoDeActivo(tipoActivo, tiposEquipo = []){
 export function opcionesServidor({
   candidatos = [], ubicacionId = null, ubicacionPorId = new Map(), tiposEquipo = [], redes = [],
   conActivos = false, activos = [], vigentePorActivo = new Map(), equipoPorActivo = new Map(),
-  excluirActivos = [], nombreNuevo = null, tagActivo = ()=>null,
+  excluirActivos = [], nombreNuevo = null, tagActivo = ()=>null, conModo = false,
 } = {}){
   const desde = ubicacionPorId.get(Number(ubicacionId)) || null;
   const tipoPorValor = new Map(tiposEquipo.map(t=>[t.valor, t]));
@@ -81,6 +87,8 @@ export function opcionesServidor({
       nombre: e.nombre, tipo: e.tipo_equipo || null, tipoEtiqueta: t ? t.etiqueta : null,
       redId: r ? Number(r.id) : null, redNombre: r ? r.nombre : null, redColor: r ? r.color : null, redHeredada: !!r && redHeredadaDe(e) !== null,
       modelo: e.modelo || null, referencia: e.referencia || null, tag: null,
+      // v17 (014): la marca «Router» si enruta y su tipo no lo dice ya.
+      router: !!conModo && llevaMarcaRouter(e, t || (e.tipo_equipo ? { valor: e.tipo_equipo } : null)),
       ...lugar(ubicacionPorId.get(e.ubicacion_id)),
     });
   }
@@ -98,13 +106,13 @@ export function opcionesServidor({
         clave: `a:${a.id}`, origen: "activo", id: null, activoId: a.id,
         nombre: nombreNuevo ? nombreNuevo({ tipo, ubicacion: u, activo: a }) : `${t.etiqueta} en ${u.nombre}`,
         tipo, tipoEtiqueta: t.etiqueta, redId: null, redNombre: null, redColor: null, redHeredada: false,
-        modelo: [a.marca, a.modelo].filter(Boolean).join(" ") || null, referencia: null, tag: tagActivo(a) || null,
+        modelo: [a.marca, a.modelo].filter(Boolean).join(" ") || null, referencia: null, tag: tagActivo(a) || null, router: false,
         ...lugar(u),
       });
     }
   }
   for(const o of opciones){
-    o.buscable = clave([o.nombre, o.tipoEtiqueta, o.ubicacionNombre, o.redNombre, o.modelo, o.referencia, o.tag].filter(Boolean).join(" "));
+    o.buscable = clave([o.nombre, o.tipoEtiqueta, o.ubicacionNombre, o.redNombre, o.modelo, o.referencia, o.tag, o.router ? "router" : null].filter(Boolean).join(" "));
   }
   return opciones;
 }
@@ -186,16 +194,17 @@ export function ordenarServidores(opciones, orden = ORDEN_SERVIDOR_POR_DEFECTO){
 
 // Si el servidor está en otra ubicación y uno de los dos extremos no hace
 // radio (un Router, un Switch, una Cámara…), el enlace tiene que ser por
-// cable: "Automático" diría inalámbrico. null = dejar "Automático".
-export function medioSugerido({ clienteTipo = null, servidorTipo = null, misma = false } = {}){
+// cable: "Automático" diría inalámbrico. null = dejar "Automático". Con la 014,
+// lo que dice cada tipo (tiposEquipo).
+export function medioSugerido({ clienteTipo = null, servidorTipo = null, misma = false } = {}, tiposEquipo = []){
   if(misma) return null;
-  if(haceRadio(servidorTipo) === false || haceRadio(clienteTipo) === false) return "cable";
+  if(haceRadio(servidorTipo, tiposEquipo) === false || haceRadio(clienteTipo, tiposEquipo) === false) return "cable";
   return null;
 }
 
 // Por qué se sugiere cable: "Router no hace radioenlaces".
 export function motivoMedioSugerido({ clienteTipo = null, servidorTipo = null } = {}, tiposEquipo = []){
   const etiqueta = v=>(tiposEquipo.find(t=>t.valor === v) || {}).etiqueta || v;
-  const quien = haceRadio(servidorTipo) === false ? servidorTipo : haceRadio(clienteTipo) === false ? clienteTipo : null;
+  const quien = haceRadio(servidorTipo, tiposEquipo) === false ? servidorTipo : haceRadio(clienteTipo, tiposEquipo) === false ? clienteTipo : null;
   return quien ? `${etiqueta(quien)} no hace radioenlaces` : "";
 }

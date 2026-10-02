@@ -12,6 +12,7 @@ import { GLIFO_RADIO } from "./leaflet.js";
 import { normalizarCobertura, textoCobertura } from "../../nucleo/cobertura.js";
 import { cargarTiposActivo } from "../../nucleo/datos.js";
 import { iconoTipoEquipo } from "./iconos-equipo.js";
+import { haceRadioTipo, llevaMarcaRouter, textoRangos } from "../../nucleo/modo-red.js";
 
 const P = "inventario-tecnologico-";
 const MAX_CLIENTES_LISTA = 12;
@@ -44,12 +45,22 @@ function pillRol(rol){
 
 // Tipos de radio (inalámbricos): para ellos el rol calculado (backbone,
 // distribución…) tiene sentido. Para el resto (switch, cámara, router…) se
-// muestra su tipo.
-const TIPOS_RADIO = new Set(["ptp", "ap", "estacion"]);
+// muestra su tipo. De fábrica, PtP, AP y Estación; con la 014 lo dice cada
+// tipo («Hace radio» en «Redes y tipos»).
 function pillRolOTipo(ctx, e){
   const t = ctx.red007 && e.tipo_equipo ? ctx.tipoPorValor.get(e.tipo_equipo) : null;
-  if(t && !TIPOS_RADIO.has(e.tipo_equipo)) return `<span class="${P}mapa-rol ${P}mapa-rol-tipo" title="Tipo de equipo">${esc(t.etiqueta)}</span>`;
+  if(t && haceRadioTipo(t) === false) return `<span class="${P}mapa-rol ${P}mapa-rol-tipo" title="Tipo de equipo">${esc(t.etiqueta)}</span>`;
   return pillRol(ctx.red.rol.get(e.id));
+}
+
+// v17 (014): la marca «Router» junto al equipo que enruta (capa 3), salvo que
+// su tipo ya sea Router. El nombre automático no cambia.
+function marcaRouter(ctx, e){
+  if(!ctx.modoRed014) return "";
+  const t = e.tipo_equipo ? (ctx.tipoPorValor.get(e.tipo_equipo) || { valor: e.tipo_equipo }) : null;
+  if(!llevaMarcaRouter(e, t)) return "";
+  const propio = e.modo_red === "router";
+  return `<span class="${P}mapa-marca-router" title="${esc(`Trabaja como router (capa 3)${propio ? "" : ", como su tipo"}: define una red para lo que cuelga de él`)}">Router</span>`;
 }
 
 // Dentro del panel de una ubicación, todos sus equipos están ahí: el nombre
@@ -71,9 +82,20 @@ function chipRed(ctx, e){
   if(!r) return "";
   const desde = redHeredadaDe(e);
   const origen = desde !== null ? ctx.red.equipoPorId.get(desde) : null;
+  // 014: el title lleva también sus rangos IP.
+  const rangos = ctx.modoRed014 && (r.rangos_ip || []).length ? ` · ${textoRangos(r.rangos_ip)}` : "";
   return desde !== null
-    ? `<span class="${P}mapa-red-chip ${P}mapa-red-chip-heredada" style="--red-color:${esc(r.color)}" title="Red ${esc(r.nombre)}, heredada${origen ? ` de «${esc(origen.nombre)}»` : " de su servidor"}">${esc(r.nombre)}</span>`
-    : `<span class="${P}mapa-red-chip" style="--red-color:${esc(r.color)}" title="Red ${esc(r.nombre)}">${esc(r.nombre)}</span>`;
+    ? `<span class="${P}mapa-red-chip ${P}mapa-red-chip-heredada" style="--red-color:${esc(r.color)}" title="Red ${esc(r.nombre)}${esc(rangos)}, heredada${origen ? ` de «${esc(origen.nombre)}»` : " de su servidor"}">${esc(r.nombre)}</span>`
+    : `<span class="${P}mapa-red-chip" style="--red-color:${esc(r.color)}" title="Red ${esc(r.nombre)}${esc(rangos)}">${esc(r.nombre)}</span>`;
+}
+
+// v17 (014): en el detalle de un equipo con red propia, la red que define y sus rangos.
+function htmlDefineRed(ctx, e){
+  if(!ctx.modoRed014 || e.red_id === null || e.red_id === undefined) return "";
+  const r = ctx.redPorId.get(e.red_id);
+  if(!r) return "";
+  const rangos = (r.rangos_ip || []).filter(Boolean);
+  return `<div class="${P}mapa-equipo-define-red" data-define-red="${r.id}"><span class="${P}mapa-muted">Define la red</span> <span class="${P}mapa-red-chip" style="--red-color:${esc(r.color)}">${esc(r.nombre)}</span> ${rangos.length ? `<span class="${P}mapa-rangos">${rangos.map(x=>`<code>${esc(x)}</code>`).join(" ")}</span>` : `<span class="${P}mapa-muted">sin rangos IP (se ponen en «Redes y tipos»)</span>`}</div>`;
 }
 
 // v16 (3.11): el color del marco del equipo abierto: el de su red efectiva
@@ -363,7 +385,7 @@ function htmlCableado(ctx, u, equipos){
       <span class="${P}mapa-cab-punto" aria-hidden="true"></span>
       <div class="${P}mapa-cab-texto">
         <button type="button" class="${P}mapa-enlace-texto ${P}mapa-cab-nombre" data-accion="seleccionar-equipo-mapa" data-id="${e.id}" title="${esc(e.nombre)}">${esc(nombreEnUbicacion(ctx, e, u))}</button>
-        <span class="${P}mapa-cab-meta">${pillRolOTipo(ctx, e)}${st && st.estado !== "servicio" ? pillEstado(st.estado) : ""}${chipRed(ctx, e)}</span>
+        <span class="${P}mapa-cab-meta">${pillRolOTipo(ctx, e)}${marcaRouter(ctx, e)}${st && st.estado !== "servicio" ? pillEstado(st.estado) : ""}${chipRed(ctx, e)}</span>
         ${sal ? `<span class="${P}mapa-cab-salidas">${sal}</span>` : ""}
       </div>
     </div>`;
@@ -494,7 +516,7 @@ function htmlEquipo(ctx, e, seleccionado, u = null){
         <span class="${P}mapa-icono-radio"${icono.titulo ? ` title="${esc(icono.titulo)}"` : ""} data-icono-tipo="${esc(e.tipo_equipo || "")}">${icono.svg}</span>
         <span class="${P}mapa-fila-texto">
           <span class="${P}mapa-fila-titulo" title="${esc(e.nombre)}">${esc(nombreEnUbicacion(ctx, e, u))}</span>
-          <span class="${P}mapa-fila-meta">${pillRolOTipo(ctx, e)}${st ? pillEstado(st.estado) : ""}${red}${sub ? `<span class="${P}mapa-fila-sub">${esc(sub)}</span>` : ""}</span>
+          <span class="${P}mapa-fila-meta">${pillRolOTipo(ctx, e)}${marcaRouter(ctx, e)}${st ? pillEstado(st.estado) : ""}${red}${sub ? `<span class="${P}mapa-fila-sub">${esc(sub)}</span>` : ""}</span>
         </span>
         <span class="${P}mapa-contador" title="${plural(clientes.length, "cliente", "clientes")}">↓ ${clientes.length}</span>
         <span class="${P}mapa-chevron" aria-hidden="true"></span>
@@ -634,7 +656,8 @@ function htmlEquipoDetalle(ctx, e, activo){
 
   return `<div class="${P}mapa-equipo-detalle">
       ${ctx.puedeSimular ? simulacion : ""}
-      <div class="${P}mapa-equipo-meta">${pillRolOTipo(ctx, e)}${ctx.red007 && e.tipo_equipo && ctx.tipoPorValor.get(e.tipo_equipo) ? `<span class="${P}mapa-muted">${esc(ctx.tipoPorValor.get(e.tipo_equipo).etiqueta)}${e.referencia ? ` · ${esc(e.referencia)}` : ""}</span>` : ""}${chipRed(ctx, e)}</div>
+      <div class="${P}mapa-equipo-meta">${pillRolOTipo(ctx, e)}${marcaRouter(ctx, e)}${ctx.red007 && e.tipo_equipo && ctx.tipoPorValor.get(e.tipo_equipo) ? `<span class="${P}mapa-muted">${esc(ctx.tipoPorValor.get(e.tipo_equipo).etiqueta)}${e.referencia ? ` · ${esc(e.referencia)}` : ""}</span>` : ""}${chipRed(ctx, e)}</div>
+      ${htmlDefineRed(ctx, e)}
       ${ctx.cobertura013 && normalizarCobertura(e) ? `<div class="${P}mapa-equipo-cobertura" data-cobertura-equipo="${e.id}"><span class="${P}mapa-muted">Cobertura:</span> ${esc(textoCobertura(normalizarCobertura(e)))}</div>` : ""}
       ${servidor}
       ${caminoHtml}

@@ -22,19 +22,24 @@ export const conRedes = modo=>modo === "redes" || modo === "ambos";
 // la vista. tipos: tipos_equipo_red (en su orden). redes: las redes (en su
 // orden). redDe(e): la red que cuenta (la efectiva, con la herencia de la
 // 011). activos: cuántos activos hay ahí que no son equipos de red.
-export function resumenUbicacion({ equipos = [], visibleEquipo = ()=>true, tipos = [], redes = [], redDe = e=>e.red_id ?? null, activos = 0 } = {}){
-  const porTipo = new Map(), porRed = new Map();
+// routerDe(e) (v17, 014): si el equipo lleva la marca «Router»; cada fila de
+// tipos trae cuántos de ellos (routers).
+export function resumenUbicacion({ equipos = [], visibleEquipo = ()=>true, tipos = [], redes = [], redDe = e=>e.red_id ?? null, activos = 0, routerDe = ()=>false } = {}){
+  const porTipo = new Map(), porRed = new Map(), routers = new Map();
   let sinTipo = 0, sinRed = 0, ocultos = 0;
   for(const e of equipos){
-    if(e.tipo_equipo) porTipo.set(e.tipo_equipo, (porTipo.get(e.tipo_equipo) || 0) + 1); else sinTipo++;
+    if(e.tipo_equipo){
+      porTipo.set(e.tipo_equipo, (porTipo.get(e.tipo_equipo) || 0) + 1);
+      if(routerDe(e)) routers.set(e.tipo_equipo, (routers.get(e.tipo_equipo) || 0) + 1);
+    } else sinTipo++;
     const r = redDe(e);
     if(r === null || r === undefined) sinRed++; else porRed.set(r, (porRed.get(r) || 0) + 1);
     if(!visibleEquipo(e.id)) ocultos++;
   }
   const ordenTipos = [...tipos].sort((a, b)=>(a.orden ?? 0) - (b.orden ?? 0) || String(a.etiqueta).localeCompare(String(b.etiqueta), "es"));
   const conocidos = new Set(ordenTipos.map(t=>t.valor));
-  const filasTipos = ordenTipos.filter(t=>porTipo.has(t.valor)).map(t=>({ valor: t.valor, etiqueta: t.etiqueta || t.valor, n: porTipo.get(t.valor) }));
-  for(const [valor, n] of porTipo) if(!conocidos.has(valor)) filasTipos.push({ valor, etiqueta: valor, n });
+  const filasTipos = ordenTipos.filter(t=>porTipo.has(t.valor)).map(t=>({ valor: t.valor, etiqueta: t.etiqueta || t.valor, n: porTipo.get(t.valor), routers: routers.get(t.valor) || 0 }));
+  for(const [valor, n] of porTipo) if(!conocidos.has(valor)) filasTipos.push({ valor, etiqueta: valor, n, routers: routers.get(valor) || 0 });
   const conocidas = new Set(redes.map(r=>r.id));
   const filasRedes = redes.filter(r=>porRed.has(r.id)).map(r=>({ id: r.id, nombre: r.nombre, color: r.color, n: porRed.get(r.id) }));
   for(const [id, n] of porRed) if(!conocidas.has(id)) filasRedes.push({ id, nombre: `Red ${id}`, color: null, n });

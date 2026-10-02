@@ -22,6 +22,7 @@ import * as LA from "../assets/js/inventario-tecnologico/nucleo/lineas-agrupadas
 import * as CO from "../assets/js/inventario-tecnologico/nucleo/cobertura.js";
 import * as TU from "../assets/js/inventario-tecnologico/nucleo/tooltip-ubicacion.js";
 import * as IE from "../assets/js/inventario-tecnologico/ui/mapa/iconos-equipo.js";
+import * as MR from "../assets/js/inventario-tecnologico/nucleo/modo-red.js";
 
 let ok = 0, total = 0;
 const fallas = [];
@@ -1496,6 +1497,162 @@ prueba("v15: errores de la 013 traducidos (sin la migración y por sus reglas)",
   assert.match(L.traducirErrorMapa({ code:"23514", message:'violates check constraint "equipos_radioenlace_radio_cobertura_valido"' }), /20 000/);
   assert.match(L.traducirErrorMapa({ code:"23514", message:'violates check constraint "tipos_equipo_red_icono_valido"' }), /SVG sin scripts/);
   assert.equal(L.traducirErrorMapa({ code:"PGRST204", message:"Could not find the 'tipo_equipo' column of 'equipos_radioenlace' in the schema cache" }), L.TEXTO_FALTA_007, "la 007 sigue igual");
+});
+
+// ---------------------------------------------------------------- v17: modo de red y rangos IP (014)
+prueba("v17: el modo de cada tipo (el guardado o el de fábrica) y el del equipo (el suyo o el de su tipo)", ()=>{
+  assert.equal(MR.modoDelTipo({ valor:"router" }), "router");
+  assert.equal(MR.modoDelTipo({ valor:"switch" }), "bridge");
+  for(const v of ["camara", "nvr", "inyector_poe"]) assert.equal(MR.modoDelTipo({ valor:v }), "no_aplica", v);
+  for(const v of ["ap", "ptp", "estacion", "otro", "cam_ip"]) assert.equal(MR.modoDelTipo({ valor:v }), "elegir", v);
+  assert.equal(MR.modoDelTipo(null), "elegir", "sin tipo: a elegir");
+  assert.equal(MR.modoDelTipo({ valor:"switch", modo_red:"router" }), "router", "con la 014 manda lo guardado");
+  assert.equal(MR.modoDelTipo({ valor:"ap", modo_red:"raro" }), "elegir", "un valor raro: el de fábrica");
+  assert.equal(MR.modoEfectivo({ modo_red:"router" }, { valor:"ap" }), "router", "un AP que enruta");
+  assert.equal(MR.modoEfectivo({ modo_red:null }, { valor:"switch" }), "bridge");
+  assert.equal(MR.modoEfectivo({ modo_red:"bridge" }, { valor:"router" }), "bridge", "el propio pisa al del tipo");
+  assert.equal(MR.modoEfectivo({ modo_red:"router" }, { valor:"camara" }), "router", "también en un tipo «no aplica» (como la base)");
+  assert.equal(MR.modoEfectivo({}, null), "elegir");
+  assert.deepEqual(["router", "elegir", "bridge", "no_aplica"].map(MR.defineRed), [true, true, false, false], "solo los routers (y los sin indicar) definen red");
+});
+prueba("v17: la marca «Router» va en lo que enruta salvo que su tipo ya sea Router", ()=>{
+  assert.equal(MR.llevaMarcaRouter({ modo_red:"router" }, { valor:"ap" }), true);
+  assert.equal(MR.llevaMarcaRouter({ modo_red:null }, { valor:"router" }), false, "un Router no la necesita");
+  assert.equal(MR.llevaMarcaRouter({ modo_red:null }, { valor:"switch", modo_red:"router" }), true, "un tipo entero en modo router");
+  assert.equal(MR.llevaMarcaRouter({ modo_red:"bridge" }, { valor:"ap" }), false);
+  assert.equal(MR.llevaMarcaRouter({ modo_red:null }, { valor:"ap" }), false, "sin indicar");
+  assert.equal(MR.llevaMarcaRouter({ modo_red:"router" }, null), true, "sin tipo y en modo router");
+});
+prueba("v17: «Hace radio» y «Lleva cobertura» por tipo (de fábrica, como antes)", ()=>{
+  assert.deepEqual(["ptp", "ap", "estacion", "router", "switch", "camara", "otro"].map(v=>MR.haceRadioTipo({ valor:v })), [true, true, true, false, false, false, false]);
+  assert.equal(MR.haceRadioTipo(null), null, "sin tipo no se sabe");
+  assert.equal(MR.haceRadioTipo({ valor:"router", hace_radio:true }), true, "con la 014, lo guardado");
+  assert.equal(MR.haceRadioTipo({ valor:"ptp", hace_radio:false }), false);
+  assert.deepEqual(["ap", "ptp", "estacion"].map(v=>MR.llevaCoberturaTipo({ valor:v })), [true, false, false]);
+  assert.equal(MR.llevaCoberturaTipo({ valor:"estacion", lleva_cobertura:true }), true);
+  assert.equal(MR.llevaCoberturaTipo({ valor:"ap", lleva_cobertura:false }), false);
+  assert.equal(MR.llevaCoberturaTipo(null), false);
+  // Quien lo usa: el medio sugerido y la cobertura del formulario.
+  const tipos = [{ valor:"router", etiqueta:"Router", hace_radio:true }, { valor:"ptp", etiqueta:"PtP-E", hace_radio:true }];
+  assert.equal(SS.medioSugerido({ clienteTipo:"ptp", servidorTipo:"router", misma:false }), "cable", "de fábrica el Router no hace radio");
+  assert.equal(SS.medioSugerido({ clienteTipo:"ptp", servidorTipo:"router", misma:false }, tipos), null, "con la 014, un Router que hace radio: automático");
+  assert.equal(SS.motivoMedioSugerido({ clienteTipo:"ptp", servidorTipo:"router" }, tipos), "");
+  assert.equal(SS.haceRadio("switch", [{ valor:"switch", hace_radio:true }]), true);
+  assert.equal(CO.llevaCobertura({ tipo_equipo:"estacion" }, [{ valor:"estacion", lleva_cobertura:true }]), true);
+  assert.equal(CO.llevaCobertura({ tipo_equipo:"ap" }, [{ valor:"ap", lleva_cobertura:false }]), false, "un AP cuyo tipo ya no la lleva");
+  assert.equal(CO.llevaCobertura({ tipo_equipo:"ap", radio_cobertura_m:300 }, [{ valor:"ap", lleva_cobertura:false }]), true, "salvo que ya tenga una guardada");
+});
+prueba("v17: los textos del modo (selector del equipo)", ()=>{
+  assert.equal(MR.textoModoDeSuTipo({ valor:"switch" }), "El de su tipo: Bridge (capa 2)");
+  assert.equal(MR.textoModoDeSuTipo({ valor:"router" }), "El de su tipo: Router (capa 3)");
+  assert.equal(MR.textoModoDeSuTipo({ valor:"camara" }), "No aplica a su tipo");
+  assert.equal(MR.textoModoDeSuTipo({ valor:"ap" }), "Sin indicar");
+  assert.equal(MR.textoModoDeSuTipo(null), "Sin indicar");
+  assert.equal(MR.etiquetaModo("no_aplica"), "No aplica");
+  assert.equal(MR.etiquetaModo("raro"), "");
+});
+prueba("v17: un rango IPv4 en CIDR (la red se normaliza; se rechaza lo mal escrito)", ()=>{
+  const r = MR.parsearRango(" 10.10.0.0/24 ");
+  assert.equal(r.ok, true); assert.equal(r.rango, "10.10.0.0/24"); assert.equal(r.corregido, null);
+  assert.equal(r.fin - r.base, 255);
+  const h = MR.parsearRango("192.168.88.1/24");
+  assert.equal(h.rango, "192.168.88.0/24", "con bits de host se guarda la red"); assert.equal(h.corregido, "192.168.88.1/24");
+  assert.equal(MR.parsearRango("10.0.0.7/32").rango, "10.0.0.7/32");
+  assert.equal(MR.parsearRango("0.0.0.0/0").fin, 2 ** 32 - 1);
+  for(const malo of ["", "10.10.0.0", "10.10.0/24", "10.10.0.256/24", "10.10.0.0/33", "010.1.1.0/24", "10.1.1.0/24/1", "hola/24", "10.1.1.0/x", "10.1.1.0/-1", "2001:db8::/32"]){
+    assert.equal(MR.parsearRango(malo).ok, false, malo);
+  }
+  assert.match(MR.parsearRango("10.10.0.0").error, /le falta la máscara/);
+  assert.match(MR.parsearRango("10.10.0.0/40").error, /de \/0 a \/32/);
+});
+prueba("v17: «Rangos IP»: separados por comas, espacios o líneas, sin repetir, como mucho 20", ()=>{
+  const v = MR.validarRangos("10.10.0.0/24, 10.20.0.0/16\n10.10.0.0/24;192.168.88.1/24");
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.rangos, ["10.10.0.0/24", "10.20.0.0/16", "192.168.88.0/24"]);
+  assert.deepEqual(v.avisos, ["192.168.88.1/24 se guarda como 192.168.88.0/24 (la red de ese rango)."]);
+  assert.deepEqual(MR.validarRangos("").rangos, [], "vacío = sin rangos");
+  assert.equal(MR.validarRangos("  ").ok, true);
+  const mal = MR.validarRangos("10.0.0.0/8, 10.1.1.0");
+  assert.equal(mal.ok, false); assert.equal(mal.errores.length, 1); assert.deepEqual(mal.rangos, ["10.0.0.0/8"]);
+  const muchos = Array.from({ length: 21 }, (_, i)=>`10.${i}.0.0/16`).join(" ");
+  assert.equal(MR.validarRangos(muchos).ok, false);
+  assert.match(MR.validarRangos(muchos).errores[0], /Como mucho 20/);
+  assert.equal(MR.validarRangos(Array.from({ length: 20 }, (_, i)=>`10.${i}.0.0/16`).join(" ")).ok, true);
+  assert.equal(MR.textoRangos(["10.0.0.0/8", "192.168.1.0/24"]), "10.0.0.0/8, 192.168.1.0/24");
+  assert.equal(MR.textoRangos(null), "");
+});
+prueba("v17: cruces de rangos entre redes (y dentro de una), con su aviso", ()=>{
+  assert.equal(MR.seCruzan("10.0.0.0/8", "10.20.0.0/16"), true, "uno dentro de otro");
+  assert.equal(MR.seCruzan("10.0.0.0/24", "10.0.1.0/24"), false, "contiguos no se cruzan");
+  assert.equal(MR.seCruzan("192.168.88.0/24", "192.168.88.0/24"), true, "el mismo");
+  assert.equal(MR.seCruzan("hola", "10.0.0.0/8"), false);
+  const redes = [
+    { id:1, nombre:"CCTV", rangos_ip:["10.10.0.0/16"] },
+    { id:2, nombre:"AQ1", rangos_ip:["10.10.5.0/24", "172.16.0.0/24"] },
+    { id:3, nombre:"Oficina", rangos_ip:["192.168.1.0/24", "192.168.1.128/25"] },
+    { id:4, nombre:"Sin rangos", rangos_ip:[] },
+  ];
+  assert.equal(MR.crucesDeRangos(redes).length, 2);
+  assert.deepEqual(MR.avisosDeCruce(1, redes), ["10.10.0.0/16 se cruza con 10.10.5.0/24, de «AQ1»."]);
+  assert.deepEqual(MR.avisosDeCruce(2, redes), ["10.10.5.0/24 se cruza con 10.10.0.0/16, de «CCTV»."]);
+  assert.deepEqual(MR.avisosDeCruce(3, redes), ["192.168.1.0/24 se cruza con 192.168.1.128/25, de esta misma red."]);
+  assert.deepEqual(MR.avisosDeCruce(4, redes), []);
+});
+prueba("v17: lote con «solo los routers definen red» (plan de los UPDATE)", ()=>{
+  const tipos = [{ valor:"switch", modo_red:"bridge" }, { valor:"ap", modo_red:"elegir" }, { valor:"camara", modo_red:"no_aplica" }, { valor:"router", modo_red:"router" }];
+  const eqs = [
+    { id:1, tipo_equipo:"ap", modo_red:null, red_id:null },
+    { id:2, tipo_equipo:"switch", modo_red:null, red_id:null },
+    { id:3, tipo_equipo:"switch", modo_red:"router", red_id:7 },
+    { id:4, tipo_equipo:"camara", modo_red:null, red_id:null },
+    { id:5, tipo_equipo:"ap", modo_red:"router", red_id:8 },
+  ];
+  // Poner la red 9 a todos: el switch en bridge y la cámara no la toman.
+  let p = MR.planLote(eqs, [1, 2, 3, 4, 5], { red_id: 9 }, tipos);
+  assert.deepEqual(p.grupos, [{ ids:[1, 3, 5], parche:{ red_id:9 } }]);
+  assert.deepEqual(p.sinLaRed, [2, 4]); assert.deepEqual(p.dejanRed, []); assert.deepEqual(p.sinCambio, [2, 4]);
+  // Pasar a bridge: los que tenían red propia la dejan.
+  p = MR.planLote(eqs, [1, 3, 5], { modo_red:"bridge" }, tipos);
+  assert.deepEqual(p.grupos, [{ ids:[1], parche:{ modo_red:"bridge" } }, { ids:[3, 5], parche:{ modo_red:"bridge", red_id:null } }]);
+  assert.deepEqual(p.sinLaRed, []); assert.deepEqual(p.dejanRed, [3, 5]);
+  // Router + red: todos la toman (también la cámara, si enruta).
+  p = MR.planLote(eqs, [2, 4], { modo_red:"router", red_id: 9 }, tipos);
+  assert.deepEqual(p.grupos, [{ ids:[2, 4], parche:{ modo_red:"router", red_id:9 } }]);
+  // Cambiar el tipo a Switch (bridge de fábrica) a uno con red propia sin modo: la deja.
+  p = MR.planLote([{ id:6, tipo_equipo:"ap", modo_red:null, red_id:3 }], [6], { tipo_equipo:"switch" }, tipos);
+  assert.deepEqual(p.grupos, [{ ids:[6], parche:{ tipo_equipo:"switch", red_id:null } }]); assert.deepEqual(p.dejanRed, [6]);
+  // Quitar la propia vale para todos.
+  p = MR.planLote(eqs, [2, 3], { red_id: null }, tipos);
+  assert.deepEqual(p.grupos, [{ ids:[2, 3], parche:{ red_id:null } }]);
+  // Sin modos (sin la 014 todo es «a elegir» o de fábrica): igual que antes.
+  p = MR.planLote([{ id:1, tipo_equipo:"ap", red_id:null }], [1, 99], { red_id: 2 }, []);
+  assert.deepEqual(p.grupos, [{ ids:[1], parche:{ red_id:2 } }], "el que no existe se ignora");
+});
+prueba("v17: el tooltip cuenta los routers de cada tipo (y ya no trae la cobertura)", ()=>{
+  const eqs = [{ id:1, tipo_equipo:"ap", modo_red:"router" }, { id:2, tipo_equipo:"ap", modo_red:null }, { id:3, tipo_equipo:"router" }];
+  const tipos = [{ valor:"router", etiqueta:"Router", orden:10 }, { valor:"ap", etiqueta:"AP", orden:40 }];
+  const r = TU.resumenUbicacion({ equipos: eqs, tipos, routerDe: e=>MR.llevaMarcaRouter(e, tipos.find(t=>t.valor === e.tipo_equipo)) });
+  assert.deepEqual(r.tipos.map(t=>[t.etiqueta, t.n, t.routers]), [["Router", 1, 0], ["AP", 2, 1]]);
+  assert.deepEqual(TU.resumenUbicacion({ equipos: eqs, tipos }).tipos.map(t=>t.routers), [0, 0], "sin routerDe (sin la 014): ninguno");
+});
+prueba("v17: errores de la 014 traducidos (sus reglas y sin la migración)", ()=>{
+  assert.equal(L.traducirErrorMapa({ code:"23514", message:"equipos_radioenlace_red_solo_routers: «Switch (CCTV) en Torre L22» no define red (trabaja como bridge o su tipo no tiene modo de red): va en la red de su servidor. Para darle otra red, ponlo en modo router." }),
+    "«Switch (CCTV) en Torre L22» no define red: trabaja como bridge (o su tipo no tiene modo de red) y va en la red de su servidor. Para darle otra red, ponlo en modo router.");
+  assert.equal(L.traducirErrorMapa({ code:"23514", message:"tipos_equipo_red_modo_con_redes: 2 equipo(s) de tipo «Switch» tienen red propia: ponlos en modo router o quítales la red antes de pasar el tipo a bridge." }),
+    "2 equipos de tipo «Switch» tienen red propia: ponlos en modo router o quítales la red antes de pasar el tipo a «Bridge (capa 2)».");
+  assert.equal(L.traducirErrorMapa({ code:"23514", message:"tipos_equipo_red_modo_con_redes: 1 equipo(s) de tipo «Cámara» tienen red propia: ponlos en modo router o quítales la red antes de pasar el tipo a no_aplica." }),
+    "1 equipo de tipo «Cámara» tiene red propia: ponlo en modo router o quítale la red antes de pasar el tipo a «No aplica».");
+  assert.match(L.traducirErrorMapa({ code:"22P02", message:'invalid cidr value: "192.168.88.1/24"' }), /Algún rango IP no es válido/);
+  assert.match(L.traducirErrorMapa({ code:"22P02", message:'invalid input syntax for type cidr: "hola"' }), /10\.10\.0\.0\/24/);
+  assert.match(L.traducirErrorMapa({ code:"23514", message:'violates check constraint "redes_rangos_ip_validos"' }), /20 rangos/);
+  assert.match(L.traducirErrorMapa({ code:"23514", message:'violates check constraint "equipos_radioenlace_modo_valido"' }), /router o bridge/);
+  assert.match(L.traducirErrorMapa({ code:"23514", message:'violates check constraint "tipos_equipo_red_modo_valido"' }), /no aplica/);
+  for(const [code, message] of [["PGRST204", "Could not find the 'modo_red' column of 'equipos_radioenlace' in the schema cache"], ["PGRST204", "Could not find the 'rangos_ip' column of 'redes' in the schema cache"],
+    ["PGRST204", "Could not find the 'lleva_cobertura' column of 'tipos_equipo_red' in the schema cache"], ["42703", "column tipos_equipo_red.hace_radio does not exist"]]){
+    assert.equal(L.traducirErrorMapa({ code, message }), L.TEXTO_FALTA_014, message);
+  }
+  assert.equal(L.traducirErrorMapa({ code:"PGRST204", message:"Could not find the 'radio_cobertura_m' column of 'equipos_radioenlace' in the schema cache" }), L.TEXTO_FALTA_013, "la 013 sigue igual");
+  assert.equal(L.traducirErrorMapa({ code:"22P02", message:'invalid input syntax for type integer: "x"' }), 'invalid input syntax for type integer: "x"', "otro 22P02 no es de los rangos");
 });
 
 prueba("errores de la 008/009 traducidos", ()=>{

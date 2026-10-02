@@ -1660,3 +1660,38 @@ body.inventario-tecnologico-con-mapa-completo{overflow:hidden;}
 .inventario-tecnologico-mapa-caida-caja{pointer-events:none;}
 .inventario-tecnologico-mapa-caida-bloqueada + .inventario-tecnologico-mapa-caida-todos-texto{cursor:not-allowed;}
 .inventario-tecnologico-mapa-caida-bloqueada + .inventario-tecnologico-mapa-caida-todos-texto:hover{background:transparent;}
+
+/* ---------- v17 (migración 014): modo de red (router/bridge) y rangos IP ----------
+   La marca «Router» junto al equipo que enruta (en la torre, el cableado, el
+   detalle, el selector de servidor y, como cuenta, en el tooltip). */
+.inventario-tecnologico-mapa-marca-router,
+.inventario-tecnologico-serv-marca-router,
+.inventario-tecnologico-mapa-tt-router{display:inline-flex;align-items:center;font-size:10px;font-weight:700;line-height:15px;padding:0 6px;border-radius:9px;white-space:nowrap;
+  color:#1F4E79;background:#E3ECF7;border:1px solid #B7CBE3;letter-spacing:.01em;}
+.inventario-tecnologico-serv-marca-router{margin-right:5px;vertical-align:1px;}
+.inventario-tecnologico-mapa-tt-router{margin-left:6px;font-size:9.5px;line-height:13px;padding:0 5px;}
+.inventario-tecnologico-mapa-tt-etq-texto{white-space:nowrap;}
+/* La red que define un router, en su detalle. */
+.inventario-tecnologico-mapa-equipo-define-red{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;font-size:12px;margin:2px 0 8px;}
+.inventario-tecnologico-mapa-equipo-define-red .inventario-tecnologico-mapa-red-chip{margin-right:0;}
+.inventario-tecnologico-mapa-rangos{display:inline-flex;flex-wrap:wrap;gap:4px;}
+.inventario-tecnologico-mapa-rangos code{font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--surface-2, #F2F5F8);border:1px solid var(--border);border-radius:4px;padding:0 4px;}
+/* Formulario del equipo: «Modo de red» y «Red» juntos. */
+.inventario-tecnologico-equipo-modo-red{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px 14px;}
+.inventario-tecnologico-equipo-modo-red > .inventario-tecnologico-field{min-width:0;}
+@media (max-width:720px){ .inventario-tecnologico-equipo-modo-red{grid-template-columns:minmax(0,1fr);} }
+.inventario-tecnologico-equipo-modo-red select:disabled{color:var(--ink-muted);background:var(--surface-2, #F2F5F8);cursor:not-allowed;}
+/* «Redes y tipos»: la segunda línea de cada fila (rangos IP; modo, radio y cobertura). */
+.inventario-tecnologico-catalogo-extra{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:0 0 2px;}
+.inventario-tecnologico-catalogo-campo{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-muted);flex:1;min-width:220px;}
+.inventario-tecnologico-catalogo-campo > span{white-space:nowrap;}
+.inventario-tecnologico-catalogo-campo input[type=text]{font-family:'IBM Plex Mono',monospace;font-size:12.5px;}
+.inventario-tecnologico-catalogo-campo select{flex:0 1 auto;}
+.inventario-tecnologico-catalogo-campo input[aria-invalid="true"]{border-color:var(--danger, #B3261E);}
+.inventario-tecnologico-catalogo-avisos{flex-basis:100%;display:flex;flex-direction:column;gap:2px;}
+.inventario-tecnologico-catalogo-avisos:empty{display:none;}
+.inventario-tecnologico-catalogo-aviso{font-size:12px;color:var(--ink-muted);}
+.inventario-tecnologico-catalogo-aviso-error{color:var(--danger, #B3261E);font-weight:600;}
+.inventario-tecnologico-catalogo-aviso-cruce{color:#8A5A00;}
+/* Lote: lo que pasa con los que quedan como bridge. */
+.inventario-tecnologico-lote-aviso{font-size:12.5px;color:#8A5A00;margin-top:4px;}

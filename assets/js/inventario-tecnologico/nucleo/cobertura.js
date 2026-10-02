@@ -3,15 +3,24 @@
 // hacia dónde apunta (azimut, en grados desde el norte) y su apertura (en
 // grados). Sin apertura, o con 360°, la cobertura es un círculo alrededor del
 // equipo; con una apertura menor, una cuña. La app pide estos datos para los
-// AP y los dibuja en el mapa. Lógica pura: se prueba en Node
-// (tests/mapa-unit.mjs).
+// AP y los dibuja en el mapa. Con la 014 (v17) cada tipo dice si la lleva
+// (tipos_equipo_red.lleva_cobertura); de fábrica, solo el AP. Lógica pura: se
+// prueba en Node (tests/mapa-unit.mjs).
 import { RADIO_TIERRA_KM, aRad, puntoCardinal } from "./geo.js";
+import { llevaCoberturaTipo } from "./modo-red.js";
 
 export const COBERTURA = Object.freeze({ radioMaximo: 20000, pasosCirculo: 72 });
 
-// El tipo de equipo que lleva cobertura (por su valor en tipos_equipo_red).
+// El tipo de equipo que lleva cobertura de fábrica (por su valor en tipos_equipo_red).
 export const TIPO_CON_COBERTURA = "ap";
-export function llevaCobertura(e){ return !!e && (e.tipo_equipo === TIPO_CON_COBERTURA || normalizarCobertura(e) !== null); }
+// ¿Se piden sus datos de cobertura? Si su tipo la lleva o si ya tiene una
+// guardada. tiposEquipo = las filas de tipos_equipo_red (con la 014 traen
+// lleva_cobertura; sin ellas, el de fábrica).
+export function llevaCobertura(e, tiposEquipo = []){
+  if(!e) return false;
+  const tipo = e.tipo_equipo ? (tiposEquipo.find(t=>t.valor === e.tipo_equipo) || { valor: e.tipo_equipo }) : null;
+  return llevaCoberturaTipo(tipo) || normalizarCobertura(e) !== null;
+}
 
 const numero = v=>{
   if(v === null || v === undefined) return null;
