@@ -9,6 +9,7 @@ import { atajosQueLoApagan } from "../../nucleo/mapa-nombres.js";
 import { colorTipo, iconoTipoTam, tintarClaro } from "../../nucleo/opciones-configurables.js";
 import { urlFoto } from "../../negocio/operaciones.js";
 import { GLIFO_RADIO } from "./leaflet.js";
+import { normalizarCobertura, textoCobertura } from "../../nucleo/cobertura.js";
 
 const P = "inventario-tecnologico-";
 const MAX_CLIENTES_LISTA = 12;
@@ -564,6 +565,7 @@ function htmlEquipoDetalle(ctx, e, activo){
   return `<div class="${P}mapa-equipo-detalle">
       ${ctx.puedeSimular ? simulacion : ""}
       <div class="${P}mapa-equipo-meta">${pillRolOTipo(ctx, e)}${ctx.red007 && e.tipo_equipo && ctx.tipoPorValor.get(e.tipo_equipo) ? `<span class="${P}mapa-muted">${esc(ctx.tipoPorValor.get(e.tipo_equipo).etiqueta)}${e.referencia ? ` · ${esc(e.referencia)}` : ""}</span>` : ""}${chipRed(ctx, e)}</div>
+      ${ctx.cobertura013 && normalizarCobertura(e) ? `<div class="${P}mapa-equipo-cobertura" data-cobertura-equipo="${e.id}"><span class="${P}mapa-muted">Cobertura:</span> ${esc(textoCobertura(normalizarCobertura(e)))}</div>` : ""}
       ${servidor}
       ${caminoHtml}
       ${clientesHtml}

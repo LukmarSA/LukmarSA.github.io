@@ -7,7 +7,8 @@
 // equipos, respaldos y tipos: solo administrador; historial_ubicacion: acción
 // "asignar_ubicacion" de la matriz). La UI solo esconde los botones.
 import { sb } from "../nucleo/config.js";
-import { cargarAtajos, cargarPiscinas, cargarRedes, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, datosNombres, estadoMapa, hayMedio, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa, refrescarTiposUbicacion } from "../nucleo/datos-mapa.js";
+import { cargarAtajos, cargarPiscinas, cargarRedes, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, cargarEquiposRadioenlace, datosNombres, estadoMapa, hayCobertura, hayMedio, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa, refrescarTiposUbicacion } from "../nucleo/datos-mapa.js";
+import { validarCobertura } from "../nucleo/cobertura.js";
 import { hayCamposConfigurables } from "../nucleo/datos.js";
 import { validarSvg } from "../nucleo/svg-seguro.js";
 import { numeroHectareas, redondearPunto, validarPiscina } from "../nucleo/piscinas.js";
@@ -221,12 +222,20 @@ function filaEquipo(c){
   if("referencia" in c) fila.referencia = textoOpcional(c.referencia);
   // 008: medio del enlace con el servidor (sin servidor no aplica).
   if("medio" in c) fila.medio = fila.servidor_id !== null && esMedio(c.medio) ? c.medio : null;
+  // 013 (v15): la cobertura (radio, dirección y apertura), si el formulario la
+  // trae; lo escrito se valida en validarFilaEquipo.
+  if("radio_cobertura_m" in c){
+    const v = validarCobertura({ radio: c.radio_cobertura_m, azimut: c.azimut_cobertura, apertura: c.apertura_cobertura });
+    if(v.ok) Object.assign(fila, v.valores);
+    else Object.defineProperty(fila, "erroresCobertura", { value: v.errores, enumerable: false }); // no viaja a la base
+  }
   return fila;
 }
 
 function validarFilaEquipo(fila, idActual){
   const v = validarEquipo(fila, cargarEquiposRadioenlace(), idActual);
-  const errores = { ...v.errores };
+  const errores = { ...v.errores, ...(fila.erroresCobertura || {}) };
+  if(("radio_cobertura_m" in fila || fila.erroresCobertura) && !hayCobertura()) errores.radio_cobertura_m = "Para guardar la cobertura hace falta la migración 013.";
   const errorServidor = validarServidor(redMapa(), idActual, fila.servidor_id);
   if(errorServidor && !errores.servidor_id) errores.servidor_id = errorServidor;
   if(Number.isNaN(fila.frecuencia_mhz)) errores.frecuencia_mhz = "La frecuencia debe ser un número mayor que cero.";
@@ -403,10 +412,26 @@ export async function crearTipoEquipo({ etiqueta, genero }){
   return v.valor;
 }
 
-export async function editarTipoEquipo(valor, { etiqueta, genero, activo }){
-  exigirValido(validarTipoEquipo({ etiqueta, genero }, cargarTiposEquipo(), valor));
-  const parche = { etiqueta: etiqueta.trim(), genero };
+export async function editarTipoEquipo(valor, { etiqueta, genero, activo, icono_svg }){
+  const actual = cargarTiposEquipo().find(t=>t.valor === valor);
+  if(!actual) throw new Error("Ese tipo de equipo ya no existe. Recarga el mapa.");
+  const parche = {};
+  if(etiqueta !== undefined || genero !== undefined){
+    const etq = etiqueta !== undefined ? etiqueta : actual.etiqueta;
+    const gen = genero !== undefined ? genero : actual.genero;
+    exigirValido(validarTipoEquipo({ etiqueta: etq, genero: gen }, cargarTiposEquipo(), valor));
+    parche.etiqueta = String(etq).trim(); parche.genero = gen;
+  }
   if(activo !== undefined) parche.activo = !!activo;
+  // 013 (v15): el ícono del tipo (vacío = el de fábrica). Con viewBox, como
+  // los de las ubicaciones: se dibuja a otro tamaño en el tooltip.
+  if(icono_svg !== undefined){
+    const v = validarSvg(icono_svg, { exigirViewBox: true });
+    if(!v.ok) throw new ErrorValidacion({ icono_svg: v.error });
+    if(!hayCobertura()) throw new ErrorValidacion({ icono_svg: "Para guardar el ícono de un tipo de equipo hace falta la migración 013." });
+    parche.icono_svg = v.svg || null;
+  }
+  if(!Object.keys(parche).length) return;
   exigirFilas(await sb.from("tipos_equipo_red").update(parche).eq("valor", valor).select("valor"), "guardó el tipo de equipo");
   await refrescarDatosMapa();
 }

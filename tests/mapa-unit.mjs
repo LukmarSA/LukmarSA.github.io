@@ -17,6 +17,11 @@ import * as SS from "../assets/js/inventario-tecnologico/nucleo/selector-servido
 import { htmlPin } from "../assets/js/inventario-tecnologico/ui/mapa/leaflet.js";
 import * as SOLO from "../assets/js/inventario-tecnologico/nucleo/solo-esta.js";
 import * as FM from "../assets/js/inventario-tecnologico/nucleo/filtros-mapa.js";
+import * as BO from "../assets/js/inventario-tecnologico/nucleo/buscar-opciones.js";
+import * as LA from "../assets/js/inventario-tecnologico/nucleo/lineas-agrupadas.js";
+import * as CO from "../assets/js/inventario-tecnologico/nucleo/cobertura.js";
+import * as TU from "../assets/js/inventario-tecnologico/nucleo/tooltip-ubicacion.js";
+import * as IE from "../assets/js/inventario-tecnologico/ui/mapa/iconos-equipo.js";
 
 let ok = 0, total = 0;
 const fallas = [];
@@ -1210,6 +1215,287 @@ prueba("tipo de equipo (3.4): opciones con cuentas, «Sin tipo» y «Sin equipos
   assert.equal(J.ubicacionVisiblePorEquipos([], { tiposEquipoOcultos: [J.UBICACION_SIN_EQUIPOS] }), false);
   assert.equal(J.ubicacionVisiblePorEquipos([], { tiposEquipoOcultos: ["ap"] }), true);
   assert.equal(J.ubicacionVisiblePorEquipos([{ id:1 }], { tiposEquipoOcultos: [J.UBICACION_SIN_EQUIPOS] }, ()=>true), true);
+});
+
+prueba("v13: buscador de las listas de casillas (sin mayúsculas ni tildes, palabras en cualquier orden)", ()=>{
+  assert.equal(BO.normalizarOpcion("  Cámara   IP "), "camara ip");
+  assert.equal(BO.normalizarOpcion(null), "");
+  assert.equal(BO.normalizarOpcion("ESTACIÓN Ñandú"), "estacion nandu", "tildes y eñe fuera, minúsculas");
+  assert.ok(BO.coincideOpcion("Cámara", "camara"), "sin la tilde");
+  assert.ok(BO.coincideOpcion("camara", "CÁMARA"), "la tilde en lo escrito");
+  assert.ok(BO.coincideOpcion("Cámara IP", "ip cam"), "palabras en otro orden");
+  assert.ok(!BO.coincideOpcion("Cámara IP", "cam wifi"), "todas las palabras tienen que estar");
+  assert.ok(BO.coincideOpcion("Red Cámaras", "") && BO.coincideOpcion("Red Cámaras", "   ") && BO.coincideOpcion("x", null), "sin nada escrito, coinciden todas");
+  assert.ok(BO.coincideOpcion("Punto a Punto", "a punto") && !BO.coincideOpcion("Cámara", "ap"), "partes de palabra");
+  assert.ok(BO.coincideOpcion(null, "") && !BO.coincideOpcion(null, "x"), "sin nombre");
+  const ops = [{ etiqueta: "Router" }, { etiqueta: "Punto a Punto" }, { etiqueta: "AP" }, { etiqueta: "Cámara" }, { etiqueta: "Sin tipo" }, { etiqueta: "Sin equipos" }];
+  assert.deepEqual(BO.filtrarOpciones(ops, "sin").map(o=>o.etiqueta), ["Sin tipo", "Sin equipos"], "en su orden");
+  assert.deepEqual(BO.filtrarOpciones(ops, "").length, 6);
+  assert.deepEqual(BO.filtrarOpciones(["Laptop", "Antena", "Monitor"], "ANT"), ["Antena"], "también con textos");
+  assert.deepEqual(BO.filtrarOpciones([{ nombre: "Red Oficina" }, { nombre: "CCTV" }], "ofi", o=>o.nombre).map(o=>o.nombre), ["Red Oficina"], "con su propio nombre");
+  assert.deepEqual(BO.filtrarOpciones(null, "x"), []);
+  assert.equal(BO.textoSinCoincidencias("  xyz   abc "), "Ninguna coincide con «xyz abc».");
+  assert.match(BO.AYUDA_BUSCAR_OPCION, /Enter/);
+  assert.match(BO.AYUDA_BUSCAR_OPCION, /Esc/);
+});
+
+// ---------------------------------------------------------------- v14 (3.8): líneas agrupadas y franjas por red
+{
+  // Torre principal (1) ─cable─ Data Center (2): 4 enlaces por cable (2 de CCTV, 1 de Oficina, 1 sin red) y 1 por fibra;
+  // Torre principal ═radio═ Lote 9 (3): 2 backbones (AQ1 y CCTV). Redes en este orden: CCTV (2), Oficina (3), AQ1 (1).
+  const U = [{ id:1, nombre:"Torre principal", lat:0, lng:0 }, { id:2, nombre:"Data Center", lat:0, lng:0.001 }, { id:3, nombre:"Lote 9", lat:0.02, lng:0.02 }];
+  const e = (id, ubicacion_id, nombre, servidor_id, extra = {})=>({ id, ubicacion_id, nombre, servidor_id, banda:null, frecuencia_mhz:null, activo_id:null, ...extra });
+  const E = [
+    e(1, 2, "Router DC", null, { red_id:1 }),
+    e(11, 1, "Cámara B", 1, { medio:"cable", red_id:2 }), e(12, 1, "Cámara A", 1, { medio:"cable", red_id:2 }),
+    e(13, 1, "Switch Oficina", 1, { medio:"cable", red_id:3 }), e(14, 1, "Equipo suelto", 1, { medio:"cable", red_id:null }),
+    e(15, 1, "PTP fibra", 1, { medio:"fibra", red_id:1 }),
+    e(21, 1, "PTP TP → L9 a", 15, { red_id:1 }), e(22, 1, "PTP TP → L9 b", 15, { red_id:2 }),
+    e(30, 3, "PTP L9 a", 21, { red_id:1 }), e(31, 3, "PTP L9 b", 22, { red_id:2 }),
+  ];
+  const rd = J.analizarRed({ equipos:E, ubicaciones:U, respaldos:[] });
+  const nombre = id=>rd.equipoPorId.get(id).nombre;
+  const redDe = d=>rd.equipoPorId.get(d.clienteId).red_id ?? null;
+  const ORDEN = [2, 3, 1];
+  const NOMBRE_RED = { 1:"AQ1", 2:"CCTV", 3:"Red Oficina" };
+  const todas = { backbone:true, p2mp:true, cable:true, respaldos:false };
+  const agrupar = (o = {})=>LA.agruparLineas(J.planDeLineas(rd, { lineas:todas, ...o }), { redDe, ordenRedes:ORDEN, nombreDe:nombre });
+  const ANCHO = { backbone:5, p2mp:2.2, cable:3, fibra:3.5 };
+  const anchoDe = estilo=>ANCHO[estilo];
+
+  prueba("v14: el plan trae los ids de las ubicaciones de cada línea", ()=>{
+    const d = J.planDeLineas(rd, { lineas:todas }).find(x=>x.clienteId === 30);
+    assert.deepEqual([d.desdeId, d.hastaId], [1, 3], "desde el servidor hacia el cliente");
+  });
+  prueba("v14: clase del grupo (backbone y P2MP son radio), clave del par sin importar el sentido", ()=>{
+    assert.deepEqual(["backbone", "p2mp", "cable", "fibra"].map(LA.claseDeGrupo), ["radio", "radio", "cable", "fibra"]);
+    assert.equal(LA.clavePar(5, 2), "2-5"); assert.equal(LA.clavePar("2", 5), "2-5"); assert.equal(LA.clavePar(10, 9), "9-10", "como números, no como texto");
+  });
+  prueba("v14: se juntan por par de ubicaciones y clase; cada red en su orden y, dentro, por nombre", ()=>{
+    const { grupos, sueltas } = agrupar();
+    assert.equal(sueltas.length, 0);
+    assert.deepEqual(grupos.map(g=>[g.clave, g.enlaces.length]).sort(), [["1-2|cable", 4], ["1-2|fibra", 1], ["1-3|radio", 2]]);
+    const cable = grupos.find(g=>g.clave === "1-2|cable");
+    assert.deepEqual(cable.redes.map(r=>[r.red, r.enlaces.map(d=>d.clienteId)]), [[2, [12, 11]], [3, [13]], [null, [14]]], "CCTV (Cámara A antes que B), Oficina y al final sin red");
+    assert.deepEqual(cable.enlaces.map(d=>d.clienteId), [12, 11, 13, 14], "el primero es el que elige el clic");
+    assert.deepEqual([cable.desdeId, cable.hastaId, cable.desde.lng, cable.hasta.lng], [1, 2, 0, 0.001], "va de la ubicación de id menor a la otra");
+    assert.equal(cable.atenuada, false);
+    const radio = grupos.find(g=>g.clave === "1-3|radio");
+    assert.equal(radio.estilo, "backbone");
+    assert.deepEqual(radio.redes.map(r=>r.red), [2, 1], "CCTV antes que AQ1, por el orden de las redes");
+  });
+  prueba("v14: un backbone manda sobre un P2MP en el mismo tramo", ()=>{
+    const plan = [
+      { tipo:"principal", estilo:"p2mp", clienteId:1, servidorId:9, desdeId:7, hastaId:8, desde:{ lat:0, lng:0 }, hasta:{ lat:1, lng:1 } },
+      { tipo:"principal", estilo:"backbone", clienteId:2, servidorId:9, desdeId:7, hastaId:8, desde:{ lat:0, lng:0 }, hasta:{ lat:1, lng:1 } },
+    ];
+    const { grupos } = LA.agruparLineas(plan);
+    assert.equal(grupos.length, 1); assert.equal(grupos[0].estilo, "backbone");
+  });
+  prueba("v14: el camino resaltado, la simulación y los respaldos quedan sueltos (enlace por enlace)", ()=>{
+    const sel = agrupar({ seleccionId:30 });
+    assert.deepEqual(sel.sueltas.map(d=>[d.clienteId, d.estilo]).sort(), [[15, "cadena"], [30, "cadena"]].sort(), "los tramos del camino de PTP L9 a");
+    const radio = sel.grupos.find(g=>g.clave === "1-3|radio");
+    assert.deepEqual(radio.enlaces.map(d=>d.clienteId), [31], "en el grupo queda solo el otro");
+    assert.equal(radio.atenuada, true, "lo que no es del camino, atenuado");
+    const sim = agrupar({ sim:J.simularFallas(rd, [1]) });
+    assert.ok(sim.sueltas.length > 0 && sim.sueltas.every(d=>!LA.ESTILOS_AGRUPABLES.has(d.estilo)), "lo cortado o sin conectividad va suelto");
+    assert.equal(sim.grupos.length, 0, "con el router caído no queda ninguna línea normal");
+    const conRespaldo = LA.agruparLineas([{ tipo:"respaldo", estilo:"respaldo", clienteId:1, servidorId:2, desdeId:1, hastaId:2 }]);
+    assert.equal(conRespaldo.sueltas.length, 1);
+  });
+  prueba("v14: un grupo está atenuado solo si todos sus enlaces lo están; cada red, igual", ()=>{
+    const { grupos } = agrupar({ seleccionId:1 }); // el router: sus clientes directos no se atenúan
+    const cable = grupos.find(g=>g.clave === "1-2|cable");
+    assert.equal(cable.atenuada, false);
+    assert.ok(cable.redes.every(r=>r.atenuada === false));
+  });
+  prueba("v14: ancho de las franjas: un poco más delgadas que la línea; el haz no pasa de 3 líneas", ()=>{
+    assert.equal(LA.anchoFranja(5, 1), 5, "una sola: el ancho de siempre");
+    assert.equal(LA.anchoFranja(5, 2), 3);
+    cerca(LA.anchoFranja(3, 3), 1.8, 1e-9);
+    assert.equal(LA.anchoFranja(5, 10), 1.5, "con muchas redes, se afinan");
+    assert.equal(LA.anchoFranja(1, 10), LA.FRANJAS.minimo, "nunca menos que el mínimo");
+  });
+  prueba("v14: desplazamientos centrados en el eje, con y sin separación", ()=>{
+    assert.deepEqual(LA.desplazamientos([5]), [0]);
+    assert.deepEqual(LA.desplazamientos([3, 3]), [-1.5, 1.5]);
+    assert.deepEqual(LA.desplazamientos([3, 3, 3]), [-3, 0, 3]);
+    assert.deepEqual(LA.desplazamientos([5, 3], 2), [-2.5, 3.5]);
+    assert.deepEqual(LA.desplazamientos([]), []);
+  });
+  prueba("v14: correr un tramo hacia su costado (en píxeles de pantalla)", ()=>{
+    assert.deepEqual(LA.desplazarPuntos([{ x:0, y:0 }, { x:10, y:0 }], 2), [{ x:0, y:2 }, { x:10, y:2 }]);
+    assert.deepEqual(LA.desplazarPuntos([{ x:0, y:0 }, { x:0, y:10 }], 2), [{ x:-2, y:0 }, { x:-2, y:10 }]);
+    const diag = LA.desplazarPuntos([{ x:0, y:0 }, { x:3, y:4 }], 5);
+    cerca(diag[0].x, -4, 1e-9); cerca(diag[0].y, 3, 1e-9); cerca(diag[1].x, -1, 1e-9); cerca(diag[1].y, 7, 1e-9);
+    assert.deepEqual(LA.desplazarPuntos([{ x:1, y:2 }, { x:5, y:2 }], 0), [{ x:1, y:2 }, { x:5, y:2 }], "sin corrimiento, igual");
+    assert.deepEqual(LA.desplazarPuntos([{ x:1, y:1 }, { x:1, y:1 }], 3), [{ x:1, y:1 }, { x:1, y:1 }], "un tramo de largo 0 no se mueve");
+  });
+  prueba("v14: trazos sin colorear: uno por grupo; dos clases en el mismo par, lado a lado", ()=>{
+    const t = LA.planDeTrazos(agrupar().grupos, { colorPorRed:false, anchoDe });
+    assert.equal(t.length, 3);
+    const cable = t.find(x=>x.grupo.clave === "1-2|cable"), fibra = t.find(x=>x.grupo.clave === "1-2|fibra"), radio = t.find(x=>x.grupo.clave === "1-3|radio");
+    assert.deepEqual([cable.desplazamiento, fibra.desplazamiento], [-2.75, 2.5], "3 + 2 + 3,5 px, centrados");
+    assert.equal(radio.desplazamiento, 0, "solo en su par: en el eje");
+    assert.ok(t.every(x=>!x.franja && x.red === undefined && x.halo));
+    assert.equal(cable.enlaces.length, 4);
+  });
+  prueba("v14: trazos coloreando por red: una franja por red, lado a lado; un grupo de una sola red, entero y con su red", ()=>{
+    const t = LA.planDeTrazos(agrupar().grupos, { colorPorRed:true, anchoDe });
+    const cable = t.filter(x=>x.grupo.clave === "1-2|cable");
+    assert.deepEqual(cable.map(x=>x.red), [2, 3, null]);
+    assert.ok(cable.every(x=>x.franja));
+    cerca(cable[0].ancho, 1.8, 1e-9);
+    assert.deepEqual(cable.map(x=>x.desplazamiento), [-4.55, -2.75, -0.95], "haz de 5,4 px al lado de la fibra");
+    assert.deepEqual(cable.map(x=>x.halo), [true, false, false], "un halo por haz");
+    assert.deepEqual(cable.map(x=>x.enlaces.map(d=>d.clienteId)), [[12, 11], [13], [14]]);
+    const fibra = t.find(x=>x.grupo.clave === "1-2|fibra");
+    assert.deepEqual([fibra.franja, fibra.red, fibra.desplazamiento, fibra.ancho], [false, 1, 3.7, 3.5]);
+    const radio = t.filter(x=>x.grupo.clave === "1-3|radio");
+    assert.deepEqual(radio.map(x=>[x.red, x.desplazamiento, x.ancho]), [[2, -1.5, 3], [1, 1.5, 3]]);
+  });
+  prueba("v14: al apagar una red sale su franja (sus enlaces ya no vienen en el plan)", ()=>{
+    const oculta = new Set([13, 14]); // Switch Oficina (Red Oficina) y el equipo sin red
+    const g = agrupar({ visibleEquipo:id=>!oculta.has(id) }).grupos;
+    const cable = LA.planDeTrazos(g, { colorPorRed:true, anchoDe }).filter(x=>x.grupo.clave === "1-2|cable");
+    assert.deepEqual(cable.map(x=>x.red), [2], "quedan los de CCTV: una sola red, sin franjas");
+    assert.equal(cable[0].franja, false);
+  });
+  prueba("v14: tooltip de un tramo con varios enlaces: cuántos, entre qué ubicaciones, por red, la lista y qué elige el clic", ()=>{
+    const g = agrupar().grupos;
+    const opciones = { nombreEquipo:nombre, nombreUbicacion:id=>U.find(u=>u.id === id).nombre, nombreRed:id=>NOMBRE_RED[id], hayRedes:true };
+    const [entero] = LA.planDeTrazos(g, { colorPorRed:false, anchoDe }).filter(x=>x.grupo.clave === "1-2|cable");
+    const txt = LA.textoTrazo(entero, opciones);
+    assert.match(txt[0], /^4 enlaces por cable entre Torre principal y Data Center · \d+ m$/);
+    assert.equal(txt[1], "2 de CCTV, 1 de Red Oficina, 1 sin red");
+    assert.deepEqual(txt.slice(2), ["Cámara A ← Router DC", "Cámara B ← Router DC", "Switch Oficina ← Router DC", "Equipo suelto ← Router DC", "Clic: elige «Cámara A»"]);
+    const franja = LA.planDeTrazos(g, { colorPorRed:true, anchoDe }).find(x=>x.grupo.clave === "1-2|cable" && x.red === 3);
+    const tf = LA.textoTrazo(franja, opciones);
+    assert.equal(tf[0], "Red Oficina: 1 de 4 enlaces por cable");
+    assert.match(tf[1], /^entre Torre principal y Data Center/);
+    assert.equal(tf[2], "En total: 2 de CCTV, 1 de Red Oficina, 1 sin red");
+    assert.deepEqual(tf.slice(3), ["Switch Oficina ← Router DC", "Clic: elige «Switch Oficina»"]);
+    const sinRed = LA.planDeTrazos(g, { colorPorRed:true, anchoDe }).find(x=>x.grupo.clave === "1-2|cable" && x.red === null);
+    assert.equal(LA.textoTrazo(sinRed, opciones)[0], "Sin red: 1 de 4 enlaces por cable");
+    const sinRedes = LA.textoTrazo(entero, { ...opciones, hayRedes:false });
+    assert.ok(!sinRedes.some(x=>/de CCTV/.test(x)), "sin la 007, sin el detalle por red");
+  });
+  prueba("v14: la lista del tooltip se corta en 6 («y N más»); clases en singular y plural", ()=>{
+    const muchos = Array.from({ length: 8 }, (_, i)=>({ tipo:"principal", estilo:"cable", clienteId:100 + i, servidorId:1, desdeId:1, hastaId:2, desde:{ lat:0, lng:0 }, hasta:{ lat:0, lng:1 } }));
+    const { grupos } = LA.agruparLineas(muchos, { nombreDe:id=>`E${id}` });
+    const [t] = LA.planDeTrazos(grupos, { anchoDe });
+    const txt = LA.textoTrazo(t, { nombreEquipo:id=>`E${id}` });
+    assert.equal(txt.filter(x=>/←/.test(x)).length, 6);
+    assert.ok(txt.includes("y 2 más"));
+    assert.equal(LA.textoCantidadEnlaces("radio", 1), "1 enlace inalámbrico");
+    assert.equal(LA.textoCantidadEnlaces("radio", 2), "2 enlaces inalámbricos");
+    assert.equal(LA.textoCantidadEnlaces("fibra", 3), "3 enlaces por fibra óptica");
+  });
+}
+
+// ---------------------------------------------------------------- v15 (3.9): cobertura de los AP
+prueba("v15: la cobertura guardada de un equipo (círculo, sector, 360° y valores raros)", ()=>{
+  assert.equal(CO.normalizarCobertura({}), null, "sin radio, sin cobertura");
+  assert.equal(CO.normalizarCobertura({ radio_cobertura_m: 0 }), null);
+  assert.equal(CO.normalizarCobertura(null), null);
+  assert.deepEqual(CO.normalizarCobertura({ radio_cobertura_m: 300 }), { radio: 300, azimut: null, apertura: null, sector: false }, "círculo");
+  assert.deepEqual(CO.normalizarCobertura({ radio_cobertura_m: "300", azimut_cobertura: "45", apertura_cobertura: "120" }), { radio: 300, azimut: 45, apertura: 120, sector: true }, "sector (llega como texto de la base)");
+  assert.equal(CO.normalizarCobertura({ radio_cobertura_m: 300, azimut_cobertura: 45, apertura_cobertura: 360 }).sector, false, "360° es un círculo");
+  assert.equal(CO.normalizarCobertura({ radio_cobertura_m: 300, apertura_cobertura: 90 }).sector, false, "sin dirección no hay sector");
+  assert.equal(CO.normalizarCobertura({ radio_cobertura_m: 300, azimut_cobertura: 400, apertura_cobertura: 60 }).azimut, 40, "la dirección se lleva a 0–360");
+  assert.equal(CO.llevaCobertura({ tipo_equipo: "ap" }), true, "un AP lleva cobertura");
+  assert.equal(CO.llevaCobertura({ tipo_equipo: "ptp" }), false);
+  assert.equal(CO.llevaCobertura({ tipo_equipo: "ptp", radio_cobertura_m: 50 }), true, "o cualquier equipo que ya tenga una");
+});
+prueba("v15: validar la cobertura del formulario (coma decimal, rangos, sector sin dirección, sin radio)", ()=>{
+  assert.deepEqual(CO.validarCobertura({ radio: "", azimut: "", apertura: "" }), { ok: true, errores: {}, valores: { radio_cobertura_m: null, azimut_cobertura: null, apertura_cobertura: null } }, "todo vacío: sin cobertura");
+  assert.deepEqual(CO.validarCobertura({ radio: "300,5" }).valores, { radio_cobertura_m: 300.5, azimut_cobertura: null, apertura_cobertura: null }, "coma decimal");
+  assert.deepEqual(CO.validarCobertura({ radio: "300", azimut: "360", apertura: "120" }).valores, { radio_cobertura_m: 300, azimut_cobertura: 0, apertura_cobertura: 120 }, "360° de dirección = 0 (norte)");
+  assert.deepEqual(CO.validarCobertura({ radio: "300", apertura: "360" }).valores, { radio_cobertura_m: 300, azimut_cobertura: null, apertura_cobertura: 360 }, "360° de apertura sin dirección: un círculo");
+  for(const [entrada, campo] of [[{ radio: "0" }, "radio_cobertura_m"], [{ radio: "-3" }, "radio_cobertura_m"], [{ radio: "20001" }, "radio_cobertura_m"], [{ radio: "abc" }, "radio_cobertura_m"],
+    [{ radio: "300", azimut: "361" }, "azimut_cobertura"], [{ radio: "300", azimut: "-1" }, "azimut_cobertura"], [{ radio: "300", apertura: "0" }, "apertura_cobertura"], [{ radio: "300", apertura: "400" }, "apertura_cobertura"],
+    [{ radio: "300", apertura: "90" }, "azimut_cobertura"], [{ azimut: "45" }, "radio_cobertura_m"], [{ apertura: "90", azimut: "10" }, "radio_cobertura_m"]]){
+    const v = CO.validarCobertura(entrada);
+    assert.ok(!v.ok && v.errores[campo], `${JSON.stringify(entrada)} → error en ${campo}: ${JSON.stringify(v.errores)}`);
+  }
+  assert.equal(CO.validarCobertura({ radio: "20000" }).ok, true, "el tope entra");
+});
+prueba("v15: el punto a tantos metros hacia un azimut, y la cuña del sector", ()=>{
+  const c = { lat: -2.2, lng: -79.9 };
+  const n = CO.puntoDestino(c, 0, 1000);
+  cerca(geo.distanciaKm(c, n) * 1000, 1000, 0.5, "1 km al norte"); cerca(geo.azimutGrados(c, n), 0, 0.01);
+  const e = CO.puntoDestino(c, 90, 500);
+  cerca(geo.distanciaKm(c, e) * 1000, 500, 0.5, "500 m al este"); cerca(geo.azimutGrados(c, e), 90, 0.01);
+  const p = CO.puntosSector(c, { radio: 300, azimut: 45, apertura: 120 });
+  assert.deepEqual(p[0], c); assert.deepEqual(p[p.length - 1], c);
+  assert.equal(p.length, 24 + 3, "un paso cada 5° (120/5 = 24 tramos), más el centro dos veces");
+  cerca(geo.azimutGrados(c, p[1]), 345, 0.01, "empieza en 45 − 60"); cerca(geo.azimutGrados(c, p[p.length - 2]), 105, 0.01, "termina en 45 + 60");
+  assert.ok(p.slice(1, -1).every(q=>Math.abs(geo.distanciaKm(c, q) * 1000 - 300) < 0.5), "todo el arco a 300 m");
+  assert.equal(CO.puntosSector(c, { radio: 100, azimut: 0, apertura: 4 }).length, 2 + 1 + 2, "uno muy angosto tiene al menos dos tramos");
+});
+prueba("v15: textos de la cobertura", ()=>{
+  assert.equal(CO.textoRadio(300), "300 m"); assert.equal(CO.textoRadio(1250), "1,25 km"); assert.equal(CO.textoRadio(0), "—");
+  assert.equal(CO.textoCobertura({ radio: 300, azimut: null, apertura: null, sector: false }), "300 m a la redonda");
+  assert.equal(CO.textoCobertura({ radio: 1200, azimut: 45, apertura: 120, sector: true }), "1,2 km · sector de 120° hacia el NE (45°)");
+  assert.equal(CO.textoCobertura(null), "");
+});
+
+// ---------------------------------------------------------------- v15 (3.10): tooltip de las ubicaciones
+prueba("v15: el resumen de una ubicación cuenta todo, por tipo y por red, y avisa lo oculto", ()=>{
+  const tipos = [{ valor:"router", etiqueta:"Router", orden:10 }, { valor:"ptp", etiqueta:"PtP-E", orden:30 }, { valor:"camara", etiqueta:"Cámara", orden:60 }];
+  const redes = [{ id:2, nombre:"CCTV", color:"#fbff00" }, { id:3, nombre:"Red Oficina", color:"#007eb2" }];
+  const equipos = [
+    { id:1, tipo_equipo:"camara", red_id:2 }, { id:2, tipo_equipo:"ptp", red_id:2 }, { id:3, tipo_equipo:"ptp", red_id:3 },
+    { id:4, tipo_equipo:null, red_id:null }, { id:5, tipo_equipo:"inyector_poe", red_id:9 }, { id:6, tipo_equipo:"camara", red_id:2 },
+  ];
+  const r = TU.resumenUbicacion({ equipos, tipos, redes, visibleEquipo:id=>id !== 3 && id !== 6, activos: 2 });
+  assert.equal(r.total, 6);
+  assert.deepEqual(r.tipos.map(t=>[t.etiqueta, t.n]), [["PtP-E", 2], ["Cámara", 2], ["inyector_poe", 1]], "en el orden de los tipos; uno que no está en el catálogo, al final");
+  assert.equal(r.sinTipo, 1);
+  assert.deepEqual(r.redes.map(x=>[x.nombre, x.n]), [["CCTV", 3], ["Red Oficina", 1], ["Red 9", 1]], "en el orden de las redes");
+  assert.equal(r.sinRed, 1);
+  assert.equal(r.ocultos, 2, "los que ocultan los filtros también se cuentan, y se avisa cuántos son");
+  assert.equal(r.activos, 2);
+  const conHerencia = TU.resumenUbicacion({ equipos:[{ id:1, red_id:null, red_efectiva:2 }], redes, redDe:e=>e.red_efectiva ?? null });
+  assert.deepEqual(conHerencia.redes.map(x=>x.nombre), ["CCTV"], "con la red efectiva (011)");
+  const vacia = TU.resumenUbicacion({});
+  assert.deepEqual([vacia.total, vacia.tipos.length, vacia.redes.length, vacia.ocultos, vacia.activos], [0, 0, 0, 0, 0]);
+});
+prueba("v15: modos del tooltip y sus textos", ()=>{
+  assert.deepEqual(TU.MODOS_TOOLTIP.map(m=>m.id), ["nombre", "tipos", "redes", "ambos"]);
+  assert.equal(TU.MODO_TOOLTIP_POR_DEFECTO, "tipos", "de fábrica, los tipos de equipo (lo decidió la persona)");
+  assert.equal(TU.normalizarModoTooltip("redes"), "redes"); assert.equal(TU.normalizarModoTooltip("xyz"), "tipos"); assert.equal(TU.normalizarModoTooltip(null), "tipos");
+  assert.deepEqual(["nombre", "tipos", "redes", "ambos"].map(m=>[TU.conTipos(m), TU.conRedes(m)]), [[false, false], [true, false], [false, true], [true, true]]);
+  assert.equal(TU.textoOcultos(1), "1 oculto por los filtros"); assert.equal(TU.textoOcultos(3), "3 ocultos por los filtros");
+  assert.equal(TU.textoActivos(1), "1 activo que no es equipo de red"); assert.equal(TU.textoActivos(2), "2 activos que no son equipos de red");
+});
+prueba("v15: ícono de un tipo de equipo: el propio, el de fábrica, el del tipo de activo o el genérico", ()=>{
+  const tiposEquipo = [{ valor:"router", etiqueta:"Router" }, { valor:"inyector_poe", etiqueta:"Inyector POE" }, { valor:"raro", etiqueta:"Raro" }];
+  const tiposActivo = [{ nombre:"Inyector POE", icono_svg:'<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><rect width="8" height="8"/></svg>' }];
+  const propio = { valor:"router", icono_svg:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/></svg>' };
+  const o = { tiposEquipo, tiposActivo };
+  assert.equal(IE.origenIconoTipoEquipo(propio, o), "propio");
+  assert.equal(IE.origenIconoTipoEquipo({ valor:"router" }, o), "fabrica");
+  assert.equal(IE.origenIconoTipoEquipo({ valor:"inyector_poe" }, o), "activo", "Inyector POE: el del tipo de activo que empareja");
+  assert.equal(IE.origenIconoTipoEquipo({ valor:"raro" }, o), "generico");
+  assert.match(IE.iconoTipoEquipo(propio, o), /^<svg aria-hidden="true" width="16" height="16"[^>]*fill="currentColor"[^>]*><circle/, "el propio, a 16 px y del color del texto");
+  assert.equal(IE.iconoTipoEquipo({ valor:"router" }, o), IE.GLIFOS_TIPO_EQUIPO.router);
+  assert.match(IE.iconoTipoEquipo({ valor:"inyector_poe" }, o), /<rect width="8" height="8"\/>/);
+  assert.match(IE.iconoTipoEquipo({ valor:"raro" }, o), /viewBox="0 0 24 24"/, "el genérico (radio)");
+  assert.match(IE.iconoTipoEquipo(null, o), /viewBox="0 0 24 24"/, "«Sin tipo»: el genérico");
+  assert.match(IE.iconoTipoEquipo({ valor:"ap" }, { ...o, px: 24 }), /width="24" height="24"/, "a otro tamaño");
+  assert.deepEqual(Object.keys(IE.GLIFOS_TIPO_EQUIPO), ["router", "switch", "ptp", "ap", "estacion", "camara", "nvr", "otro"], "los 8 de la semilla de la 007");
+  assert.ok(Object.values(IE.GLIFOS_TIPO_EQUIPO).every(g=>/^<svg viewBox="0 0 24 24" width="16" height="16"/.test(g) && !/on[a-z]+=/i.test(g)));
+});
+prueba("v15: errores de la 013 traducidos (sin la migración y por sus reglas)", ()=>{
+  assert.equal(L.traducirErrorMapa({ code:"PGRST204", message:"Could not find the 'radio_cobertura_m' column of 'equipos_radioenlace' in the schema cache" }), L.TEXTO_FALTA_013);
+  assert.equal(L.traducirErrorMapa({ code:"PGRST204", message:"Could not find the 'icono_svg' column of 'tipos_equipo_red' in the schema cache" }), L.TEXTO_FALTA_013, "no la confunde con la 007");
+  assert.equal(L.traducirErrorMapa({ code:"42703", message:"column tipos_equipo_red.icono_svg does not exist" }), L.TEXTO_FALTA_013);
+  assert.match(L.traducirErrorMapa({ code:"23514", message:'new row for relation "equipos_radioenlace" violates check constraint "equipos_radioenlace_sector_con_direccion"' }), /hacia dónde apunta/);
+  assert.match(L.traducirErrorMapa({ code:"23514", message:'violates check constraint "equipos_radioenlace_radio_cobertura_valido"' }), /20 000/);
+  assert.match(L.traducirErrorMapa({ code:"23514", message:'violates check constraint "tipos_equipo_red_icono_valido"' }), /SVG sin scripts/);
+  assert.equal(L.traducirErrorMapa({ code:"PGRST204", message:"Could not find the 'tipo_equipo' column of 'equipos_radioenlace' in the schema cache" }), L.TEXTO_FALTA_007, "la 007 sigue igual");
 });
 
 prueba("errores de la 008/009 traducidos", ()=>{

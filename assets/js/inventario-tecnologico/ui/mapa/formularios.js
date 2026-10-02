@@ -3,7 +3,8 @@
 // (abrirModal/cerrarModal) y, al guardar, avisan con mostrarToast y devuelven
 // el control con alGuardar.
 import { cargarActivos, hayCamposConfigurables } from "../../nucleo/datos.js";
-import { cargarAtajos, cargarEquiposRadioenlace, cargarPiscinas, cargarRedes, cargarRespaldos, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, datosNombres, estadoMapa, hayHerenciaRed, hayMedio, hayNombresConRed, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
+import { cargarAtajos, cargarEquiposRadioenlace, cargarPiscinas, cargarRedes, cargarRespaldos, cargarTiposEquipo, cargarTiposUbicacion, cargarUbicaciones, datosNombres, estadoMapa, hayCobertura, hayHerenciaRed, hayMedio, hayNombresConRed, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa } from "../../nucleo/datos-mapa.js";
+import { TIPO_CON_COBERTURA, normalizarCobertura, textoCobertura, validarCobertura } from "../../nucleo/cobertura.js";
 import { GENEROS, nombreParaGuardar, nombresAutomaticos } from "../../nucleo/mapa-nombres.js";
 import { azimutGrados, distanciaKm, fmtAzimut, fmtCoordenadas, fmtDistancia, parsearCoordenadas } from "../../nucleo/geo.js";
 import { esc, fmtFecha, fmtTag } from "../../nucleo/helpers.js";
@@ -15,6 +16,9 @@ import { cuadradoAlrededor, sectorDeNombre } from "../../nucleo/piscinas.js";
 import { medioSugerido, motivoMedioSugerido, opcionesServidor } from "../../nucleo/selector-servidor.js";
 import { montarSelectorServidor } from "./selector-servidor.js";
 import { htmlPin } from "./leaflet.js";
+import { TEXTO_ORIGEN_ICONO, iconoTipoEquipo, origenIconoTipoEquipo } from "./iconos-equipo.js";
+import { abrirSubmodal, cerrarSubmodal } from "../submodal.js";
+import { cargarTiposActivo } from "../../nucleo/datos.js";
 import { validarSvg } from "../../nucleo/svg-seguro.js";
 import { ErrorValidacion, asignarActivosAUbicacion, asignarEnLote, crearAtajo, crearPiscina, editarPiscina, eliminarPiscina, crearEquipo, crearRed, crearRespaldo, crearTipoEquipo, crearTipoUbicacion, crearUbicacion, editarAtajo, editarEquipo, editarRed, editarRespaldo, editarTipoEquipo, editarTipoUbicacion, editarUbicacion, eliminarAtajo, eliminarRed } from "../../negocio/operaciones-mapa.js";
 import { urlFoto } from "../../negocio/operaciones.js";
@@ -389,6 +393,24 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
           </select>
           <div class="${P}hint" id="${P}equipo-medio-ayuda"></div>
         </div>` : "";
+  // 013 (v15, 3.9): la cobertura de los AP (radio, dirección y apertura).
+  // Se ve para los AP y para cualquier equipo que ya tenga una guardada.
+  const conCobertura = hayCobertura();
+  const cobActual = actual ? normalizarCobertura(actual) : null;
+  const numeroCampo = v=>v === null || v === undefined || v === "" ? "" : String(v).replace(".", ",");
+  const campoCobertura = conCobertura ? `
+        <fieldset class="${P}span-2 ${P}equipo-cobertura" id="${P}equipo-cobertura">
+          <legend>Cobertura <span class="${P}mapa-muted">(de los AP; opcional)</span></legend>
+          <div class="${P}equipo-cobertura-fila">
+            <label>Radio (m)<input type="text" inputmode="decimal" id="${P}equipo-cobertura-radio" value="${esc(numeroCampo(actual && actual.radio_cobertura_m))}" placeholder="Ej.: 300" autocomplete="off"></label>
+            <label>Dirección (°)<input type="text" inputmode="decimal" id="${P}equipo-cobertura-azimut" value="${esc(numeroCampo(actual && actual.azimut_cobertura))}" placeholder="0 = norte, 90 = este" autocomplete="off"></label>
+            <label>Apertura (°)<input type="text" inputmode="decimal" id="${P}equipo-cobertura-apertura" value="${esc(numeroCampo(actual && actual.apertura_cobertura))}" placeholder="Vacío o 360 = círculo" autocomplete="off"></label>
+          </div>
+          <div class="${P}hint" id="${P}equipo-cobertura-ayuda" aria-live="polite"></div>
+          <div class="${P}field-error" data-error="radio_cobertura_m"></div>
+          <div class="${P}field-error" data-error="azimut_cobertura"></div>
+          <div class="${P}field-error" data-error="apertura_cobertura"></div>
+        </fieldset>` : "";
   const vistaNombre = conRed ? `
         <div class="${P}field ${P}span-2">
           <span class="${P}field-titulo">Nombre <span class="${P}mapa-muted">(automático)</span></span>
@@ -421,6 +443,7 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
           <input type="text" id="${P}equipo-modelo" maxlength="120" value="${esc(actual && actual.modelo || "")}" placeholder="Ej.: Cambium PTP 550">
         </div>
         ${vistaNombre}
+        ${campoCobertura}
         <div class="${P}field ${P}span-2">
           <label for="${P}equipo-activo-filtro">Activo del inventario <span class="${P}mapa-muted">(opcional)</span></label>
           <input type="search" id="${P}equipo-activo-filtro" placeholder="Filtrar por tag, tipo, marca, modelo…" autocomplete="off">
@@ -597,7 +620,23 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
       salidaNombre.textContent = n || "Elige el tipo de equipo para armar el nombre.";
       salidaNombre.classList.toggle(`${P}mapa-nombre-auto-vacio`, !n);
     }
-    if(selTipo) selTipo.addEventListener("change", ()=>{ aplicarSugerenciaMedio(); pintarCalculoServ(); pintarNombre(); });
+    // Cobertura (013): a la vista para un AP o si ya hay algo escrito o guardado.
+    const bloqueCobertura = $(`#${P}equipo-cobertura`);
+    const camposCobertura = bloqueCobertura ? ["radio", "azimut", "apertura"].map(k=>$(`#${P}equipo-cobertura-${k}`)) : [];
+    const ayudaCobertura = $(`#${P}equipo-cobertura-ayuda`);
+    const leerCobertura = ()=>{ const [r, a, ap] = camposCobertura; return { radio: r.value, azimut: a.value, apertura: ap.value }; };
+    function pintarCoberturaForm(){
+      if(!bloqueCobertura) return;
+      const algo = camposCobertura.some(x=>x.value.trim());
+      bloqueCobertura.hidden = !(tipoCliente() === TIPO_CON_COBERTURA || algo || cobActual);
+      const v = validarCobertura(leerCobertura());
+      ayudaCobertura.textContent = !v.ok ? "Revisa los valores marcados."
+        : v.valores.radio_cobertura_m === null ? "Sin cobertura. Con el radio se dibuja un círculo alrededor del equipo; con dirección y apertura, un sector."
+        : `Se dibuja: ${textoCobertura(normalizarCobertura(v.valores))}.`;
+    }
+    camposCobertura.forEach(x=>x.addEventListener("input", pintarCoberturaForm));
+    pintarCoberturaForm();
+    if(selTipo) selTipo.addEventListener("change", ()=>{ aplicarSugerenciaMedio(); pintarCalculoServ(); pintarNombre(); pintarCoberturaForm(); });
     if(inputRef) inputRef.addEventListener("input", pintarNombre);
     if(selRedEquipo) selRedEquipo.addEventListener("change", ()=>{
       if(herencia){ redPropia = selRedEquipo.value ? Number(selRedEquipo.value) : null; pintarRed(); }
@@ -663,6 +702,11 @@ export function abrirFormEquipo({ id = null, ubicacionId = null } = {}, { alGuar
         campos.red_id = selRedEquipo.value ? Number(selRedEquipo.value) : null;
       }
       if(conMedio) campos.medio = campos.servidor_id === null ? null : (selMedio.value || null);
+      // 013: la cobertura viaja solo si su bloque está a la vista (un equipo que no la lleva no la toca).
+      if(conCobertura && bloqueCobertura && !bloqueCobertura.hidden){
+        const cob = leerCobertura();
+        campos.radio_cobertura_m = cob.radio; campos.azimut_cobertura = cob.azimut; campos.apertura_cobertura = cob.apertura;
+      }
       // Si el servidor elegido era uno de sus respaldos, la base lo quita de los respaldos.
       const promovido = id && campos.servidor_id !== null && campos.servidor_id !== servidorActual
         && cargarRespaldos().some(r=>r.equipo_id === id && r.servidor_alternativo_id === campos.servidor_id);
@@ -1098,7 +1142,15 @@ export function abrirRedesYTipos({ alCambiar } = {}){
       <button type="button" class="${P}btn ${P}btn-sm" data-cat="guardar-red">Guardar</button>
       <button type="button" class="${P}btn ${P}btn-sm ${P}btn-ghost" data-cat="eliminar-red" title="Eliminar la red (sus equipos quedan sin red)">Eliminar</button>
     </li>`;
+  // 013 (v15, 3.10): el ícono de cada tipo, que se ve en el tooltip de las ubicaciones.
+  const conIconos = hayCobertura();
+  const opcionesIcono = { tiposEquipo: cargarTiposEquipo(), tiposActivo: cargarTiposActivo() };
+  const botonIcono = x=>{
+    const origen = TEXTO_ORIGEN_ICONO[origenIconoTipoEquipo(x, opcionesIcono)];
+    return `<button type="button" class="${P}tipo-icono-btn" data-cat="icono-tipo" title="${esc(`${origen}. Clic para cambiarlo`)}" aria-label="${esc(`Ícono de «${x.etiqueta}» (${origen.toLowerCase()}): cambiar`)}">${iconoTipoEquipo(x, opcionesIcono)}</button>`;
+  };
   const filaTipo = x=>`<li class="${P}catalogo-fila" data-tipo-valor="${esc(x.valor)}">
+      ${conIconos ? botonIcono(x) : ""}
       <input type="text" value="${esc(x.etiqueta)}" maxlength="40" aria-label="Nombre del tipo" data-campo="etiqueta">
       <select data-campo="genero" aria-label="Género del tipo">${GENEROS.map(g=>`<option value="${g.id}"${x.genero === g.id ? " selected" : ""}>${g.id === "f" ? "la" : "el"}</option>`).join("")}</select>
       <label class="${P}catalogo-check"><input type="checkbox" data-campo="activo"${x.activo !== false ? " checked" : ""}> Activo</label>
@@ -1120,7 +1172,7 @@ export function abrirRedesYTipos({ alCambiar } = {}){
       </section>
       <section class="${P}catalogo" aria-label="Tipos de equipo">
         <div class="${P}section-title">Tipos de equipo</div>
-        <div class="${P}hint">El nombre del tipo arma el nombre automático de cada equipo («Estación en Torre K enlazada a Punto a Punto en Torre L»); el género hace concordar «enlazado/enlazada».</div>
+        <div class="${P}hint">El nombre del tipo arma el nombre automático de cada equipo («Estación en Torre K enlazada a Punto a Punto en Torre L»); el género hace concordar «enlazado/enlazada».${conIconos ? " El ícono se ve al pasar el mouse por una ubicación del mapa." : ""}</div>
         <ul class="${P}catalogo-lista">${cargarTiposEquipo().map(filaTipo).join("")}</ul>
         <div class="${P}catalogo-fila ${P}catalogo-nueva">
           <input type="text" id="${P}tipo-nuevo-etiqueta" maxlength="40" placeholder="Tipo nuevo (ej.: Cámara PTZ)">
@@ -1151,6 +1203,7 @@ export function abrirRedesYTipos({ alCambiar } = {}){
       if(!b) return;
       const fila = b.closest(`.${P}catalogo-fila`);
       if(b.dataset.cat === "lote") return abrirAsignacionEnLote({ alGuardar: alCambiar });
+      if(b.dataset.cat === "icono-tipo") return abrirIconoTipoEquipo(fila.dataset.tipoValor, b, { alGuardar: ()=>hecho("Ícono guardado: ya se ve en el mapa.") });
       try{
         switch(b.dataset.cat){
           case "crear-red": {
@@ -1179,6 +1232,58 @@ export function abrirRedesYTipos({ alCambiar } = {}){
       }
     });
   });
+}
+
+// 013 (v15, 3.10): cambiar el ícono de un tipo de equipo de red. Se pega un
+// SVG (con viewBox, como los de las ubicaciones); vacío vuelve al de fábrica
+// (o al del tipo de activo que empareja, o al genérico).
+function abrirIconoTipoEquipo(valor, origen, { alGuardar } = {}){
+  const tipo = cargarTiposEquipo().find(t=>t.valor === valor);
+  if(!tipo) return;
+  const opciones = { tiposEquipo: cargarTiposEquipo(), tiposActivo: cargarTiposActivo() };
+  const sinPropio = { ...tipo, icono_svg: null };
+  const html = `<div class="${P}modal" role="dialog" aria-modal="true" aria-labelledby="${P}icono-tipo-titulo">
+    <div class="${P}modal-header"><h3 id="${P}icono-tipo-titulo">Ícono de «${esc(tipo.etiqueta)}»</h3><button type="button" class="${P}modal-close" data-submodal-cerrar aria-label="Cerrar">✕</button></div>
+    <div class="${P}modal-body">
+      <div class="${P}field">
+        <label for="${P}icono-tipo-svg">SVG del ícono (opcional)</label>
+        <textarea id="${P}icono-tipo-svg" class="${P}mono" rows="5" placeholder="Pega acá el &lt;svg&gt;…&lt;/svg&gt; (con viewBox). Vacío: ${esc(TEXTO_ORIGEN_ICONO[origenIconoTipoEquipo(sinPropio, opciones)].toLowerCase())}.">${esc(tipo.icono_svg || "")}</textarea>
+        <div class="${P}tipo-icono-vista" id="${P}icono-tipo-vista" aria-live="polite"></div>
+        <div class="${P}hint" id="${P}icono-tipo-ayuda"></div>
+      </div>
+    </div>
+    <div class="${P}modal-footer">
+      <button type="button" class="${P}btn ${P}btn-ghost" id="${P}icono-tipo-fabrica"${tipo.icono_svg ? "" : " disabled"}>Volver al de fábrica</button>
+      <span class="${P}fb-spacer"></span>
+      <button type="button" class="${P}btn" data-submodal-cerrar>Cancelar</button>
+      <button type="button" class="${P}btn ${P}btn-primary" id="${P}icono-tipo-guardar">Guardar</button>
+    </div>
+  </div>`;
+  abrirSubmodal(html, { origen, alMontar: host=>{
+    const $ = sel=>host.querySelector(sel);
+    const area = $(`#${P}icono-tipo-svg`);
+    const pintar = ()=>{
+      const v = validarSvg(area.value, { exigirViewBox: true });
+      const muestra = v.ok ? iconoTipoEquipo(v.svg ? { ...tipo, icono_svg: v.svg } : sinPropio, opciones) : "";
+      $(`#${P}icono-tipo-vista`).innerHTML = v.ok ? `${muestra}${iconoTipoEquipo(v.svg ? { ...tipo, icono_svg: v.svg } : sinPropio, { ...opciones, px: 24 })}<span class="${P}mapa-muted">${esc(v.svg ? "Así se verá en el tooltip." : `${TEXTO_ORIGEN_ICONO[origenIconoTipoEquipo(sinPropio, opciones)]}.`)}</span>` : "";
+      $(`#${P}icono-tipo-vista`).classList.toggle(`${P}tipo-icono-vista-error`, !v.ok);
+      $(`#${P}icono-tipo-ayuda`).textContent = v.ok ? "Se dibuja del color del texto; si el SVG trae colores propios (fill), se respetan." : v.error;
+    };
+    area.addEventListener("input", pintar);
+    pintar();
+    const guardar = async (icono, boton)=>{
+      try{
+        await conBotonOcupado(boton, "Guardando…", ()=>editarTipoEquipo(valor, { icono_svg: icono }));
+        cerrarSubmodal({ devolverFoco: false });
+        if(alGuardar) alGuardar();
+      }catch(err){
+        $(`#${P}icono-tipo-ayuda`).textContent = err instanceof ErrorValidacion ? Object.values(err.errores)[0] : (err.message || String(err));
+      }
+    };
+    $(`#${P}icono-tipo-guardar`).addEventListener("click", e=>guardar(area.value, e.currentTarget));
+    $(`#${P}icono-tipo-fabrica`).addEventListener("click", e=>guardar("", e.currentTarget));
+    area.focus();
+  } });
 }
 
 // ===========================================================================

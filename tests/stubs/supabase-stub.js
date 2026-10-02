@@ -29,6 +29,10 @@
 // solo el admin, tipos_activo.campos_obligatorios, tipos_ubicacion.icono_svg y
 // renombrar_tipo_activo(). Sin la 012: la tabla no existe (PGRST205), esas
 // columnas tampoco (PGRST204) ni la función (PGRST202).
+// De la 013 (fixture.m013): tipos_equipo_red.icono_svg y la cobertura de
+// equipos_radioenlace (radio_cobertura_m, azimut_cobertura, apertura_cobertura)
+// con sus reglas (23514). Sin ella, pedir esas columnas da 42703 y escribirlas,
+// PGRST204.
 // Como en la base real, tipos_activo, propiedad_opciones, estado_opciones y
 // tipos_ubicacion no tienen "id": filtrar por una columna que no existe da
 // el error 42703.
@@ -50,6 +54,8 @@
   const hay010 = !!fixture.m010 || !!fixture.m011;
   const hay011 = !!fixture.m011;
   const hay012 = !!(fixture.tablas && "campos_activo" in fixture.tablas);
+  const hay013 = !!fixture.m013;
+  const COLUMNAS_013 = { equipos_radioenlace: ["radio_cobertura_m", "azimut_cobertura", "apertura_cobertura"], tipos_equipo_red: ["icono_svg"] };
   const COLUMNAS_REALES = {
     tipos_activo: ["nombre","icono_svg","color","campos_pertinentes","orden","creado_en","creado_por","activo", ...(hay012 ? ["campos_obligatorios"] : [])],
     propiedad_opciones: ["valor","etiqueta","orden","activo","creado_en","creado_por"],
@@ -240,6 +246,30 @@
     const c = COLUMNAS_007.find(k=>filas.some(f=>f && k in f));
     return c ? { code:"PGRST204", message:`Could not find the '${c}' column of 'equipos_radioenlace' in the schema cache` } : null;
   }
+  function columnas013SinMigracion(t, datos){
+    if(hay013 || !COLUMNAS_013[t]) return null;
+    const filas = Array.isArray(datos) ? datos : [datos];
+    const c = COLUMNAS_013[t].find(k=>filas.some(f=>f && k in f));
+    return c ? { code:"PGRST204", message:`Could not find the '${c}' column of '${t}' in the schema cache` } : null;
+  }
+  // Las reglas de la 013, como CHECK de la base.
+  function validar013(t, f){
+    if(!hay013) return;
+    const regla = nombre=>({ code:"23514", message:`new row for relation "${t}" violates check constraint "${nombre}"` });
+    if(t === "tipos_equipo_red" && !vacio(f.icono_svg)){
+      const v = String(f.icono_svg);
+      if(v.length > 20000 || !/^\s*<svg[\s>]/i.test(v) || /<\s*script|javascript\s*:|[\s\/"']on[a-z]+\s*=|<\s*foreignObject/i.test(v)) throw regla("tipos_equipo_red_icono_valido");
+    }
+    if(t !== "equipos_radioenlace") return;
+    const r = vacio(f.radio_cobertura_m) ? null : Number(f.radio_cobertura_m);
+    const a = vacio(f.azimut_cobertura) ? null : Number(f.azimut_cobertura);
+    const ap = vacio(f.apertura_cobertura) ? null : Number(f.apertura_cobertura);
+    if(r !== null && !(r > 0 && r <= 20000)) throw regla("equipos_radioenlace_radio_cobertura_valido");
+    if(a !== null && !(a >= 0 && a < 360)) throw regla("equipos_radioenlace_azimut_cobertura_valido");
+    if(ap !== null && !(ap > 0 && ap <= 360)) throw regla("equipos_radioenlace_apertura_cobertura_valida");
+    if(r === null && (a !== null || ap !== null)) throw regla("equipos_radioenlace_sector_con_radio");
+    if(ap !== null && ap !== 360 && a === null) throw regla("equipos_radioenlace_sector_con_direccion");
+  }
   function columna008SinMigracion(t, datos){
     if(hay008 || t !== "equipos_radioenlace") return null;
     const filas = Array.isArray(datos) ? datos : [datos];
@@ -345,6 +375,12 @@
       const sin012 = (this.op === "insert" || this.op === "update") ? columnas012SinMigracion(this.t, this.datos) : null;
       if(sin012) return { data: null, error: sin012, count: null };
       if(this.t === "equipos_radioenlace" && !hay008 && this.op === "select" && /\bmedio\b/.test(String(this.sel))) return { data: null, error: { code:"42703", message:"column equipos_radioenlace.medio does not exist" }, count: null };
+      if(!hay013 && this.op === "select" && COLUMNAS_013[this.t]){
+        const c = COLUMNAS_013[this.t].find(k=>new RegExp(`\\b${k}\\b`).test(String(this.sel)));
+        if(c) return { data: null, error: { code:"42703", message:`column ${this.t}.${c} does not exist` }, count: null };
+      }
+      const sin013 = (this.op === "insert" || this.op === "update") ? columnas013SinMigracion(this.t, this.datos) : null;
+      if(sin013) return { data: null, error: sin013, count: null };
       const sin007 = (this.op === "insert" || this.op === "update") ? (columnas007SinMigracion(this.t, this.datos) || columna008SinMigracion(this.t, this.datos)) : null;
       if(sin007) return { data: null, error: sin007, count: null };
       try{
@@ -362,7 +398,8 @@
             if(this.t === "ubicaciones"){ fila.fotos ||= []; if(fila.activa === undefined) fila.activa = true; }
             if(this.t === "historial_ubicacion"){ if(fila.hasta === undefined) fila.hasta = null; if(!fila.desde) fila.desde = hoy; antesDeInsertarTramo(fila); }
             if(this.t === "tipos_ubicacion" && fila.activo === undefined) fila.activo = true;
-            if(this.t === "equipos_radioenlace"){ if(fila.servidor_id === undefined) fila.servidor_id = null; if(hay008 && fila.medio === undefined) fila.medio = null; validarJerarquia(fila); validar008(this.t, fila); }
+            if(this.t === "equipos_radioenlace"){ if(fila.servidor_id === undefined) fila.servidor_id = null; if(hay008 && fila.medio === undefined) fila.medio = null; validarJerarquia(fila); validar008(this.t, fila); validar013(this.t, fila); }
+            if(this.t === "tipos_equipo_red") validar013(this.t, fila);
             if(this.t === "piscinas"){ if(fila.activa === undefined) fila.activa = true; if(fila.orden === undefined) fila.orden = 0; if(fila.revisar === undefined) fila.revisar = false; if(fila.fuente === undefined) fila.fuente = "manual"; validarPiscina(fila, null); fila.actualizado_en = new Date().toISOString(); }
             if(this.t === "enlaces_respaldo"){ if(fila.prioridad === undefined) fila.prioridad = 1; validarRespaldo(fila, null); }
             if(this.t === "planos_mapa"){ if(fila.activo === undefined) fila.activo = true; fila.actualizado_en = new Date().toISOString(); validarPlano(fila); }
@@ -398,6 +435,7 @@
             if(this.t === "piscinas") validarPiscina(nueva, r.id);
             validar007(this.t, nueva, this.t === "tipos_equipo_red" ? r.valor : r.id);
             validar008(this.t, nueva);
+            validar013(this.t, nueva);
             if(this.t === "atajos_simulacion") this.datos = { ...this.datos, equipos: nueva.equipos };
           }
           resultado.forEach(r=>{

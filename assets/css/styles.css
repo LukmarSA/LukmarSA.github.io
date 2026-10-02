@@ -1536,3 +1536,63 @@ body.inventario-tecnologico-con-mapa-completo{overflow:hidden;}
 @media (max-width:720px){
   .inventario-tecnologico-mapa-desplegable-panel{min-width:min(240px, calc(100vw - 24px));}
 }
+/* ---------- v13: buscador en los desplegables del mapa y en los filtros de la tabla ----------
+   El mismo cuadro de los filtros de Tipo y Marca de la tabla. Lo que no
+   coincide se oculta; sin coincidencias, un aviso. */
+.inventario-tecnologico-mapa-desplegable-buscar{display:block;}
+.inventario-tecnologico-mapa-opcion[hidden],.inventario-tecnologico-filtro-fila[hidden]{display:none;}
+.inventario-tecnologico-mapa-opciones-vacio,.inventario-tecnologico-filter-panel-vacio{padding:8px 6px;font-size:12.5px;font-style:italic;color:var(--ink-faint);overflow-wrap:anywhere;}
+.inventario-tecnologico-mapa-opciones-vacio[hidden],.inventario-tecnologico-filter-panel-vacio[hidden]{display:none;}
+/* ---------- v14: líneas agrupadas y franjas por red (3.8) ----------
+   Un tramo con varias redes lleva una franja por red (los trazos los arma
+   nucleo/lineas-agrupadas.js); el tooltip de un tramo con varios enlaces los
+   lista en varias líneas. */
+.leaflet-tooltip.inventario-tecnologico-mapa-tooltip-grupo{font-weight:500;line-height:1.45;}
+.leaflet-tooltip.inventario-tecnologico-mapa-tooltip-grupo strong{font-weight:700;}
+.inventario-tecnologico-mapa-leyenda-franjas{border-top:none;height:6px;background:linear-gradient(to bottom, var(--franja-1) 0 50%, var(--franja-2) 50% 100%);}
+.inventario-tecnologico-mapa-leyenda-nota{color:var(--ink-muted);line-height:1.3;}
+/* ---------- v15: tooltip de las ubicaciones (3.10) y cobertura de los AP (3.9) ----------
+   El tooltip lleva el nombre y el tipo de la ubicación y una tablita (ícono,
+   tipo o red, cantidad). La cobertura va en su propio pane, debajo de las
+   líneas; su chip y el selector «Al pasar el mouse», junto al grosor. */
+.leaflet-tooltip.inventario-tecnologico-mapa-tooltip-ubicacion{font-weight:500;padding:6px 9px;white-space:nowrap;z-index:1;}
+.inventario-tecnologico-mapa-tt-titulo{display:flex;align-items:baseline;gap:8px;margin-bottom:3px;}
+.inventario-tecnologico-mapa-tt-titulo strong{font-weight:700;color:var(--ink);}
+.inventario-tecnologico-mapa-tt-tipo{font-size:11px;color:var(--ink-muted);}
+.inventario-tecnologico-mapa-tt-tabla{border-collapse:collapse;margin:2px 0 0;}
+.inventario-tecnologico-mapa-tt-tabla td{padding:1px 0;vertical-align:middle;}
+.inventario-tecnologico-mapa-tt-tabla-redes{margin-top:4px;padding-top:3px;border-top:1px solid var(--border);}
+.inventario-tecnologico-mapa-tt-ico{width:18px;padding-right:6px !important;color:var(--accent-ink);line-height:0;}
+.inventario-tecnologico-mapa-tt-ico svg{width:16px;height:16px;display:inline-block;}
+.inventario-tecnologico-mapa-tt-etq{padding-right:14px !important;}
+.inventario-tecnologico-mapa-tt-n{text-align:right;font-family:'IBM Plex Mono',monospace;font-weight:700;color:var(--ink);}
+.inventario-tecnologico-mapa-tt-especial .inventario-tecnologico-mapa-tt-etq{font-style:italic;color:var(--ink-muted);}
+.inventario-tecnologico-mapa-tt-punto{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--chip-color);margin:0 3px;}
+.inventario-tecnologico-mapa-tt-nota{font-size:11px;color:var(--ink-muted);margin-top:3px;}
+.inventario-tecnologico-mapa-tt-ocultos{color:var(--accent-ink);}
+.inventario-tecnologico-mapa-tooltip-modo{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-muted);white-space:nowrap;}
+.inventario-tecnologico-mapa-tooltip-modo label{font-weight:600;}
+.inventario-tecnologico-mapa-tooltip-modo select{font:inherit;font-size:12.5px;padding:3px 6px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink);}
+.inventario-tecnologico-mapa-tooltip-modo[hidden],.inventario-tecnologico-mapa-chip-cobertura[hidden]{display:none;}
+.inventario-tecnologico-mapa-chip-cobertura{font-weight:600;}
+.inventario-tecnologico-mapa-chip-cobertura::before{content:"";width:12px;height:12px;border-radius:50%;border:1.5px dashed #007EB2;background:rgba(0,126,178,0.15);box-sizing:border-box;}
+.inventario-tecnologico-mapa-chip-cobertura[aria-pressed="false"]{opacity:1;text-decoration:none;background:var(--surface);}
+.inventario-tecnologico-mapa-chip-cobertura[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink);}
+.inventario-tecnologico-mapa-leyenda-cobertura{border-top:1px solid var(--border);padding-top:6px !important;}
+.inventario-tecnologico-mapa-leyenda-cobertura[hidden]{display:none !important;}
+.inventario-tecnologico-mapa-leyenda-area{display:inline-block;width:16px;height:16px;flex-shrink:0;border-radius:50%;border:1.5px solid #007EB2;background:rgba(0,126,178,0.12);box-sizing:border-box;}
+/* El formulario del equipo: la cobertura en una fila de tres campos. */
+.inventario-tecnologico-equipo-cobertura{border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px 10px;margin:0;}
+.inventario-tecnologico-equipo-cobertura[hidden]{display:none;}
+.inventario-tecnologico-equipo-cobertura legend{font-weight:600;font-size:12.5px;padding:0 4px;}
+.inventario-tecnologico-equipo-cobertura-fila{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:8px;}
+.inventario-tecnologico-equipo-cobertura-fila label{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:600;color:var(--ink-muted);}
+.inventario-tecnologico-equipo-cobertura-fila input{width:100%;box-sizing:border-box;}
+@media (max-width:520px){ .inventario-tecnologico-equipo-cobertura-fila{grid-template-columns:1fr;} }
+/* «Redes y tipos»: el ícono de cada tipo de equipo. */
+.inventario-tecnologico-tipo-icono-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--accent-ink);cursor:pointer;}
+.inventario-tecnologico-tipo-icono-btn:hover{background:var(--surface-2);}
+.inventario-tecnologico-tipo-icono-btn:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+.inventario-tecnologico-tipo-icono-vista{display:flex;align-items:center;gap:14px;color:var(--accent-ink);margin-top:6px;}
+.inventario-tecnologico-tipo-icono-vista-error{color:var(--danger);}
+

@@ -1,5 +1,5 @@
 -- =====================================================================
--- Pruebas de las reglas del mapa y de los activos (migraciones 002 a 004, 006 a 012) contra la base
+-- Pruebas de las reglas del mapa y de los activos (migraciones 002 a 004, 006 a 013) contra la base
 -- REAL, sin dejar rastro. Sirven antes y después de correr la 005.
 -- =====================================================================
 -- Todo corre dentro de un único bloque DO que termina con RAISE EXCEPTION:
@@ -94,6 +94,13 @@ DECLARE
   x_n      integer;
   x_txt    text;
   x_js     jsonb;
+  y_u      bigint;
+  y_e      bigint;
+  y_n      integer;
+  y_m      integer;
+  y_txt    text;
+  y_nom    text;
+  y_caso   text;
 BEGIN
   IF to_regprocedure('public.equipo_radio_de_activo(integer)') IS NULL THEN
     RAISE EXCEPTION 'Falta la migración 004 (public.equipo_radio_de_activo no existe): aplícala antes de correr estas pruebas.';
@@ -1447,6 +1454,86 @@ BEGIN
     EXCEPTION WHEN others THEN
       r := r || jsonb_build_object('t', 'W16 los obligatorios son una lista de claves por tipo, y los cambios de campos quedan en la auditoría', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
     END;
+  END IF;
+
+  -- ================= X. Migración 013: íconos de los tipos de equipo y cobertura de los AP =================
+  PERFORM set_config('role', 'postgres', true);
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'equipos_radioenlace' AND column_name = 'radio_cobertura_m') THEN
+    r := r || jsonb_build_object('t', 'X0 migración 013 aplicada (equipos_radioenlace.radio_cobertura_m existe)', 'ok', false, 'det', 'falta correr db/migraciones/013_iconos_equipo_y_cobertura.sql');
+  ELSE
+    SELECT count(*) INTO y_n FROM information_schema.columns WHERE table_schema = 'public'
+       AND ((table_name = 'equipos_radioenlace' AND column_name IN ('radio_cobertura_m', 'azimut_cobertura', 'apertura_cobertura'))
+         OR (table_name = 'tipos_equipo_red' AND column_name = 'icono_svg'));
+    SELECT count(*) INTO y_m FROM pg_constraint WHERE conname IN ('tipos_equipo_red_icono_valido', 'equipos_radioenlace_radio_cobertura_valido',
+      'equipos_radioenlace_azimut_cobertura_valido', 'equipos_radioenlace_apertura_cobertura_valida', 'equipos_radioenlace_sector_con_radio', 'equipos_radioenlace_sector_con_direccion');
+    r := r || jsonb_build_object('t', 'X0 migración 013: las 4 columnas nuevas y sus 6 reglas', 'ok', y_n = 4 AND y_m = 6, 'det', format('columnas %s, reglas %s', y_n, y_m));
+
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+    PERFORM set_config('role', 'authenticated', true);
+    BEGIN
+      INSERT INTO public.ubicaciones (nombre, tipo, lat, lng) VALUES ('[TX] Torre X', 'torre', -2.31, -79.71) RETURNING id INTO y_u;
+      INSERT INTO public.equipos_radioenlace (ubicacion_id, nombre, tipo_equipo) VALUES (y_u, '[TX] AP X', 'ap') RETURNING id INTO y_e;
+      SELECT nombre INTO y_nom FROM public.equipos_radioenlace WHERE id = y_e;
+      UPDATE public.equipos_radioenlace SET radio_cobertura_m = 300 WHERE id = y_e;
+      UPDATE public.equipos_radioenlace SET azimut_cobertura = 45, apertura_cobertura = 120 WHERE id = y_e;
+      SELECT format('%s/%s/%s', radio_cobertura_m, azimut_cobertura, apertura_cobertura) INTO y_txt FROM public.equipos_radioenlace WHERE id = y_e;
+      UPDATE public.equipos_radioenlace SET azimut_cobertura = NULL, apertura_cobertura = 360 WHERE id = y_e;
+      SELECT y_txt || ' ' || format('%s/%s/%s', radio_cobertura_m, coalesce(azimut_cobertura::text, '-'), apertura_cobertura), nombre = y_nom INTO y_txt, v_her FROM public.equipos_radioenlace WHERE id = y_e;
+      r := r || jsonb_build_object('t', 'X1 el administrador guarda el radio, un sector (dirección y apertura) y un círculo de 360° sin dirección; el nombre no cambia',
+        'ok', y_txt = '300/45/120 300/-/360' AND v_her, 'det', y_txt || ' — nombre igual: ' || v_her);
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'X1 el administrador guarda el radio, un sector (dirección y apertura) y un círculo de 360° sin dirección; el nombre no cambia', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    IF y_e IS NOT NULL THEN
+      -- Cada caso parte de un sector válido (300 m, 45°, 120°) y tiene que rechazarse por una regla (23514).
+      UPDATE public.equipos_radioenlace SET radio_cobertura_m = 300, azimut_cobertura = 45, apertura_cobertura = 120 WHERE id = y_e;
+      y_txt := ''; y_n := 0;
+      FOREACH y_caso IN ARRAY ARRAY['radio_cobertura_m = 0', 'radio_cobertura_m = -5', 'radio_cobertura_m = 20001', 'azimut_cobertura = 360', 'azimut_cobertura = -1',
+                                    'apertura_cobertura = 0', 'apertura_cobertura = 361', 'radio_cobertura_m = NULL', 'azimut_cobertura = NULL'] LOOP
+        BEGIN
+          EXECUTE format('UPDATE public.equipos_radioenlace SET %s WHERE id = %s', y_caso, y_e);
+          y_txt := y_txt || ' aceptado: ' || y_caso;
+        EXCEPTION WHEN check_violation THEN y_n := y_n + 1;
+                  WHEN others THEN y_txt := y_txt || ' ' || y_caso || ' → ' || SQLSTATE;
+        END;
+      END LOOP;
+      r := r || jsonb_build_object('t', 'X2 se rechazan un radio de 0 o menos o de más de 20 000 m, la dirección y la apertura fuera de rango, un sector sin radio y un sector sin dirección',
+        'ok', y_n = 9 AND y_txt = '', 'det', format('rechazados %s de 9%s', y_n, y_txt));
+      BEGIN
+        UPDATE public.equipos_radioenlace SET radio_cobertura_m = NULL, azimut_cobertura = NULL, apertura_cobertura = NULL WHERE id = y_e;
+        r := r || jsonb_build_object('t', 'X3 quitar la cobertura (las tres vacías) se puede', 'ok', true, 'det', '');
+      EXCEPTION WHEN others THEN
+        r := r || jsonb_build_object('t', 'X3 quitar la cobertura (las tres vacías) se puede', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+      END;
+    END IF;
+    -- Íconos de los tipos: uno bien formado se guarda; uno con script o que no es SVG, no.
+    BEGIN
+      UPDATE public.tipos_equipo_red SET icono_svg = '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/></svg>' WHERE valor = 'nvr';
+      GET DIAGNOSTICS y_n = ROW_COUNT;
+      y_txt := '';
+      BEGIN UPDATE public.tipos_equipo_red SET icono_svg = '<svg viewBox="0 0 16 16"><script>alert(1)</script></svg>' WHERE valor = 'nvr'; y_txt := y_txt || ' script-aceptado'; EXCEPTION WHEN check_violation THEN NULL; END;
+      BEGIN UPDATE public.tipos_equipo_red SET icono_svg = '<svg viewBox="0 0 16 16"><path/onload=alert(1) d="M0 0"/></svg>' WHERE valor = 'nvr'; y_txt := y_txt || ' evento-aceptado'; EXCEPTION WHEN check_violation THEN NULL; END;
+      BEGIN UPDATE public.tipos_equipo_red SET icono_svg = 'no es un svg' WHERE valor = 'nvr'; y_txt := y_txt || ' texto-aceptado'; EXCEPTION WHEN check_violation THEN NULL; END;
+      SELECT y_txt || CASE WHEN icono_svg LIKE '<svg%' THEN '' ELSE ' no-quedó-el-bueno' END INTO y_txt FROM public.tipos_equipo_red WHERE valor = 'nvr';
+      r := r || jsonb_build_object('t', 'X4 el administrador pone el ícono de un tipo de equipo; con script, con un evento o sin <svg se rechaza',
+        'ok', y_n = 1 AND y_txt = '', 'det', format('filas %s%s', y_n, y_txt));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'X4 el administrador pone el ícono de un tipo de equipo; con script, con un evento o sin <svg se rechaza', 'ok', false, 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    -- Quien no es administrador no cambia ni la cobertura ni los íconos (RLS: 0 filas).
+    PERFORM set_config('request.jwt.claims', json_build_object('sub', v_visit, 'role', 'authenticated')::text, true);
+    BEGIN
+      UPDATE public.equipos_radioenlace SET radio_cobertura_m = 999 WHERE id = y_e;
+      GET DIAGNOSTICS y_n = ROW_COUNT;
+      UPDATE public.tipos_equipo_red SET icono_svg = NULL WHERE valor = 'nvr';
+      GET DIAGNOSTICS y_m = ROW_COUNT;
+      r := r || jsonb_build_object('t', 'X5 quien no es administrador no cambia la cobertura ni los íconos (0 filas)', 'ok', y_n = 0 AND y_m = 0, 'det', format('equipos %s, tipos %s', y_n, y_m));
+    EXCEPTION WHEN others THEN
+      r := r || jsonb_build_object('t', 'X5 quien no es administrador no cambia la cobertura ni los íconos (0 filas)', 'ok', SQLSTATE = '42501', 'det', SQLSTATE || ' ' || SQLERRM);
+    END;
+    PERFORM set_config('role', 'postgres', true);
+    SELECT count(*) INTO y_n FROM public.auditoria WHERE accion = 'UPDATE_equipos_radioenlace' AND detalle = format('equipos_radioenlace: actualizado id=%s', y_e) AND fecha >= now() - interval '1 minute';
+    r := r || jsonb_build_object('t', 'X6 los cambios de cobertura quedan en la auditoría', 'ok', y_n >= 3, 'det', format('%s filas', y_n));
   END IF;
 
   -- ================= G. GRANT explícito (sin él, la API responde "permission denied") =================

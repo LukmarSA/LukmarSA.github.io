@@ -198,6 +198,13 @@ const ERRORES_POR_RESTRICCION = [
   ["atajos_simulacion_con_equipos", "El atajo necesita al menos un equipo."],
   // 008: medio del enlace
   ["equipos_radioenlace_medio_valido", "El medio tiene que ser cable, fibra óptica o inalámbrico."],
+  // 013: cobertura de los AP e íconos de los tipos de equipo
+  ["equipos_radioenlace_radio_cobertura_valido", "El radio de cobertura va en metros, de más de 0 a 20 000."],
+  ["equipos_radioenlace_azimut_cobertura_valido", "La dirección de la cobertura va en grados, de 0 a menos de 360."],
+  ["equipos_radioenlace_apertura_cobertura_valida", "La apertura de la cobertura va en grados, de más de 0 a 360."],
+  ["equipos_radioenlace_sector_con_radio", "Para guardar la dirección o la apertura hace falta el radio de cobertura."],
+  ["equipos_radioenlace_sector_con_direccion", "Un sector (apertura menor que 360°) necesita hacia dónde apunta."],
+  ["tipos_equipo_red_icono_valido", "El ícono del tipo de equipo tiene que ser un SVG sin scripts ni eventos (hasta 20 000 caracteres)."],
   // 009: piscinas
   ["piscinas_nombre_unico", "Ya hay una piscina con ese nombre."],
   ["piscinas_nombre_valido", "El nombre de la piscina no puede quedar vacío (hasta 40 caracteres)."],
@@ -206,12 +213,15 @@ const ERRORES_POR_RESTRICCION = [
 ];
 
 export const TEXTO_FALTA_007 = "Falta la migración 007 en Supabase (tipos de equipo, redes y atajos): hay que correr db/migraciones/007_red_tipos_atajos.sql.";
+export const TEXTO_FALTA_013 = "Falta la migración 013 en Supabase (íconos de los tipos de equipo y cobertura de los AP): hay que correr db/migraciones/013_iconos_equipo_y_cobertura.sql.";
 
 export function traducirErrorMapa(error){
   if(!error) return "Error desconocido.";
   const msg = String(error.message || error);
   const code = String(error.code || "");
   for(const [restriccion, texto] of ERRORES_POR_RESTRICCION) if(msg.includes(restriccion)) return texto;
+  // 013: sin la migración, PostgREST no conoce las columnas nuevas (antes que la 007, que también mira tipos_equipo_red).
+  if((code === "PGRST204" || code === "42703") && /radio_cobertura_m|azimut_cobertura|apertura_cobertura|'icono_svg' column of 'tipos_equipo_red'|tipos_equipo_red\.icono_svg/.test(msg)) return TEXTO_FALTA_013;
   if(/tipos_equipo_red|atajos_simulacion|public\.redes|'redes'|"redes"/.test(msg) || (code === "PGRST204" && /tipo_equipo|red_id|referencia/.test(msg))){
     if(code === "PGRST205" || code === "PGRST204" || code === "42P01" || /Could not find the (table|'\w+' column)|does not exist/i.test(msg)) return TEXTO_FALTA_007;
     if(code === "42501" && /permission denied for (table|relation)/i.test(msg)) return `La base rechazó el acceso: falta el GRANT de la migración 007 (${msg}).`;

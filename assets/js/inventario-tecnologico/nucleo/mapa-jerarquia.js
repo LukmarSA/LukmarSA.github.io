@@ -563,6 +563,9 @@ export function estadoPorUbicacion(red, sim = null){
 //
 // estilo: "backbone" | "p2mp" | "cable" | "fibra" | "cadena" | "cadenaRespaldo" | "cadenaRota" |
 //         "cortado" | "sinConexion" | "respaldo" | "recuperado"
+// desde y hasta son los puntos de las ubicaciones del servidor y del cliente;
+// desdeId y hastaId, sus ids (v14: para juntar las líneas del mismo tramo,
+// nucleo/lineas-agrupadas.js).
 export function planDeLineas(red, { lineas = { backbone: true, p2mp: true, cable: true, respaldos: false }, visibleEquipo = ()=>true, visibleUbicacion = ()=>true, sim = null, seleccionId = null, expandidos = new Set() } = {}){
   const out = [];
   const camino = seleccionId !== null && red.equipoPorId.has(seleccionId) ? caminoARaiz(red, seleccionId, sim) : [];
@@ -593,7 +596,7 @@ export function planDeLineas(red, { lineas = { backbone: true, p2mp: true, cable
     if(cadena) estilo = funciona ? "cadena" : "cadenaRota";
     out.push({
       clave: `p:${c}`, tipo: "principal", estilo, clase: l.clase, medio: l.medio, clienteId: c, servidorId: s,
-      desde: punto(l.uServidor), hasta: punto(l.uCliente), distanciaKm: l.distanciaKm, banda: l.banda,
+      desde: punto(l.uServidor), hasta: punto(l.uCliente), desdeId: l.uServidor.id, hastaId: l.uCliente.id, distanciaKm: l.distanciaKm, banda: l.banda,
       enCadena: cadena, atenuada: hayCadena && !cadena && c !== seleccionId && !(s === seleccionId && clientesDirectos.has(c)),
     });
   }
@@ -619,7 +622,7 @@ export function planDeLineas(red, { lineas = { backbone: true, p2mp: true, cable
       out.push({
         clave: `r:${r.id}`, tipo: "respaldo", estilo: cadena ? "cadenaRespaldo" : (enUso ? "recuperado" : "respaldo"),
         clienteId: equipoId, servidorId: s.id, respaldoId: r.id, prioridad: r.prioridad,
-        desde: punto(us), hasta: punto(u), distanciaKm: distanciaKm(us, u), banda: s.banda || e.banda || null,
+        desde: punto(us), hasta: punto(u), desdeId: us.id, hastaId: u.id, distanciaKm: distanciaKm(us, u), banda: s.banda || e.banda || null,
         enCadena: cadena, enUso, atenuada: hayCadena && !cadena && equipoId !== seleccionId && s.id !== seleccionId,
         ubicacionRespaldo: us.nombre,
       });

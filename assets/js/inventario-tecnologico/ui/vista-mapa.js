@@ -19,7 +19,10 @@
 // dentro de <main>. Como Leaflet engancha listeners a window, renderMain()
 // llama a destruirVistaMapa() al salir de la pestaña.
 import { cargarActivos } from "../nucleo/datos.js";
-import { cargarPiscinas, cargarPlanoMapa, estadoMapa, hayMedio, hayPiscinas, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa, simulacionMapa } from "../nucleo/datos-mapa.js";
+import { cargarPiscinas, cargarPlanoMapa, estadoMapa, hayCobertura, hayMedio, hayPiscinas, hayRedFinca, indicesMapa, redMapa, refrescarDatosMapa, refrescarPlanoMapa, simulacionMapa } from "../nucleo/datos-mapa.js";
+import { cargarTiposActivo } from "../nucleo/datos.js";
+import { normalizarCobertura, puntosSector, textoCobertura } from "../nucleo/cobertura.js";
+import { MODOS_TOOLTIP, conRedes, conTipos, resumenUbicacion, textoActivos, textoOcultos, textoSinEquipos } from "../nucleo/tooltip-ubicacion.js";
 import { cajaPiscinas } from "../nucleo/piscinas.js";
 import { caidosEfectivos } from "../nucleo/mapa-nombres.js";
 import { cajaEsquinas } from "../nucleo/plano-mapa.js";
@@ -30,12 +33,15 @@ import { buscarEnMapa, infoTipoUbicacion, resumenMapa, traducirErrorMapa, ubicac
 import { ESTADOS_SIMULACION, GROSOR_LINEAS, ROLES, TIPO_EQUIPO_SIN, UBICACION_SIN_EQUIPOS, UMBRAL_AGRUPAR_CLIENTES, caminoARaiz, claveRed, conGrosor, contarRoles, equipoVisible, estadoPorUbicacion, grosorDeLinea, normalizarGrosor, planDeAgrupados, planDeLineas, redEfectivaDe, resumenRed, textoGrosor, tituloSinRed, ubicacionVisiblePorEquipos, ubicacionesSinEquipos } from "../nucleo/mapa-jerarquia.js";
 import { LINEAS_POR_DEFECTO, cuantosFiltros, filtrosLimpios, lineasConVisibles, ocultosSoloEsta, opcionesTiposEquipo, resumenDesplegable } from "../nucleo/filtros-mapa.js";
 import { AYUDA_SOLO, esMayusEnter, tituloSolo } from "../nucleo/solo-esta.js";
+import { AYUDA_BUSCAR_OPCION, coincideOpcion, textoSinCoincidencias } from "../nucleo/buscar-opciones.js";
 import { esAdmin, puede } from "../nucleo/permisos.js";
 import { editarPiscina, eliminarEquipo, eliminarRespaldo, eliminarUbicacion, establecerUbicacionActiva, guardarAjustePlano, quitarActivoDeUbicacion } from "../negocio/operaciones-mapa.js";
 import { urlFoto } from "../negocio/operaciones.js";
 import { abrirDetalle } from "./detalle/vista.js";
 import { abrirAsignacionEnLote, abrirAsignarActivos, abrirEditarAtajo, abrirFormEquipo, abrirFormPiscina, abrirFormRespaldo, abrirFormUbicacion, abrirGuardarAtajo, abrirMoverActivo, abrirRedesYTipos } from "./mapa/formularios.js";
-import { CAPAS_BASE, CAPAS_SUPERPUESTAS, CENTRO_POR_DEFECTO, ESTILOS_CON_HALO, ESTILOS_LINEA, HALO, OPACIDAD_ATENUADA, capaBaseInicial, cargarLeaflet, crearCapasBase, grosorInicial, iconoAgrupado, iconoUbicacion, recordarCapaBase, recordarGrosor, recordarSuperpuesta, superpuestaInicial } from "./mapa/leaflet.js";
+import { CAPAS_BASE, CAPAS_SUPERPUESTAS, CENTRO_POR_DEFECTO, COLOR_COBERTURA, COLOR_COBERTURA_SIN_SERVICIO, ESTILOS_CON_HALO, ESTILOS_LINEA, HALO, OPACIDAD_ATENUADA, PANE_COBERTURA, capaBaseInicial, cargarLeaflet, coberturaInicial, crearCapasBase, crearPaneCobertura, grosorInicial, iconoAgrupado, iconoUbicacion, lineaCorrida, modoTooltipInicial, recordarCapaBase, recordarCobertura, recordarGrosor, recordarModoTooltip, recordarSuperpuesta, superpuestaInicial } from "./mapa/leaflet.js";
+import { iconoTipoEquipo } from "./mapa/iconos-equipo.js";
+import { agruparLineas, planDeTrazos, textoTrazo } from "../nucleo/lineas-agrupadas.js";
 import { crearControlPantallaCompleta, crearPantallaCompleta } from "./mapa/pantalla-completa.js";
 import { htmlPanelCargando, htmlPanelError, htmlPanelResumen, htmlPanelUbicacion } from "./mapa/panel.js";
 import { crearCapaPlano, crearControlPlano, crearPanesPlano, htmlLeyendaPlano, iniciarAjustePlano, opacidadInicial, recordarOpacidad } from "./mapa/plano.js";
@@ -51,6 +57,8 @@ let alClicFueraBuscador = null;
 let alClicFueraFiltros = null; // v12: cierra el desplegable de filtros abierto
 let ubicacionEnPanel = null; // para conservar el scroll del panel solo si sigue mostrando la misma ubicación
 let grosorLineas = GROSOR_LINEAS.porDefecto; // factor del grosor de las líneas (v9), recordado en el navegador
+let modoTooltip = modoTooltipInicial();        // v15 (3.10): qué muestra el tooltip de una ubicación
+let verCobertura = coberturaInicial();          // v15 (3.9): la cobertura de los AP, a la vista
 
 const LINEAS = [
   { id: "backbone", etiqueta: "Backbone", ayuda: "Enlaces punto a punto: servidor con un solo cliente." },
@@ -144,14 +152,15 @@ function htmlEsqueleto(){
         <summary class="${P}mapa-filtros-resumen">Filtros y capas <span class="${P}mapa-chip-n" id="${P}mapa-filtros-cuenta"></span></summary>
         <div class="${P}mapa-filtros" role="toolbar" aria-label="Capas y filtros del mapa">
           <div class="${P}mapa-desplegables">
-            ${htmlDesplegable("ubicaciones", "Ubicaciones", { ayuda: "Tipos de ubicación que se ven en el mapa", extra: `<label class="${P}mapa-check ${P}mapa-desplegable-extra"><input type="checkbox" id="${P}mapa-ver-archivadas"> Ver también las archivadas</label>` })}
+            ${htmlDesplegable("ubicaciones", "Ubicaciones", { ayuda: "Tipos de ubicación que se ven en el mapa", buscador: "Buscar tipo de ubicación…", extra: `<label class="${P}mapa-check ${P}mapa-desplegable-extra"><input type="checkbox" id="${P}mapa-ver-archivadas"> Ver también las archivadas</label>` })}
             ${htmlDesplegable("lineas", "Líneas", { ayuda: "Clases de línea que se dibujan" })}
             ${htmlDesplegable("roles", "Equipos", { ayuda: "Equipos por su papel en la red: raíz, backbone, distribución o cliente" })}
-            ${htmlDesplegable("redes", "Redes", { oculto: true, idWrap: `${P}mapa-grupo-redes`, ayuda: "Redes de la finca" })}
-            ${htmlDesplegable("tiposEquipo", "Tipos de equipo", { oculto: true, ayuda: "Router, PtP, Switch…: las torres sin los tipos elegidos se ocultan" })}
+            ${htmlDesplegable("redes", "Redes", { oculto: true, idWrap: `${P}mapa-grupo-redes`, ayuda: "Redes de la finca", buscador: "Buscar red…" })}
+            ${htmlDesplegable("tiposEquipo", "Tipos de equipo", { oculto: true, ayuda: "Router, PtP, Switch…: las torres sin los tipos elegidos se ocultan", buscador: "Buscar tipo de equipo…" })}
           </div>
           <button type="button" class="${P}btn ${P}btn-sm ${P}btn-ghost ${P}mapa-quitar-filtros" id="${P}mapa-quitar-filtros" disabled title="Volver a ver todo: tipos, líneas, equipos, redes y archivadas">✕ Quitar filtros</button>
           <button type="button" class="${P}mapa-chip ${P}mapa-chip-color-red" id="${P}mapa-color-red" data-color-red="1" aria-pressed="false" hidden title="Pintar cada línea con el color de la red de su equipo">Colorear líneas por red</button>
+          <button type="button" class="${P}mapa-chip ${P}mapa-chip-cobertura" id="${P}mapa-cobertura" aria-pressed="true" hidden title="Mostrar u ocultar el área de cobertura de los AP (se recuerda en este navegador)">Cobertura de los AP</button>
           <div class="${P}mapa-filtro-grupo ${P}mapa-filtro-simulacion" role="group" aria-label="Simulación de fallas">
             <button type="button" class="${P}mapa-chip ${P}mapa-chip-sim" id="${P}mapa-simulacion" aria-pressed="false" title="Activar o apagar la simulación de fallas (no se guarda nada)">Simulación de fallas</button>
             ${htmlDesplegable("estados", "Estados", { oculto: true, ayuda: "Equipos según su estado en la simulación" })}
@@ -162,6 +171,10 @@ function htmlEsqueleto(){
             <input type="range" id="${P}mapa-grosor" min="${GROSOR_LINEAS.min}" max="${GROSOR_LINEAS.max}" step="${GROSOR_LINEAS.paso}" value="${GROSOR_LINEAS.porDefecto}">
             <output id="${P}mapa-grosor-valor" for="${P}mapa-grosor">${textoGrosor(GROSOR_LINEAS.porDefecto)}</output>
             <button type="button" class="${P}btn ${P}btn-sm ${P}btn-ghost" id="${P}mapa-grosor-normal" hidden title="Volver al grosor normal">Normal</button>
+          </div>
+          <div class="${P}mapa-tooltip-modo" id="${P}mapa-tooltip-modo-grupo" hidden title="Qué muestra la ubicación al pasar el mouse o con el foco del teclado (se recuerda en este navegador)">
+            <label for="${P}mapa-tooltip-modo">Al pasar el mouse</label>
+            <select id="${P}mapa-tooltip-modo">${MODOS_TOOLTIP.map(mo=>`<option value="${mo.id}">${esc(mo.etiqueta)}</option>`).join("")}</select>
           </div>
         </div>
         </details>
@@ -188,6 +201,9 @@ function htmlEsqueleto(){
               <li><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-sinConexion"></span>Sin conectividad</li>
             </ul>
             <ul class="${P}mapa-leyenda-redes" id="${P}mapa-leyenda-redes" aria-label="Colores de las redes" hidden></ul>
+            <ul class="${P}mapa-leyenda-cobertura" id="${P}mapa-leyenda-cobertura" aria-label="Cobertura" hidden>
+              <li><span class="${P}mapa-leyenda-area"></span>Cobertura de un AP (círculo o sector)</li>
+            </ul>
             <ul class="${P}mapa-leyenda-piscinas" id="${P}mapa-leyenda-piscinas" aria-label="Piscinas" hidden>
               <li><span class="${P}mapa-leyenda-piscina"></span>Piscina (clic: nombre y hectáreas)</li>
               <li><span class="${P}mapa-leyenda-piscina ${P}mapa-leyenda-piscina-revisar"></span>Piscina por revisar</li>
@@ -208,6 +224,7 @@ function crearMapa(L, main){
   const mapa = L.map(canvas, { zoomControl: true, worldCopyJump: true }).setView([CENTRO_POR_DEFECTO.lat, CENTRO_POR_DEFECTO.lng], CENTRO_POR_DEFECTO.zoom);
   crearPanesPlano(mapa);
   crearPanesPiscinas(mapa);
+  crearPaneCobertura(mapa);
   const capaPlano = crearCapaPlano(L, cargarPlanoMapa(), { opacidad: opacidadInicial() });
   const capaPiscinas = L.layerGroup();
   const capas = crearCapasBase(L);
@@ -238,10 +255,11 @@ function crearMapa(L, main){
   const capaLineas = L.layerGroup().addTo(mapa);
   const capaMarcadores = L.layerGroup().addTo(mapa);
   const capaAgrupados = L.layerGroup().addTo(mapa);
+  const capaCobertura = L.layerGroup().addTo(mapa); // v15 (3.9): sus capas van en PANE_COBERTURA
   mapa.on("click", alClicMapa);
   mapa.on("contextmenu", alClicDerechoMapa);
 
-  vista = { L, mapa, capaLineas, capaMarcadores, capaAgrupados, marcadores: new Map(), main, colocando: null, encuadrado: false, alTeclear: null,
+  vista = { L, mapa, capaLineas, capaMarcadores, capaAgrupados, capaCobertura, marcadores: new Map(), main, colocando: null, encuadrado: false, alTeclear: null,
     capas, capaPlano, controlCapas, controlPlano: null, ajustePlano: null,
     capaPiscinas, piscinasEnControl: false, piscinasVisibles: false, piscinasSoloRevisar: false, piscinasDibujadas: null,
     controlPiscinas: null, edicionPiscina: null, edicionPiscinaId: null, pantalla: null };
@@ -261,6 +279,9 @@ function crearMapa(L, main){
   vista.alTeclear = e=>{
     if(e.key !== "Escape" || state.vista !== "mapa" || !vista) return;
     if(hayModalAbierto()) return;
+    // v13: en el buscador de un desplegable, Esc primero borra lo escrito.
+    const buscarDd = e.target && e.target.closest ? e.target.closest("[data-dd-buscar]") : null;
+    if(buscarDd && buscarDd.value && limpiarBusquedaDesplegable(buscarDd.dataset.ddBuscar)){ e.preventDefault(); e.stopPropagation(); return; }
     // v12: un desplegable de filtros abierto se cierra primero (el foco vuelve a su botón).
     if(cerrarDesplegables({ foco: true })){ e.preventDefault(); e.stopPropagation(); return; }
     if(vista.ajustePlano || vista.edicionPiscina) return; // el Esc lo manejan "Ajustar plano" y el editor de piscinas
@@ -326,6 +347,7 @@ function contextoPanel(c){
     puedeSimular: puede("ver_mapa"),
     // Red de la finca (007)
     red007: hayRedFinca(),
+    cobertura013: hayCobertura(),
     atajos: m.atajos,
     simEstado: m.simulacion,
     redPorId: new Map(m.redes.map(r=>[r.id, r])),
@@ -351,6 +373,7 @@ function refrescar(){
     pintarMarcadores(c);
     pintarLineas(c);
     pintarAgrupados(c);
+    pintarCobertura(c);
     prepararPiscinas();
   }
   pintarPanel(c);
@@ -366,9 +389,10 @@ function refrescar(){
 // mismo data-* de los chips de antes (data-tipo, data-linea, data-rol,
 // data-red, data-estado y, nuevo, data-tipo-equipo). «Solo esta» (3.5): doble
 // clic, su botón «solo» o Mayús+Enter. Se abre uno a la vez; Esc o un clic
-// afuera lo cierran.
+// afuera lo cierran. v13: los que pueden crecer (Ubicaciones, Redes y Tipos de
+// equipo) traen un buscador, como los filtros de Tipo y Marca de la tabla.
 // ---------------------------------------------------------------------------
-function htmlDesplegable(id, titulo, { oculto = false, ayuda = "", extra = "", idWrap = "" } = {}){
+function htmlDesplegable(id, titulo, { oculto = false, ayuda = "", extra = "", idWrap = "", buscador = "" } = {}){
   return `<div class="${P}mapa-desplegable" data-desplegable="${id}"${idWrap ? ` id="${idWrap}"` : ""}${oculto ? " hidden" : ""}>
     <button type="button" class="${P}mapa-desplegable-btn" id="${P}mapa-dd-${id}" data-dd-boton="${id}" aria-expanded="false" aria-controls="${P}mapa-dd-${id}-panel"${ayuda ? ` title="${esc(ayuda)}"` : ""}>
       <span class="${P}mapa-desplegable-titulo">${esc(titulo)}</span><span class="${P}mapa-chip-n" data-dd-cuenta="${id}"></span><span class="${P}mapa-desplegable-flecha" aria-hidden="true"></span>
@@ -377,11 +401,13 @@ function htmlDesplegable(id, titulo, { oculto = false, ayuda = "", extra = "", i
       <div class="${P}filter-panel-card">
         <div class="${P}filter-panel-titlebar">${esc(titulo)}</div>
         <div class="${P}filter-panel-card-inner">
+          ${buscador ? `<input type="search" class="${P}filter-panel-search ${P}mapa-desplegable-buscar" data-dd-buscar="${id}" placeholder="${esc(buscador)}" aria-label="${esc(buscador)}" title="${esc(AYUDA_BUSCAR_OPCION)}" autocomplete="off" spellcheck="false">` : ""}
           <div class="${P}filter-panel-actions">
             <button type="button" class="${P}btn ${P}btn-sm" data-dd-todas="${id}">Todas</button>
             <button type="button" class="${P}btn ${P}btn-sm" data-dd-ninguna="${id}">Ninguna</button>
           </div>
           <div class="${P}mapa-opciones" data-dd-lista="${id}"></div>
+          ${buscador ? `<div class="${P}mapa-opciones-vacio" data-dd-vacio="${id}" role="status" hidden></div>` : ""}
           ${extra}
           <div class="${P}filter-panel-hint">${esc(AYUDA_SOLO)}</div>
         </div>
@@ -439,6 +465,55 @@ function pintarDesplegable(id, opciones, { ocultasPorDefecto = [] } = {}){
   const distinto = ocultas.length !== porDefecto.size || ocultas.some(v=>!porDefecto.has(v));
   const boton = document.getElementById(`${P}mapa-dd-${id}`);
   if(boton) boton.classList.toggle(`${P}mapa-desplegable-filtrado`, distinto);
+  // v13: lo escrito en su buscador sigue valiendo aunque las opciones se rearmen.
+  aplicarBusquedaDesplegable(id);
+}
+
+// v13: el buscador de un desplegable. Deja a la vista las opciones cuyo nombre
+// coincide (sin mayúsculas ni tildes); no cambia los filtros ni la cuenta del
+// botón. Sin coincidencias, avisa. Devuelve las filas a la vista.
+function aplicarBusquedaDesplegable(id){
+  const lista = document.querySelector(`[data-dd-lista="${id}"]`);
+  if(!lista) return [];
+  const input = document.querySelector(`[data-dd-buscar="${id}"]`);
+  const consulta = input ? input.value : "";
+  const visibles = [];
+  for(const fila of lista.querySelectorAll(`.${P}mapa-opcion`)){
+    const etiqueta = fila.querySelector(`.${P}mapa-opcion-etiqueta`)?.textContent || "";
+    const coincide = coincideOpcion(etiqueta, consulta);
+    if(fila.hidden === coincide) fila.hidden = !coincide;
+    if(coincide) visibles.push(fila);
+  }
+  const vacio = document.querySelector(`[data-dd-vacio="${id}"]`);
+  if(vacio){
+    const sin = !!consulta.trim() && visibles.length === 0;
+    vacio.hidden = !sin;
+    vacio.textContent = sin ? textoSinCoincidencias(consulta) : "";
+  }
+  return visibles;
+}
+// Las filas de un desplegable que están a la vista (las que deja el buscador).
+function filasVisiblesDesplegable(id){
+  return [...document.querySelectorAll(`[data-dd-lista="${id}"] .${P}mapa-opcion`)].filter(f=>!f.hidden);
+}
+// Borra lo escrito en el buscador del desplegable (al cerrarlo o con Esc).
+function limpiarBusquedaDesplegable(id){
+  const input = document.querySelector(`[data-dd-buscar="${id}"]`);
+  if(!input || !input.value) return false;
+  input.value = "";
+  aplicarBusquedaDesplegable(id);
+  return true;
+}
+// Al abrir un desplegable con buscador, el foco va a él para escribir de una
+// vez; en pantallas táctiles no, para no sacar el teclado sin pedirlo.
+function enfocarBuscadorAlAbrir(){
+  return !!(window.matchMedia && window.matchMedia("(pointer: fine)").matches);
+}
+// v15 (3.10): en un celular o una tableta sin mouse no hay «pasar el mouse»: el
+// toque elige la ubicación (su detalle sale en el panel) y el tooltip queda
+// con el nombre, como antes. Ahí tampoco se muestra el selector.
+function sinHover(){
+  return !!(window.matchMedia && window.matchMedia("(hover: none)").matches);
 }
 
 function desplegableAbierto(){
@@ -447,12 +522,18 @@ function desplegableAbierto(){
 }
 function abrirDesplegable(id){
   for(const b of document.querySelectorAll(`.${P}mapa-desplegable-btn`)){
-    const abrir = b.dataset.ddBoton === id && b.getAttribute("aria-expanded") !== "true";
+    const estaba = b.getAttribute("aria-expanded") === "true";
+    const abrir = b.dataset.ddBoton === id && !estaba;
     b.setAttribute("aria-expanded", String(abrir));
     const panel = document.getElementById(b.getAttribute("aria-controls"));
     if(!panel) continue;
     panel.hidden = !abrir;
-    if(abrir) acomodarPanel(panel);
+    if(estaba && !abrir) limpiarBusquedaDesplegable(b.dataset.ddBoton);
+    if(abrir){
+      acomodarPanel(panel);
+      const buscar = panel.querySelector("[data-dd-buscar]");
+      if(buscar && enfocarBuscadorAlAbrir()) buscar.focus({ preventScroll: true });
+    }
   }
 }
 // El panel cuelga de su botón; si se sale de la pantalla (un botón a la
@@ -477,6 +558,7 @@ function cerrarDesplegables({ foco = false } = {}){
   const adentro = panel && document.activeElement && panel.contains(document.activeElement);
   if(boton) boton.setAttribute("aria-expanded", "false");
   if(panel) panel.hidden = true;
+  limpiarBusquedaDesplegable(id);
   if(foco && (adentro || document.activeElement === boton) && boton) boton.focus({ preventScroll: true });
   return true;
 }
@@ -523,6 +605,17 @@ function pintarFiltros(c){
   if(grupoRedes) grupoRedes.hidden = !hayRedes;
   const colorRed = document.getElementById(`${P}mapa-color-red`);
   if(colorRed){ colorRed.hidden = !hayRedes; colorRed.setAttribute("aria-pressed", String(!!f.colorPorRed)); }
+  // v15 (3.10): «Al pasar el mouse» (con la 007: sin tipos ni redes no hay nada que mostrar).
+  const grupoTooltip = document.getElementById(`${P}mapa-tooltip-modo-grupo`);
+  if(grupoTooltip) grupoTooltip.hidden = !hayRedFinca() || sinHover();
+  const selTooltip = document.getElementById(`${P}mapa-tooltip-modo`);
+  if(selTooltip && selTooltip.value !== modoTooltip) selTooltip.value = modoTooltip;
+  // v15 (3.9): «Cobertura de los AP», si algún equipo tiene cobertura (013).
+  const hayAlgunaCobertura = hayCobertura() && m.equipos.some(e=>normalizarCobertura(e));
+  const chipCobertura = document.getElementById(`${P}mapa-cobertura`);
+  if(chipCobertura){ chipCobertura.hidden = !hayAlgunaCobertura; chipCobertura.setAttribute("aria-pressed", String(verCobertura)); }
+  const leyendaCobertura = document.getElementById(`${P}mapa-leyenda-cobertura`);
+  if(leyendaCobertura) leyendaCobertura.hidden = !(hayAlgunaCobertura && verCobertura);
   if(hayRedes){
     const n = new Map();
     for(const e of m.equipos){ const k = claveRed(e); n.set(k, (n.get(k) || 0) + 1); }
@@ -538,7 +631,9 @@ function pintarFiltros(c){
   const leyendaRedes = document.getElementById(`${P}mapa-leyenda-redes`);
   if(leyendaRedes){
     leyendaRedes.hidden = !(hayRedes && f.colorPorRed);
-    leyendaRedes.innerHTML = hayRedes && f.colorPorRed ? `<li class="${P}mapa-leyenda-subtitulo">Líneas por red</li>` + m.redes.map(r=>`<li><span class="${P}mapa-leyenda-linea" style="border-top:4px solid ${esc(r.color)}"></span>${esc(r.nombre)}</li>`).join("") : "";
+    // v14 (3.8): con dos redes o más, cómo se ve un tramo que llevan varias.
+    const franjas = m.redes.length > 1 ? `<li class="${P}mapa-leyenda-nota"><span class="${P}mapa-leyenda-linea ${P}mapa-leyenda-franjas" style="--franja-1:${esc(m.redes[0].color)};--franja-2:${esc(m.redes[1].color)}"></span>Varias redes en un tramo: una franja por red</li>` : "";
+    leyendaRedes.innerHTML = hayRedes && f.colorPorRed ? `<li class="${P}mapa-leyenda-subtitulo">Líneas por red</li>` + m.redes.map(r=>`<li><span class="${P}mapa-leyenda-linea" style="border-top:4px solid ${esc(r.color)}"></span>${esc(r.nombre)}</li>`).join("") + franjas : "";
   }
 
   // Tipos de equipo de red (v12, 3.4): con la 007 y si hay equipos o
@@ -640,7 +735,11 @@ function pintarMarcadores(c){
       riseOnHover: true,
       zIndexOffset: o.seleccionada ? 1000 : (o.enlazada ? 500 : (o.atenuada ? -200 : 0)),
     });
-    marcador.bindTooltip(esc(u.nombre), { direction: "top", className: `${P}mapa-tooltip` });
+    const tooltipRico = hayRedFinca() && modoTooltip !== "nombre" && !sinHover();
+    // La tablita, opaca y encima de las etiquetas de los enlaces (Leaflet deja
+    // los tooltips al 90 %: se veían las etiquetas por debajo).
+    marcador.bindTooltip(tooltipRico ? htmlTooltipUbicacion(c, u) : esc(u.nombre), { direction: "top", className: `${P}mapa-tooltip${tooltipRico ? ` ${P}mapa-tooltip-ubicacion` : ""}`, ...(tooltipRico ? { opacity: 1 } : {}) });
+    if(tooltipRico) marcador.on("tooltipopen", e=>acomodarTooltip(marcador, e.tooltip));
     marcador.on("click", ()=>alClicMarcador(u.id));
     marcador.on("add", ()=>{
       const el = marcador.getElement();
@@ -651,6 +750,105 @@ function pintarMarcadores(c){
     });
     marcador.addTo(vista.capaMarcadores);
     vista.marcadores.set(u.id, marcador);
+  }
+}
+
+// v15 (3.10): el tooltip de una ubicación: su nombre y su tipo y, según «Al
+// pasar el mouse», cuántos equipos hay de cada tipo (con su ícono), de cada
+// red, o las dos. Cuenta todo lo que hay en la ubicación y avisa cuántos
+// ocultan los filtros. Con la 013, también la cobertura de sus AP.
+function htmlTooltipUbicacion(c, u){
+  const m = c.m;
+  const equipos = c.idx.equiposPorUbicacion.get(u.id) || [];
+  const activos = (c.idx.activosPorUbicacion.get(u.id) || []).filter(a=>{ const e = c.idx.equipoPorActivo.get(a.id); return !(e && e.ubicacion_id === u.id); }).length;
+  const r = resumenUbicacion({ equipos, visibleEquipo: c.visibleEquipo, tipos: m.tiposEquipo, redes: m.redes, redDe: e=>{ const id = redEfectivaDe(e); return id === null || id === undefined ? null : id; }, activos });
+  const tipoU = infoTipoUbicacion(m.tiposUbicacion, u.tipo);
+  const tipoPorValor = new Map(m.tiposEquipo.map(t=>[t.valor, t]));
+  const tiposActivo = cargarTiposActivo();
+  const fila = (icono, etiqueta, n, clase = "")=>`<tr${clase ? ` class="${P}${clase}"` : ""}><td class="${P}mapa-tt-ico">${icono}</td><td class="${P}mapa-tt-etq">${esc(etiqueta)}</td><td class="${P}mapa-tt-n">${n}</td></tr>`;
+  let cuerpo = "";
+  if(!r.total) cuerpo += `<div class="${P}mapa-tt-nota">${esc(textoSinEquipos())}</div>`;
+  if(r.total && conTipos(modoTooltip)){
+    cuerpo += `<table class="${P}mapa-tt-tabla" aria-label="Equipos por tipo">`
+      + r.tipos.map(t=>fila(iconoTipoEquipo(tipoPorValor.get(t.valor) || { valor: t.valor }, { tiposEquipo: m.tiposEquipo, tiposActivo }), t.etiqueta, t.n)).join("")
+      + (r.sinTipo ? fila(iconoTipoEquipo(null), "Sin tipo", r.sinTipo, "mapa-tt-especial") : "")
+      + `</table>`;
+  }
+  if(r.total && conRedes(modoTooltip) && (r.redes.length || r.sinRed)){
+    const punto = color=>`<span class="${P}mapa-tt-punto" style="--chip-color:${esc(color || "#8B9AAA")}"></span>`;
+    cuerpo += `<table class="${P}mapa-tt-tabla${conTipos(modoTooltip) ? ` ${P}mapa-tt-tabla-redes` : ""}" aria-label="Equipos por red">`
+      + r.redes.map(x=>fila(punto(x.color), x.nombre, x.n)).join("")
+      + (r.sinRed ? fila(punto(null), "Sin red", r.sinRed, "mapa-tt-especial") : "")
+      + `</table>`;
+  }
+  if(r.ocultos) cuerpo += `<div class="${P}mapa-tt-nota ${P}mapa-tt-ocultos">${esc(textoOcultos(r.ocultos))}</div>`;
+  if(r.activos) cuerpo += `<div class="${P}mapa-tt-nota">${esc(textoActivos(r.activos))}</div>`;
+  if(hayCobertura()){
+    const conCobertura = equipos.map(e=>[e, normalizarCobertura(e)]).filter(([, cob])=>cob);
+    for(const [e, cob] of conCobertura.slice(0, 3)) cuerpo += `<div class="${P}mapa-tt-nota ${P}mapa-tt-cobertura">${esc(`${e.nombre}: ${textoCobertura(cob)}`)}</div>`;
+    if(conCobertura.length > 3) cuerpo += `<div class="${P}mapa-tt-nota">${esc(`y ${conCobertura.length - 3} más con cobertura`)}</div>`;
+  }
+  return `<div class="${P}mapa-tt"><div class="${P}mapa-tt-titulo"><strong>${esc(u.nombre)}</strong><span class="${P}mapa-tt-tipo">${esc(tipoU.etiqueta)}</span></div>${cuerpo}</div>`;
+}
+
+// v15: la tablita del tooltip es alta: cerca del borde de arriba del mapa se
+// abre hacia abajo del pin, y cerca de un costado, hacia el otro lado, para
+// que no se corte contra el borde.
+const ANCLA_TOOLTIP_PIN = 32; // tooltipAnchor de iconoUbicacion: la punta de arriba del pin
+function acomodarTooltip(marcador, tooltip){
+  const mapa = vista && vista.mapa;
+  const el = tooltip && tooltip.getElement();
+  if(!mapa || !el) return;
+  const p = mapa.latLngToContainerPoint(marcador.getLatLng());
+  const tam = mapa.getSize();
+  const alto = el.offsetHeight, ancho = el.offsetWidth, margen = 6;
+  let direccion = "top", desplazamiento = [0, 0];
+  if(p.y - ANCLA_TOOLTIP_PIN - alto - margen < 0){ direccion = "bottom"; desplazamiento = [0, ANCLA_TOOLTIP_PIN + 4]; }
+  if(p.x - ancho / 2 < margen){ direccion = "right"; desplazamiento = [16, ANCLA_TOOLTIP_PIN / 2]; }
+  else if(p.x + ancho / 2 > tam.x - margen){ direccion = "left"; desplazamiento = [-16, ANCLA_TOOLTIP_PIN / 2]; }
+  if(tooltip.options.direction === direccion) return;
+  tooltip.options.direction = direccion;
+  tooltip.options.offset = desplazamiento;
+  tooltip.update();
+}
+
+// v15 (3.9): la cobertura de los AP. Un círculo (L.circle, en metros) o, con
+// apertura, una cuña. Del color de la red al colorear por red; gris si en la
+// simulación el equipo quedó sin servicio; atenuada si hay otro equipo
+// elegido. Su tooltip dice de qué equipo es; los clics siguen al mapa.
+function pintarCobertura(c){
+  const { L } = vista;
+  vista.capaCobertura.clearLayers();
+  if(!hayCobertura() || !verCobertura) return;
+  const colorPorRed = c.m.filtros.colorPorRed && hayRedFinca();
+  const colorRed = new Map(c.m.redes.map(r=>[r.id, r.color]));
+  const enCamino = new Set(c.camino);
+  for(const e of c.m.equipos){
+    const cob = normalizarCobertura(e);
+    if(!cob || !c.visibleEquipo(e.id) || !c.visibleUbicacion(e.ubicacion_id)) continue;
+    const u = c.red.ubicacionPorId.get(e.ubicacion_id);
+    if(!u) continue;
+    const st = c.sim ? c.sim.estado.get(e.id) : null;
+    const sinServicio = !!(c.sim && !(st && st.conectado));
+    const red = redEfectivaDe(e);
+    const color = sinServicio ? COLOR_COBERTURA_SIN_SERVICIO : (colorPorRed && red !== null && red !== undefined && colorRed.get(red)) || COLOR_COBERTURA;
+    const atenuada = c.seleccionId !== null && e.id !== c.seleccionId && !enCamino.has(e.id);
+    const estilo = { pane: PANE_COBERTURA, color, weight: 1.5, opacity: atenuada ? 0.35 : 0.85, fillColor: color, fillOpacity: atenuada ? 0.04 : 0.12,
+      dashArray: sinServicio ? "4 6" : null, bubblingMouseEvents: true, className: `${P}mapa-cobertura` };
+    const capa = cob.sector
+      ? L.polygon(puntosSector(u, cob).map(p=>[p.lat, p.lng]), estilo)
+      : L.circle([u.lat, u.lng], { ...estilo, radius: cob.radio });
+    const texto = `${e.nombre} · ${textoCobertura(cob)}${sinServicio ? " — sin servicio en la simulación" : ""}`;
+    capa.bindTooltip(esc(texto), { sticky: true, className: `${P}mapa-tooltip` });
+    capa.addTo(vista.capaCobertura);
+    const el = capa.getElement();
+    if(el){
+      el.dataset.equipoId = e.id;
+      el.dataset.cobertura = cob.sector ? "sector" : "circulo";
+      if(sinServicio) el.dataset.sinServicio = "1";
+      if(atenuada) el.classList.add(`${P}mapa-cobertura-atenuada`);
+      el.setAttribute("aria-label", `Cobertura de ${texto}`);
+    }
   }
 }
 
@@ -667,31 +865,76 @@ function etiquetaCorta(d){
   return fmtDistancia(d.distanciaKm);
 }
 
+// v14 (3.8): las líneas normales entre las mismas dos ubicaciones y de la
+// misma clase van juntas en una (nucleo/lineas-agrupadas.js); al colorear por
+// red, con una franja por red. El camino resaltado, la simulación y los
+// respaldos siguen enlace por enlace.
 function pintarLineas(c){
   const { L } = vista;
   vista.capaLineas.clearLayers();
   const plan = planDeLineas(c.red, { lineas: c.m.filtros.lineas, visibleEquipo: c.visibleEquipo, visibleUbicacion: c.visibleUbicacion, sim: c.sim, seleccionId: c.seleccionId, expandidos: c.expandidos });
-  // Orden de dibujo: lo atenuado abajo, lo resaltado arriba.
-  const peso = d=>(d.atenuada ? 0 : 1) + (d.enCadena ? 2 : 0) + (d.estilo === "recuperado" ? 1 : 0);
-  plan.sort((a, b)=>peso(a) - peso(b));
   // Colorear por red: solo las líneas normales (no la simulación ni el camino resaltado).
   const colorPorRed = c.m.filtros.colorPorRed && hayRedFinca();
   const colorRed = new Map(c.m.redes.map(r=>[r.id, r.color]));
+  const nombreRed = new Map(c.m.redes.map(r=>[r.id, r.nombre]));
   // La línea va con la red del cliente (con la 011, la efectiva: una red
   // aparte sale con su color desde el enlace de su primer equipo).
-  const colorDe = d=>{
+  const redDe = d=>{
     const e = c.red.equipoPorId.get(d.clienteId), s = c.red.equipoPorId.get(d.servidorId);
     const id = redEfectivaDe(e) ?? redEfectivaDe(s);
-    return id !== null && id !== undefined ? colorRed.get(id) || null : null;
+    return id !== null && id !== undefined ? id : null;
   };
-  for(const d of plan){
-    // v9: el grosor elegido (ancho y punteado) vale para todas las líneas.
-    // v11: en 0 no se dibujan (ni sus tooltips), salvo el camino resaltado
-    // del equipo elegido, al mínimo visible.
+  const nombreEquipo = id=>{ const e = c.red.equipoPorId.get(id); return e ? e.nombre : "?"; };
+  const nombreUbicacion = id=>{ const u = c.red.ubicacionPorId.get(id); return u ? u.nombre : "?"; };
+  const { grupos, sueltas } = agruparLineas(plan, { redDe, ordenRedes: c.m.redes.map(r=>r.id), nombreDe: nombreEquipo });
+  // v9: el grosor elegido (ancho y punteado) vale para todas las líneas.
+  // v11: en 0 no se dibujan (ni sus tooltips), salvo el camino resaltado
+  // del equipo elegido, al mínimo visible.
+  const factorNormal = grosorDeLinea(grosorLineas, { enCadena: false });
+  const anchoDe = estilo=>conGrosor(ESTILOS_LINEA[estilo], factorNormal).weight;
+  const trazos = factorNormal ? planDeTrazos(grupos, { colorPorRed, anchoDe }) : [];
+  const hayRedes = hayRedFinca() && c.m.redes.length > 0;
+
+  const datosLinea = (el, { clienteId, servidorId, atenuada, etiqueta })=>{
+    if(!el) return;
+    el.dataset.clienteId = clienteId;
+    el.dataset.servidorId = servidorId;
+    if(atenuada) el.classList.add(`${P}mapa-linea-atenuada`);
+    el.setAttribute("aria-label", etiqueta);
+  };
+  // Un trazo de un grupo: la línea entera o una de sus franjas.
+  const pintarTrazo = t=>{
+    const g = t.grupo;
+    const puntos = [[g.desde.lat, g.desde.lng], [g.hasta.lat, g.hasta.lng]];
+    const base = conGrosor(ESTILOS_LINEA[g.estilo], factorNormal);
+    if(t.halo && ESTILOS_CON_HALO.has(g.estilo) && !g.atenuada) lineaCorrida(L, puntos, { ...HALO, weight: t.anchoHaz + 4 }, t.desplazamientoHaz).addTo(vista.capaLineas);
+    let estilo = { ...base, weight: t.ancho };
+    if(colorPorRed && t.red !== null && t.red !== undefined){ const color = colorRed.get(t.red); if(color) estilo.color = color; }
+    if(t.atenuada) estilo = { ...estilo, opacity: estilo.opacity * OPACIDAD_ATENUADA };
+    const varios = g.enlaces.length > 1;
+    if(varios) estilo.className += ` ${P}mapa-linea-grupo`;
+    if(t.franja) estilo.className += ` ${P}mapa-linea-franja`;
+    const linea = lineaCorrida(L, puntos, estilo, t.desplazamiento).addTo(vista.capaLineas);
+    const primero = t.enlaces[0];
+    const textos = varios ? textoTrazo(t, { nombreEquipo, nombreUbicacion, nombreRed: id=>nombreRed.get(id) || "?", hayRedes }) : [textoLinea(c.red, primero)];
+    linea.bindTooltip(varios ? `<strong>${esc(textos[0])}</strong>${textos.slice(1).map(x=>`<br>${esc(x)}`).join("")}` : esc(textos[0]), { sticky: true, className: `${P}mapa-tooltip${varios ? ` ${P}mapa-tooltip-grupo` : ""}` });
+    linea.on("click", ()=>seleccionarEquipo(primero.clienteId, { encuadrar: false }));
+    const el = linea.getElement();
+    datosLinea(el, { clienteId: primero.clienteId, servidorId: primero.servidorId, atenuada: t.atenuada, etiqueta: textos.join(". ") });
+    if(el){
+      el.dataset.grupo = g.clave;
+      el.dataset.enlaces = String(t.enlaces.length);
+      el.dataset.enlacesTramo = String(g.enlaces.length);
+      el.dataset.clientes = t.enlaces.map(d=>d.clienteId).join(" ");
+      if(t.red !== undefined) el.dataset.red = t.red === null ? "sin" : String(t.red);
+    }
+  };
+  // Una línea suelta (camino, simulación, respaldo): como siempre.
+  const pintarSuelta = d=>{
     const factor = grosorDeLinea(grosorLineas, { enCadena: d.enCadena });
-    if(!factor) continue;
+    if(!factor) return;
     let estilo = conGrosor(ESTILOS_LINEA[d.estilo], factor);
-    if(colorPorRed && ["backbone", "p2mp", "cable", "fibra"].includes(d.estilo)){ const color = colorDe(d); if(color) estilo = { ...estilo, color }; }
+    if(colorPorRed && ["backbone", "p2mp", "cable", "fibra"].includes(d.estilo)){ const id = redDe(d); const color = id !== null ? colorRed.get(id) : null; if(color) estilo = { ...estilo, color }; }
     const puntos = [[d.desde.lat, d.desde.lng], [d.hasta.lat, d.hasta.lng]];
     if(ESTILOS_CON_HALO.has(d.estilo) && !d.atenuada) L.polyline(puntos, { ...HALO, weight: estilo.weight + 4 }).addTo(vista.capaLineas);
     const linea = L.polyline(puntos, d.atenuada ? { ...estilo, opacity: estilo.opacity * OPACIDAD_ATENUADA } : estilo).addTo(vista.capaLineas);
@@ -699,13 +942,23 @@ function pintarLineas(c){
     if(permanente) linea.bindTooltip(esc(etiquetaCorta(d)), { permanent: true, direction: "center", className: `${P}mapa-etiqueta-enlace ${P}mapa-etiqueta-${d.estilo}` });
     else linea.bindTooltip(esc(textoLinea(c.red, d)), { sticky: true, className: `${P}mapa-tooltip` });
     linea.on("click", ()=>seleccionarEquipo(d.clienteId, { encuadrar: false }));
-    const el = linea.getElement();
-    if(el){
-      el.dataset.clienteId = d.clienteId;
-      el.dataset.servidorId = d.servidorId;
-      if(d.atenuada) el.classList.add(`${P}mapa-linea-atenuada`);
-      el.setAttribute("aria-label", textoLinea(c.red, d));
-    }
+    datosLinea(linea.getElement(), { clienteId: d.clienteId, servidorId: d.servidorId, atenuada: d.atenuada, etiqueta: textoLinea(c.red, d) });
+  };
+
+  // Orden de dibujo: lo atenuado abajo, lo resaltado arriba. Las franjas de
+  // un mismo tramo van juntas (con su halo debajo).
+  const peso = d=>(d.atenuada ? 0 : 1) + (d.enCadena ? 2 : 0) + (d.estilo === "recuperado" ? 1 : 0);
+  const dibujos = [];
+  for(const t of trazos){
+    const ultimo = dibujos[dibujos.length - 1];
+    if(ultimo && ultimo.grupo === t.grupo) ultimo.trazos.push(t);
+    else dibujos.push({ grupo: t.grupo, peso: t.grupo.atenuada ? 0 : 1, trazos: [t] });
+  }
+  for(const d of sueltas) dibujos.push({ peso: peso(d), suelta: d });
+  dibujos.sort((a, b)=>a.peso - b.peso);
+  for(const x of dibujos){
+    if(x.suelta) pintarSuelta(x.suelta);
+    else for(const t of x.trazos) pintarTrazo(t);
   }
 }
 
@@ -1286,6 +1539,17 @@ function montarBarra(main){
     grosorNormal.addEventListener("click", ()=>{ aplicarGrosor(GROSOR_LINEAS.porDefecto, { guardar: true }); grosor.focus(); });
   }
 
+  // v15 (3.10): «Al pasar el mouse»: qué muestra el tooltip de una ubicación.
+  const selTooltip = main.querySelector(`#${P}mapa-tooltip-modo`);
+  if(selTooltip){
+    selTooltip.value = modoTooltip;
+    selTooltip.addEventListener("change", ()=>{
+      modoTooltip = selTooltip.value;
+      recordarModoTooltip(modoTooltip);
+      if(vista && estadoMapa().cargado && document.getElementById(`${P}mapa-panel`)) refrescar();
+    });
+  }
+
   // Toggles: todos editan estadoMapa().filtros y repintan.
   const alternarEnLista = (lista, valor)=>lista.includes(valor) ? lista.filter(x=>x !== valor) : [...lista, valor];
   // Si la ubicación elegida quedó con su tipo oculto, se suelta.
@@ -1345,6 +1609,9 @@ function montarBarra(main){
       f.tiposEquipoOcultos = alternarEnLista(f.tiposEquipoOcultos, te.dataset.tipoEquipo);
     } else if(e.target.closest("[data-color-red]")){
       f.colorPorRed = !f.colorPorRed;
+    } else if(e.target.closest(`#${P}mapa-cobertura`)){
+      verCobertura = !verCobertura; // v15 (3.9): se recuerda en este navegador
+      recordarCobertura(verCobertura);
     } else if(t){
       f.tiposOcultos = alternarEnLista(f.tiposOcultos, t.dataset.tipo);
       soltarSiOculta(m);
@@ -1372,8 +1639,47 @@ function montarBarra(main){
     e.preventDefault();
     soloEstaOpcion(fila.dataset.opcionDd, fila.dataset.opcionValor);
   });
-  // Mayús+Enter sobre una opción: «solo esta» (sin el clic que haría Enter).
+  // v13: el buscador de los desplegables filtra la lista al escribir.
+  barraFiltros.addEventListener("input", e=>{
+    const buscar = e.target.closest && e.target.closest("[data-dd-buscar]");
+    if(buscar) aplicarBusquedaDesplegable(buscar.dataset.ddBuscar);
+  });
   barraFiltros.addEventListener("keydown", e=>{
+    const sinModificadores = !e.ctrlKey && !e.altKey && !e.metaKey;
+    // v13, en el buscador: con una sola opción a la vista, Enter la marca o
+    // desmarca y Mayús+Enter la deja sola; la flecha abajo baja a la lista.
+    const buscar = e.target.closest("[data-dd-buscar]");
+    if(buscar){
+      const dd = buscar.dataset.ddBuscar;
+      if(e.key === "ArrowDown" && sinModificadores && !e.shiftKey){
+        const primera = filasVisiblesDesplegable(dd)[0];
+        if(primera){ e.preventDefault(); primera.querySelector(`.${P}mapa-opcion-btn`).focus(); }
+        return;
+      }
+      if(e.key !== "Enter" || !sinModificadores) return;
+      e.preventDefault();
+      const filas = filasVisiblesDesplegable(dd);
+      if(filas.length !== 1) return;
+      if(e.shiftKey) soloEstaOpcion(dd, filas[0].dataset.opcionValor);
+      else filas[0].querySelector(`.${P}mapa-opcion-btn`).click();
+      return;
+    }
+    // v13: flechas arriba y abajo entre las casillas a la vista; desde la
+    // primera, arriba vuelve al buscador (si el desplegable tiene).
+    if((e.key === "ArrowDown" || e.key === "ArrowUp") && sinModificadores && !e.shiftKey){
+      const boton = e.target.closest(`.${P}mapa-opcion-btn`);
+      const fila = boton && boton.closest("[data-opcion-dd]");
+      if(!fila) return;
+      const dd = fila.dataset.opcionDd;
+      const filas = filasVisiblesDesplegable(dd);
+      const i = filas.indexOf(fila);
+      e.preventDefault();
+      const destino = e.key === "ArrowDown" ? filas[i + 1] : filas[i - 1];
+      if(destino) destino.querySelector(`.${P}mapa-opcion-btn`).focus();
+      else if(e.key === "ArrowUp") document.querySelector(`[data-dd-buscar="${dd}"]`)?.focus();
+      return;
+    }
+    // Mayús+Enter sobre una opción: «solo esta» (sin el clic que haría Enter).
     if(!esMayusEnter(e)) return;
     const fila = e.target.closest("[data-opcion-dd]");
     if(!fila) return;

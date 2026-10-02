@@ -12,6 +12,7 @@ import { abrirGestorColumnas, columnasVisiblesOrdenadas, filaEncabezados } from 
 import { exportarActivosExcel } from "./exportar-excel.js";
 import { actualizarBotonFiltroActivo, actualizarConteosFiltros, actualizarFlechasOrden, estadoInicialFiltros, hayFiltrosActivos, listaOrdenadaFiltrada, marcarCheckboxesPanel, opcionesFiltroCache, recalcularOpcionesFiltro, seleccionActiva, tramoVigente } from "./filtros.js";
 import { esMayusEnter, soloEsta } from "../../nucleo/solo-esta.js";
+import { coincideOpcion, textoSinCoincidencias } from "../../nucleo/buscar-opciones.js";
 import { abrirHistorialCustodio } from "./historial-custodio.js";
 import { abrirPendientesFirma, listaPendientesFirma } from "./pendientes-firma.js";
 import { CAMPOS_RESUMEN_GLOBAL, abrirModalKpiColumna, calcularResumenColumna, copiarAlPortapapelesTexto, descargarArchivoTexto, resumenACSV, resumenAHTML, resumenATextoWhatsApp } from "./resumen.js";
@@ -182,11 +183,20 @@ document.addEventListener("input", (e)=>{
   const buscador = e.target.closest("[data-filtro-buscar]");
   if(!buscador) return;
   const campo = buscador.dataset.filtroBuscar;
-  const q = buscador.value.trim().toLowerCase();
+  // v13: sin mayúsculas ni tildes y con las palabras en cualquier orden, como
+  // el buscador de los desplegables del mapa; sin coincidencias, un aviso.
+  let quedan = 0;
   document.querySelectorAll(`.inventario-tecnologico-filter-opt[data-filtro-opt-campo="${campo}"]`).forEach(opt=>{
-    const texto = opt.querySelector(".inventario-tecnologico-filter-opt-label").textContent.toLowerCase();
-    (opt.closest(".inventario-tecnologico-filtro-fila") || opt).style.display = texto.includes(q) ? "" : "none";
+    const coincide = coincideOpcion(opt.querySelector(".inventario-tecnologico-filter-opt-label").textContent, buscador.value);
+    (opt.closest(".inventario-tecnologico-filtro-fila") || opt).style.display = coincide ? "" : "none";
+    if(coincide) quedan++;
   });
+  const vacio = document.querySelector(`[data-filtro-vacio="${campo}"]`);
+  if(vacio){
+    const sin = !!buscador.value.trim() && quedan === 0;
+    vacio.hidden = !sin;
+    vacio.textContent = sin ? textoSinCoincidencias(buscador.value) : "";
+  }
 });
 
 document.addEventListener("change", (e)=>{

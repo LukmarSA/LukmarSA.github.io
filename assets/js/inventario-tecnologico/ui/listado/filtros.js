@@ -3,7 +3,6 @@ import { state } from "../../nucleo/estado.js";
 import { esc, fmtTag, valorActualActivo } from "../../nucleo/helpers.js";
 import { campoPorClave, camposDeTipo, infoEstado, infoPropiedad } from "../../nucleo/opciones-configurables.js";
 import { PREFIJO_COLUMNA_CAMPO, textoValor, valorCrudo, valorParaOrdenar } from "../../nucleo/campos-personalizados.js";
-import { columnasColapsadas } from "./columnas.js";
 import { NOMBRE_COLUMNA_KPI } from "./resumen.js";
 import { AYUDA_SOLO, tituloSolo } from "../../nucleo/solo-esta.js";
 
@@ -69,10 +68,10 @@ export function seleccionActiva(campo){
   return state.filtros[campo];
 }
 
+// v13 (§4 de PENDIENTES, decidido el 1-oct): en pantallas angostas la
+// búsqueda general busca en lo mismo que en las anchas (antes, solo en el
+// tipo, el custodio y el estado).
 export function camposBusquedaGeneral(a){
-  if(columnasColapsadas()){
-    return [a.tipo, a.custodio ? a.custodio.nombre : "Disponible", infoEstado(a.estado).label];
-  }
   // v10: también los campos nuevos que usa el tipo del activo (un IMEI, un
   // número de línea…). Los de siempre ya están arriba.
   const nuevos = camposDeTipo(a.tipo).filter(d=>!d.fijo).map(d=>textoValor(d, valorCrudo(a, d)));
@@ -235,6 +234,7 @@ export function panelFiltroHtml(campo, opciones){
               <button type="button" class="inventario-tecnologico-filtro-solo" data-filtro-solo-campo="${campo}" data-filtro-solo-valor="${esc(op)}" title="${esc(tituloSolo(labelOpcionFiltro(campo, op)))}" aria-label="${esc(`Solo ${labelOpcionFiltro(campo, op)}`)}">solo</button>
             </div>`).join("")}
         </div>
+        ${conBuscador ? `<div class="inventario-tecnologico-filter-panel-vacio" data-filtro-vacio="${campo}" role="status" hidden></div>` : ""}
         <div class="inventario-tecnologico-filter-panel-hint">${esc(AYUDA_SOLO)}</div>
         <button type="button" class="inventario-tecnologico-btn inventario-tecnologico-btn-sm inventario-tecnologico-filter-panel-kpi-btn" data-ver-kpis="${campo}">📊 Ver resumen</button>
       </div>

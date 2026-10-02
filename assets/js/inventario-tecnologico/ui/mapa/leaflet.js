@@ -10,6 +10,8 @@
 // versión y hashes juntos (Leaflet 2.x cambió la API: no es un reemplazo directo).
 import { GROSOR_LINEAS, normalizarGrosor } from "../../nucleo/mapa-jerarquia.js";
 import { svgConTamano } from "../../nucleo/svg-seguro.js";
+import { desplazarPuntos } from "../../nucleo/lineas-agrupadas.js";
+import { MODO_TOOLTIP_POR_DEFECTO, normalizarModoTooltip } from "../../nucleo/tooltip-ubicacion.js";
 
 export const LEAFLET_VERSION = "1.9.4";
 export const LEAFLET_JS = {
@@ -127,6 +129,33 @@ export function recordarGrosor(k){
   try{ localStorage.setItem(CLAVE_GROSOR, String(normalizarGrosor(k))); }catch(e){ /* sin almacenamiento: no pasa nada */ }
 }
 
+// v15 (3.10): qué muestra el tooltip de una ubicación («Al pasar el mouse»).
+const CLAVE_TOOLTIP = "inventario-tecnologico-mapa-tooltip";
+export function modoTooltipInicial(){
+  try{ const v = localStorage.getItem(CLAVE_TOOLTIP); return v === null ? MODO_TOOLTIP_POR_DEFECTO : normalizarModoTooltip(v); }catch(e){ return MODO_TOOLTIP_POR_DEFECTO; }
+}
+export function recordarModoTooltip(modo){
+  try{ localStorage.setItem(CLAVE_TOOLTIP, normalizarModoTooltip(modo)); }catch(e){ /* sin almacenamiento: no pasa nada */ }
+}
+
+// v15 (3.9): la cobertura de los AP, a la vista o no (de fábrica, a la vista).
+const CLAVE_COBERTURA = "inventario-tecnologico-mapa-cobertura";
+export function coberturaInicial(){
+  try{ return localStorage.getItem(CLAVE_COBERTURA) !== "0"; }catch(e){ return true; }
+}
+export function recordarCobertura(visible){
+  try{ localStorage.setItem(CLAVE_COBERTURA, visible ? "1" : "0"); }catch(e){ /* sin almacenamiento: no pasa nada */ }
+}
+
+// v15 (3.9): la cobertura va en su propio pane: encima de las piscinas (380)
+// y debajo de las líneas (400) y de los pines.
+export const PANE_COBERTURA = "inventario-tecnologico-cobertura";
+export function crearPaneCobertura(mapa){
+  if(!mapa.getPane(PANE_COBERTURA)) mapa.createPane(PANE_COBERTURA).style.zIndex = "390";
+}
+export const COLOR_COBERTURA = "#007EB2";
+export const COLOR_COBERTURA_SIN_SERVICIO = "#8B9AAA";
+
 export function crearCapasBase(L){
   const capas = {};
   for(const [id, c] of Object.entries(CAPAS_BASE)) capas[id] = L.tileLayer(c.url, c.opciones);
@@ -218,3 +247,26 @@ export const ESTILOS_LINEA = {
 export const ESTILOS_CON_HALO = new Set(["cadena", "cadenaRespaldo", "cadenaRota", "recuperado", "backbone", "cable", "fibra"]);
 export const HALO = { color: "#FFFFFF", opacity: 0.9, lineCap: "round", interactive: false };
 export const OPACIDAD_ATENUADA = 0.18;
+
+// v14 (3.8): una línea corrida unos píxeles hacia su costado, para las
+// franjas de un tramo con varias redes (y los tramos de clases distintas
+// entre las mismas dos ubicaciones). El corrimiento se aplica al proyectar
+// los puntos en la pantalla, así que vale en cualquier zoom sin recalcular
+// nada. Sin corrimiento es una L.polyline común.
+let LineaCorrida = null;
+export function lineaCorrida(L, puntos, opciones, desplazamiento = 0){
+  if(!desplazamiento) return L.polyline(puntos, opciones);
+  if(!LineaCorrida || LineaCorrida.leaflet !== L){
+    LineaCorrida = L.Polyline.extend({
+      _projectLatlngs(latlngs, result, projectedBounds){
+        const d = this.options.desplazamiento;
+        if(!d || !latlngs.length || !(latlngs[0] instanceof L.LatLng)) return L.Polyline.prototype._projectLatlngs.call(this, latlngs, result, projectedBounds);
+        const anillo = desplazarPuntos(latlngs.map(ll=>this._map.latLngToLayerPoint(ll)), d).map(p=>L.point(p.x, p.y));
+        for(const p of anillo) projectedBounds.extend(p);
+        result.push(anillo);
+      },
+    });
+    LineaCorrida.leaflet = L;
+  }
+  return new LineaCorrida(puntos, { ...opciones, desplazamiento });
+}
