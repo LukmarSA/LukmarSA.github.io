@@ -111,10 +111,32 @@ export function nombreBase(fila, ctx){
 
 function numerado(base, n){ return n <= 1 ? base : `${base} (${n})`; }
 
+// v21 (3.23, pedido y decidido el 7-oct): el nombre corto de un equipo para
+// el tooltip de una línea, que ya dice entre qué ubicaciones va: su tipo con
+// la red y la referencia entre paréntesis, sin «en …» ni a qué se conecta, y
+// el número si su nombre lo lleva («PtP-E (CCTV · B02)», «Cámara (CCTV) (2)»).
+// Sin tipo, el nombre escrito a mano, recortado. nombreRed(e): la red que va
+// en su nombre (la efectiva) o null. El número es el que dejó aplicarNombres
+// (numero_nombre): el «(2)» del final del nombre puede ser del servidor o de
+// la ubicación («… conectada a Switch viejo (2)»). Sin él, se lee del nombre.
+export function nombreCortoEquipo(e, { tipoPorValor = new Map(), nombreRed = ()=>null, maximo = 60 } = {}){
+  if(!e) return "?";
+  const t = e.tipo_equipo ? tipoPorValor.get(e.tipo_equipo) : null;
+  if(!t){
+    const n = String(e.nombre ?? "").trim() || "?";
+    return n.length > maximo ? `${n.slice(0, maximo - 1).trimEnd()}…` : n;
+  }
+  const leido = /\s\((\d+)\)$/.exec(String(e.nombre ?? ""));
+  const numero = Number.isInteger(e.numero_nombre) ? e.numero_nombre : (leido ? Number(leido[1]) : 1);
+  return `${t.etiqueta || t.valor}${textoParentesis([nombreRed(e), e.referencia])}${numero > 1 ? ` (${numero})` : ""}`;
+}
+
 // Nombre que se muestra de cada equipo (Map id → nombre). Los equipos con tipo
 // se numeran por ubicación si se repiten (en orden de id); los que no tienen
 // tipo muestran su nombre guardado y cuentan como "ocupados".
-export function nombresAutomaticos({ equipos = [], ubicaciones = [], tipos = [], redes = [], conRed = false, herencia = false } = {}){
+// numeros (opcional, un Map): ahí deja id → número de cada uno con tipo (1 si
+// no se repite).
+export function nombresAutomaticos({ equipos = [], ubicaciones = [], tipos = [], redes = [], conRed = false, herencia = false } = {}, numeros = null){
   const ctx = contextoNombres({ equipos, ubicaciones, tipos, redes, conRed, herencia });
   const out = new Map();
   const ocupados = new Map(); // ubicacion_id → Set(claves)
@@ -132,6 +154,7 @@ export function nombresAutomaticos({ equipos = [], ubicaciones = [], tipos = [],
     while(usados.has(clave(numerado(base, n)))) n++;
     const nombre = numerado(base, n);
     out.set(e.id, nombre);
+    if(numeros) numeros.set(e.id, n);
     ocupar(e.ubicacion_id, nombre);
   }
   return out;
@@ -159,10 +182,13 @@ export function nombreParaGuardar(fila, { equipos = [], ubicaciones = [], tipos 
 
 // Deja en cada fila en memoria: nombre_guardado = lo de la base y nombre = el
 // que se muestra (así el resto de la app no cambia). Devuelve las mismas filas.
+// v21: y numero_nombre = su número si se repite (1 si no; null sin tipo),
+// para el nombre corto de los tooltips de las líneas.
 export function aplicarNombres(equipos, { ubicaciones = [], tipos = [], redes = [], conRed = false, herencia = false } = {}){
   for(const e of equipos) if(!("nombre_guardado" in e)) e.nombre_guardado = e.nombre;
-  const nombres = nombresAutomaticos({ equipos, ubicaciones, tipos, redes, conRed, herencia });
-  for(const e of equipos) e.nombre = nombres.get(e.id) ?? e.nombre_guardado;
+  const numeros = new Map();
+  const nombres = nombresAutomaticos({ equipos, ubicaciones, tipos, redes, conRed, herencia }, numeros);
+  for(const e of equipos){ e.nombre = nombres.get(e.id) ?? e.nombre_guardado; e.numero_nombre = numeros.get(e.id) ?? null; }
   return equipos;
 }
 

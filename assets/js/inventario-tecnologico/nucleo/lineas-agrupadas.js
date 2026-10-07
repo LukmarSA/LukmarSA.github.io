@@ -175,12 +175,16 @@ export function resumenRedes(grupo, nombreRed = id=>String(id)){
   return grupo.redes.map(r=>r.red === null || r.red === undefined ? `${r.enlaces.length} sin red` : `${r.enlaces.length} de ${nombreRed(r.red)}`).join(", ");
 }
 
-const MAXIMO_LISTADOS = 6;
+// v21 (3.23, pedido y decidido el 7-oct): los tooltips de las líneas, más
+// cortos y en un ancho máximo (lo pone la vista con CSS). Cada línea del
+// tooltip es { tipo, texto }: «titulo», «dato», «item» (un enlace: servidor →
+// cliente, con los nombres cortos de nombreCortoEquipo), «mas» o «clic».
+export const MAXIMO_LISTADOS = 4;
 
-// Las líneas del tooltip de un trazo con más de un enlace (el de un solo
-// enlace sigue siendo el de siempre, textoLinea en la vista).
-//   nombreEquipo(id), nombreUbicacion(id), nombreRed(id), hayRedes (¿mostrar
-//   cuántos van por cada red?)
+// Un trazo con más de un enlace: cuántos y entre qué ubicaciones (en una
+// franja, su red), cuántos por red, hasta 4 enlaces y qué elige el clic.
+//   nombreEquipo(id) (el corto), nombreUbicacion(id), nombreRed(id), hayRedes
+//   (¿mostrar cuántos van por cada red?)
 export function textoTrazo(trazo, { nombreEquipo = id=>String(id), nombreUbicacion = id=>String(id), nombreRed = id=>String(id), hayRedes = false } = {}){
   const g = trazo.grupo;
   const total = g.enlaces.length;
@@ -190,16 +194,42 @@ export function textoTrazo(trazo, { nombreEquipo = id=>String(id), nombreUbicaci
   const entre = `entre ${nombreUbicacion(g.desdeId)} y ${nombreUbicacion(g.hastaId)}${dist ? ` · ${dist}` : ""}`;
   if(trazo.franja){
     const red = trazo.red === null || trazo.red === undefined ? "Sin red" : nombreRed(trazo.red);
-    lineas.push(`${red}: ${propios.length} de ${textoCantidadEnlaces(g.clase, total)}`);
-    lineas.push(entre);
-    lineas.push(`En total: ${resumenRedes(g, nombreRed)}`);
+    lineas.push({ tipo: "titulo", texto: `${red}: ${propios.length} de ${textoCantidadEnlaces(g.clase, total)}` });
+    lineas.push({ tipo: "dato", texto: entre });
+    lineas.push({ tipo: "dato", texto: `En total: ${resumenRedes(g, nombreRed)}` });
   } else {
-    lineas.push(`${textoCantidadEnlaces(g.clase, total)} ${entre}`);
-    if(hayRedes) lineas.push(resumenRedes(g, nombreRed));
+    lineas.push({ tipo: "titulo", texto: `${textoCantidadEnlaces(g.clase, total)} ${entre}` });
+    if(hayRedes) lineas.push({ tipo: "dato", texto: resumenRedes(g, nombreRed) });
   }
-  const listados = propios.slice(0, MAXIMO_LISTADOS).map(d=>`${nombreEquipo(d.clienteId)} ← ${nombreEquipo(d.servidorId)}`);
-  if(propios.length > MAXIMO_LISTADOS) listados.push(`y ${propios.length - MAXIMO_LISTADOS} más`);
-  lineas.push(...listados);
-  if(propios[0]) lineas.push(`Clic: elige «${nombreEquipo(propios[0].clienteId)}»`);
+  for(const d of propios.slice(0, MAXIMO_LISTADOS)) lineas.push({ tipo: "item", texto: `${nombreEquipo(d.servidorId)} → ${nombreEquipo(d.clienteId)}` });
+  if(propios.length > MAXIMO_LISTADOS) lineas.push({ tipo: "mas", texto: `y ${propios.length - MAXIMO_LISTADOS} más` });
+  if(propios[0]) lineas.push({ tipo: "clic", texto: propios.length > 1 ? "Clic: elige el primero" : `Clic: elige «${nombreEquipo(propios[0].clienteId)}»` });
   return lineas;
+}
+
+// Un enlace solo (la línea de siempre, el camino, la simulación o un
+// respaldo): de qué ubicación a cuál, la distancia y el medio; los dos
+// equipos (servidor → cliente); su estado, si tiene, y qué elige el clic.
+//   desde / hasta: las ubicaciones del servidor y del cliente; servidor /
+//   cliente: los nombres cortos; clase: radio, cable o fibra; estado: «enlace
+//   cortado (simulado)», «respaldo (prioridad 1)»… o vacío.
+export function textoEnlace({ desde = "?", hasta = "?", distanciaKm = null, clase = "radio", estado = "", servidor = "?", cliente = "?" } = {}){
+  const dist = Number.isFinite(distanciaKm) ? fmtDistancia(distanciaKm) : "";
+  const medio = clase === "cable" ? "por cable" : clase === "fibra" ? "por fibra óptica" : "";
+  const lineas = [{ tipo: "titulo", texto: [`${desde} → ${hasta}`, dist, medio].filter(Boolean).join(" · ") }];
+  lineas.push({ tipo: "item", texto: `${servidor} → ${cliente}` });
+  if(estado) lineas.push({ tipo: "dato", texto: estado.charAt(0).toUpperCase() + estado.slice(1) });
+  lineas.push({ tipo: "clic", texto: `Clic: elige «${cliente}»` });
+  return lineas;
+}
+
+// Las líneas de un tooltip en un solo texto, para lectores de pantalla (el
+// aria-label de la línea): separadas por «. », salvo cuando la siguiente
+// empieza en minúscula («entre…», «y 3 más»), que va con un espacio.
+export function textoParaLector(lineas = []){
+  return lineas.reduce((acc, l, i)=>{
+    const t = typeof l === "string" ? l : (l && l.texto) || "";
+    if(i === 0) return t;
+    return acc + (/^[a-záéíóúñü]/.test(t) ? " " : ". ") + t;
+  }, "");
 }

@@ -1551,6 +1551,15 @@ body.inventario-tecnologico-con-mapa-completo{overflow:hidden;}
    lista en varias líneas. */
 .leaflet-tooltip.inventario-tecnologico-mapa-tooltip-grupo{font-weight:500;line-height:1.45;}
 .leaflet-tooltip.inventario-tecnologico-mapa-tooltip-grupo strong{font-weight:700;}
+/* v21 (3.23): el tooltip de una línea, más corto y con 300 px de ancho
+   máximo. Leaflet lo dibuja sin cortar líneas (nowrap) y con el ancho mínimo de
+   su contenido: por eso el ancho se declara («max-content», hasta 300 px). */
+.leaflet-tooltip.inventario-tecnologico-mapa-tooltip-linea{white-space:normal;width:max-content;max-width:300px;font-weight:500;line-height:1.4;padding:4px 9px;}
+.inventario-tecnologico-mapa-ttl-titulo,.inventario-tecnologico-mapa-ttl-dato,.inventario-tecnologico-mapa-ttl-item,.inventario-tecnologico-mapa-ttl-mas,.inventario-tecnologico-mapa-ttl-clic{display:block;}
+.inventario-tecnologico-mapa-ttl-titulo{font-weight:700;}
+.inventario-tecnologico-mapa-ttl-item{padding-left:10px;text-indent:-10px;}
+.inventario-tecnologico-mapa-ttl-mas{color:var(--ink-muted);}
+.inventario-tecnologico-mapa-ttl-clic{color:var(--ink-muted);font-size:11px;margin-top:1px;}
 .inventario-tecnologico-mapa-leyenda-franjas{border-top:none;height:6px;background:linear-gradient(to bottom, var(--franja-1) 0 50%, var(--franja-2) 50% 100%);}
 .inventario-tecnologico-mapa-leyenda-nota{color:var(--ink-muted);line-height:1.3;}
 /* ---------- v15: tooltip de las ubicaciones (3.10) y cobertura de los AP (3.9) ----------

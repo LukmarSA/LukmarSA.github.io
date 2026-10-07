@@ -25,7 +25,7 @@ import { normalizarCobertura, puntosSector, textoCobertura } from "../nucleo/cob
 import { llevaMarcaRouter } from "../nucleo/modo-red.js";
 import { MODOS_TOOLTIP, colorMuyClaro, conRedes, conTipos, resumenUbicacion, textoActivos, textoOcultos, textoPorRed, textoSinEquipos } from "../nucleo/tooltip-ubicacion.js";
 import { cajaPiscinas } from "../nucleo/piscinas.js";
-import { caidosEfectivos } from "../nucleo/mapa-nombres.js";
+import { caidosEfectivos, nombreCortoEquipo } from "../nucleo/mapa-nombres.js";
 import { cajaEsquinas } from "../nucleo/plano-mapa.js";
 import { state } from "../nucleo/estado.js";
 import { fmtCoordenadas, fmtDistancia } from "../nucleo/geo.js";
@@ -42,7 +42,7 @@ import { abrirDetalle } from "./detalle/vista.js";
 import { abrirAsignacionEnLote, abrirAsignarActivos, abrirEditarAtajo, abrirFormEquipo, abrirFormPiscina, abrirFormRespaldo, abrirFormUbicacion, abrirGuardarAtajo, abrirMoverActivo, abrirRedesYTipos } from "./mapa/formularios.js";
 import { CAPAS_BASE, CAPAS_SUPERPUESTAS, CENTRO_POR_DEFECTO, COLOR_COBERTURA, COLOR_COBERTURA_SIN_SERVICIO, ESTILOS_CON_HALO, ESTILOS_LINEA, HALO, OPACIDAD_ATENUADA, PANE_COBERTURA, capaBaseInicial, cargarLeaflet, coberturaInicial, crearCapasBase, crearPaneCobertura, grosorInicial, iconoAgrupado, iconoUbicacion, lineaCorrida, modoTooltipInicial, recordarCapaBase, recordarCobertura, recordarGrosor, recordarModoTooltip, recordarSuperpuesta, superpuestaInicial } from "./mapa/leaflet.js";
 import { iconoTipoEquipo } from "./mapa/iconos-equipo.js";
-import { agruparLineas, planDeTrazos, textoTrazo } from "../nucleo/lineas-agrupadas.js";
+import { agruparLineas, planDeTrazos, textoEnlace, textoParaLector, textoTrazo } from "../nucleo/lineas-agrupadas.js";
 import { crearControlPantallaCompleta, crearPantallaCompleta } from "./mapa/pantalla-completa.js";
 import { htmlPanelCargando, htmlPanelError, htmlPanelResumen, htmlPanelUbicacion } from "./mapa/panel.js";
 import { crearCapaPlano, crearControlPlano, crearPanesPlano, htmlLeyendaPlano, iniciarAjustePlano, opacidadInicial, recordarOpacidad } from "./mapa/plano.js";
@@ -923,12 +923,26 @@ function pintarCobertura(c){
   }
 }
 
-function textoLinea(red, d){
+// v21 (3.23, pedido y decidido el 7-oct): el tooltip de una línea, más corto
+// (las ubicaciones arriba y los equipos con su nombre corto, servidor →
+// cliente) y con un ancho máximo de 300 px (CSS «v21 (3.23)»).
+function nombreCortoDe(c, id){
+  // Los índices, una vez por repintado (c es el cálculo de calcular()).
+  if(!c.tipoPorValorCorto) c.tipoPorValorCorto = new Map(c.m.tiposEquipo.map(t=>[t.valor, t]));
+  if(!c.nombreRedCorto) c.nombreRedCorto = new Map(c.m.redes.map(r=>[Number(r.id), r.nombre]));
+  return nombreCortoEquipo(c.red.equipoPorId.get(id), { tipoPorValor: c.tipoPorValorCorto, nombreRed: x=>{ const r = redEfectivaDe(x); return r !== null && r !== undefined ? c.nombreRedCorto.get(Number(r)) || null : null; } });
+}
+function textoLinea(c, d){
+  const red = c.red;
   const cliente = red.equipoPorId.get(d.clienteId), servidor = red.equipoPorId.get(d.servidorId);
-  const partes = [`${cliente ? cliente.nombre : "?"} ← ${servidor ? servidor.nombre : "?"}`, fmtDistancia(d.distanciaKm)].filter(Boolean);
-  const extra = { cortado: "enlace cortado (simulado)", sinConexion: "sin servicio en la simulación", recuperado: "recuperado vía respaldo", respaldo: `respaldo (prioridad ${d.prioridad})`, cadenaRota: "camino cortado" }[d.estilo]
-    || (d.clase === "cable" ? "por cable" : d.clase === "fibra" ? "por fibra óptica" : "");
-  return partes.join(" · ") + (extra ? ` — ${extra}` : "");
+  const ubicacion = e=>{ const u = e ? red.ubicacionPorId.get(e.ubicacion_id) : null; return u ? u.nombre : "?"; };
+  const estado = { cortado: "enlace cortado (simulado)", sinConexion: "sin servicio en la simulación", recuperado: "recuperado vía respaldo", respaldo: `respaldo (prioridad ${d.prioridad})`, cadenaRota: "camino cortado" }[d.estilo] || "";
+  return textoEnlace({ desde: ubicacion(servidor), hasta: ubicacion(cliente), distanciaKm: d.distanciaKm, clase: d.clase, estado, servidor: nombreCortoDe(c, d.servidorId), cliente: nombreCortoDe(c, d.clienteId) });
+}
+// La distancia no se parte al final de un renglón: «· 9.31 km» va junto.
+const distanciaSinCortar = s=>s.replace(/ · (\d[\d.,]*) (k?m)(?=$| ·)/g, " · $1 $2");
+function htmlTooltipLinea(lineas){
+  return lineas.map(l=>`<span class="${P}mapa-ttl-${l.tipo}">${esc(distanciaSinCortar(l.texto))}</span>`).join("");
 }
 
 function etiquetaCorta(d){
@@ -960,6 +974,8 @@ function pintarLineas(c){
     return id !== null && id !== undefined ? id : null;
   };
   const nombreEquipo = id=>{ const e = c.red.equipoPorId.get(id); return e ? e.nombre : "?"; };
+  const nombreCorto = id=>nombreCortoDe(c, id);
+  const claseTooltip = varios=>`${P}mapa-tooltip ${P}mapa-tooltip-linea${varios ? ` ${P}mapa-tooltip-grupo` : ""}`;
   const nombreUbicacion = id=>{ const u = c.red.ubicacionPorId.get(id); return u ? u.nombre : "?"; };
   const { grupos, sueltas } = agruparLineas(plan, { redDe, ordenRedes: c.m.redes.map(r=>r.id), nombreDe: nombreEquipo });
   // v9: el grosor elegido (ancho y punteado) vale para todas las líneas.
@@ -991,11 +1007,11 @@ function pintarLineas(c){
     if(t.franja) estilo.className += ` ${P}mapa-linea-franja`;
     const linea = lineaCorrida(L, puntos, estilo, t.desplazamiento).addTo(vista.capaLineas);
     const primero = t.enlaces[0];
-    const textos = varios ? textoTrazo(t, { nombreEquipo, nombreUbicacion, nombreRed: id=>nombreRed.get(id) || "?", hayRedes }) : [textoLinea(c.red, primero)];
-    linea.bindTooltip(varios ? `<strong>${esc(textos[0])}</strong>${textos.slice(1).map(x=>`<br>${esc(x)}`).join("")}` : esc(textos[0]), { sticky: true, className: `${P}mapa-tooltip${varios ? ` ${P}mapa-tooltip-grupo` : ""}` });
+    const textos = varios ? textoTrazo(t, { nombreEquipo: nombreCorto, nombreUbicacion, nombreRed: id=>nombreRed.get(id) || "?", hayRedes }) : textoLinea(c, primero);
+    linea.bindTooltip(htmlTooltipLinea(textos), { sticky: true, className: claseTooltip(varios) });
     linea.on("click", ()=>seleccionarEquipo(primero.clienteId, { encuadrar: false }));
     const el = linea.getElement();
-    datosLinea(el, { clienteId: primero.clienteId, servidorId: primero.servidorId, atenuada: t.atenuada, etiqueta: textos.join(". ") });
+    datosLinea(el, { clienteId: primero.clienteId, servidorId: primero.servidorId, atenuada: t.atenuada, etiqueta: textoParaLector(textos) });
     if(el){
       el.dataset.grupo = g.clave;
       el.dataset.enlaces = String(t.enlaces.length);
@@ -1015,9 +1031,10 @@ function pintarLineas(c){
     const linea = L.polyline(puntos, d.atenuada ? { ...estilo, opacity: estilo.opacity * OPACIDAD_ATENUADA } : estilo).addTo(vista.capaLineas);
     const permanente = d.enCadena || d.estilo === "recuperado";
     if(permanente) linea.bindTooltip(esc(etiquetaCorta(d)), { permanent: true, direction: "center", className: `${P}mapa-etiqueta-enlace ${P}mapa-etiqueta-${d.estilo}` });
-    else linea.bindTooltip(esc(textoLinea(c.red, d)), { sticky: true, className: `${P}mapa-tooltip` });
+    const textos = textoLinea(c, d);
+    if(!permanente) linea.bindTooltip(htmlTooltipLinea(textos), { sticky: true, className: claseTooltip(false) });
     linea.on("click", ()=>seleccionarEquipo(d.clienteId, { encuadrar: false }));
-    datosLinea(linea.getElement(), { clienteId: d.clienteId, servidorId: d.servidorId, atenuada: d.atenuada, etiqueta: textoLinea(c.red, d) });
+    datosLinea(linea.getElement(), { clienteId: d.clienteId, servidorId: d.servidorId, atenuada: d.atenuada, etiqueta: textoParaLector(textos) });
   };
 
   // Orden de dibujo: lo atenuado abajo, lo resaltado arriba. Las franjas de

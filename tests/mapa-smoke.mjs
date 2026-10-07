@@ -3695,10 +3695,11 @@ async function escenarioFranjas(browser, base){
   const distancia = (s, t)=>{ const dx = s.b.x - s.a.x, dy = s.b.y - s.a.y; return Math.abs(dx * (t.a.y - s.a.y) - dy * (t.a.x - s.a.x)) / Math.hypot(dx, dy); };
   // Con el grosor en 3× las franjas miden 5,4 px: el mouse cae en la que se apunta.
   const grosor = async (page, k)=>{ await page.fill("#inventario-tecnologico-mapa-grosor", String(k)); await page.dispatchEvent("#inventario-tecnologico-mapa-grosor", "change"); };
-  const tooltip = async (page, sel)=>{
+  const tooltip = async (page, sel, foto = null)=>{
     await page.hover(sel, { timeout: 5000 });
     await page.waitForSelector(".leaflet-tooltip.inventario-tecnologico-mapa-tooltip-grupo", { timeout: 3000 });
     const t = await page.locator(".leaflet-tooltip.inventario-tecnologico-mapa-tooltip-grupo").last().innerText();
+    if(foto) await captura(page, foto);
     await page.mouse.move(5, 5);
     return t;
   };
@@ -3721,17 +3722,18 @@ async function escenarioFranjas(browser, base){
     exigir(cable.cliente === 201, "el clic va al primero (Cámara 1): " + cable.cliente);
     await captura(page, "v14-tramos-sin-colorear.png");
   });
-  await verificar("3.8: el tooltip de la línea agrupada dice cuántos son, entre qué ubicaciones, cuántos de cada red, cuáles y qué elige el clic", async ()=>{
-    const t = await tooltip(page, CABLE);
-    for(const re of [/11 enlaces por cable entre Data Center y Torre principal · \d+ m/, /9 de CCTV, 1 de Red Oficina, 1 de AQ1/, /Cámara 1 ← Router DC/, /y 5 más/, /Clic: elige «Cámara 1»/]) exigir(re.test(t), `falta ${re}: ${t.replace(/\s+/g, " ")}`);
+  await verificar("3.8 y 3.23 (v21): el tooltip de la línea agrupada dice cuántos son, entre qué ubicaciones, cuántos de cada red, hasta 4 (servidor → cliente) y qué elige el clic", async ()=>{
+    const t = await tooltip(page, CABLE, "v21-tooltip-grupo.png");
+    for(const re of [/11 enlaces por cable entre Data Center y Torre principal ·\s\d+\sm/, /9 de CCTV, 1 de Red Oficina, 1 de AQ1/, /Router DC → Cámara 1/, /y 7 más/, /Clic: elige el primero/]) exigir(re.test(t), `falta ${re}: ${t.replace(/\s+/g, " ")}`);
+    exigir((t.match(/→/g) || []).length === 4, "no son 4 enlaces: " + t.replace(/\s+/g, " "));
     const etiqueta = await page.getAttribute(CABLE, "aria-label");
-    exigir(/11 enlaces por cable/.test(etiqueta) && /Clic: elige «Cámara 1»/.test(etiqueta), "aria-label: " + etiqueta);
+    exigir(/^11 enlaces por cable entre Data Center y Torre principal · \d+ m\. 9 de CCTV, 1 de Red Oficina, 1 de AQ1\. Router DC → Cámara 1\./.test(etiqueta) && /Cámara 4 y 7 más\. Clic: elige el primero$/.test(etiqueta), "aria-label: " + etiqueta);
     const r = await tooltip(page, L9);
     exigir(/2 enlaces inalámbricos entre Torre principal y Torre principal del Lote 9/.test(r) && /1 de CCTV, 1 de AQ1/.test(r), r.replace(/\s+/g, " "));
   });
-  await verificar("3.8: un tramo de un solo enlace sigue como antes (su tooltip de siempre, sin «grupo»)", async ()=>{
+  await verificar("3.8 y 3.23 (v21): un tramo de un solo enlace, sin «grupo»: las ubicaciones, la distancia y el medio, servidor → cliente y el clic", async ()=>{
     exigir(!(await page.locator(FIBRA).evaluate(p=>p.classList.contains("inventario-tecnologico-mapa-linea-grupo"))), "la fibra quedó como grupo");
-    exigir(/^Conversor fibra ← Router DC · \d+ m — por fibra óptica$/.test(await page.getAttribute(FIBRA, "aria-label")), await page.getAttribute(FIBRA, "aria-label"));
+    exigir(/^Data Center → Torre principal · \d+ m · por fibra óptica\. Router DC → Conversor fibra\. Clic: elige «Conversor fibra»$/.test(await page.getAttribute(FIBRA, "aria-label")), await page.getAttribute(FIBRA, "aria-label"));
   });
   await verificar("3.8: el clic en la línea agrupada elige el primero", async ()=>{
     await page.click(CABLE);
@@ -3772,8 +3774,8 @@ async function escenarioFranjas(browser, base){
     await grosor(page, 3);
     await page.waitForFunction(sel=>Number(document.querySelector(sel)?.getAttribute("stroke-width")) === 5.4, `${CABLE}[data-red="2"]`, { timeout: 4000 });
     const t = await tooltip(page, `${CABLE}[data-red="2"]`);
-    for(const re of [/CCTV: 9 de 11 enlaces por cable/, /entre Data Center y Torre principal/, /En total: 9 de CCTV, 1 de Red Oficina, 1 de AQ1/, /Cámara 1 ← Router DC/, /y 3 más/, /Clic: elige «Cámara 1»/]) exigir(re.test(t), `falta ${re}: ${t.replace(/\s+/g, " ")}`);
-    exigir(/^Red Oficina: 1 de 11 enlaces por cable[\s\S]*Switch Oficina ← Router DC[\s\S]*Clic: elige «Switch Oficina»/.test(await tooltip(page, `${CABLE}[data-red="3"]`)), "Red Oficina");
+    for(const re of [/CCTV: 9 de 11 enlaces por cable/, /entre Data Center y Torre principal/, /En total: 9 de CCTV, 1 de Red Oficina, 1 de AQ1/, /Router DC → Cámara 1/, /y 5 más/, /Clic: elige el primero/]) exigir(re.test(t), `falta ${re}: ${t.replace(/\s+/g, " ")}`);
+    exigir(/^Red Oficina: 1 de 11 enlaces por cable[\s\S]*Router DC → Switch Oficina[\s\S]*Clic: elige «Switch Oficina»/.test(await tooltip(page, `${CABLE}[data-red="3"]`)), "Red Oficina");
     exigir(/^AQ1: 1 de 11 enlaces por cable[\s\S]*Clic: elige «Switch AQ1»/.test(await tooltip(page, `${CABLE}[data-red="4"]`)), "AQ1");
   });
   await verificar("3.8: el clic en una franja elige el primer enlace de esa red", async ()=>{
@@ -5386,13 +5388,80 @@ async function escenarioCifras(browser, base){
   await context.close();
 }
 
+// ------------------------------------------------------------------ v21 (3.23): los tooltips de las líneas, más cortos y angostos
+// Como en la base real: un PtP-E con una referencia larga y una PtP-R colgada
+// de él en otra torre.
+function fixtureLineas(){
+  const fx = fixtureCobertura();
+  const buscar = id=>fx.tablas.equipos_radioenlace.find(e=>e.id === id);
+  Object.assign(buscar(12), { referencia: "Apuntando a la torre principal del lote M, junto a la garita" });
+  Object.assign(buscar(20), { tipo_equipo: "estacion", referencia: null });
+  fx.tablas.tipos_equipo_red.find(t=>t.valor === "ptp").etiqueta = "PtP-E";
+  fx.tablas.tipos_equipo_red.find(t=>t.valor === "estacion").etiqueta = "PtP-R";
+  return fx;
+}
+async function escenarioLineas(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixtureLineas());
+  await irAlMapa(page);
+  const TT = ".leaflet-tooltip.inventario-tecnologico-mapa-tooltip-linea";
+  const LINEA_SA = `path.inventario-tecnologico-mapa-linea[data-cliente-id="20"]`;
+  // El mouse va a un punto de la línea que quede a la vista: en el medio de
+  // una punteada puede caer en un hueco (y ahí el mouse está sobre el mapa).
+  const verTooltip = async (sel, foto = null)=>{
+    await mapaQuieto(page);
+    const punto = await page.evaluate(sel=>{
+      const p = document.querySelector(sel);
+      if(!p) return null;
+      const largo = p.getTotalLength(), m = p.getScreenCTM();
+      for(let k = 0; k < 40; k++){
+        const i = 20 + (k % 2 ? 1 : -1) * Math.ceil(k / 2);
+        const q = p.getPointAtLength(largo * i / 40);
+        const x = q.x * m.a + q.y * m.c + m.e, y = q.x * m.b + q.y * m.d + m.f;
+        if(document.elementFromPoint(x, y) === p) return { x, y };
+      }
+      return null;
+    }, sel);
+    exigir(punto, "ningún punto de la línea queda a la vista: " + sel);
+    await page.mouse.move(punto.x - 6, punto.y - 6);
+    await page.mouse.move(punto.x, punto.y, { steps: 3 });
+    await page.waitForSelector(TT, { timeout: 3000 });
+    const r = await page.locator(TT).last().evaluate(t=>({ texto: t.innerText, ancho: t.getBoundingClientRect().width, alto: t.getBoundingClientRect().height, lineas: [...t.children].map(x=>[x.className.replace("inventario-tecnologico-mapa-ttl-", ""), x.textContent]) }));
+    if(foto) await captura(page, foto);
+    await page.mouse.move(5, 5);
+    return r;
+  };
+  await verificar("3.23 (v21): el tooltip de un enlace: las ubicaciones y la distancia arriba, los equipos con su nombre corto (servidor → cliente) y el clic", async ()=>{
+    const r = await verTooltip(LINEA_SA, "v21-tooltip-linea.png");
+    // La distancia va junta (con espacios que no se parten): «· 9.31 km» no queda partido en dos renglones.
+    exigir(r.lineas[0][0] === "titulo" && /^Torre Cerro Azul → Torre Santa Ana ·\u00a0\d+\.\d+\u00a0km$/.test(r.lineas[0][1]), JSON.stringify(r.lineas));
+    exigir(JSON.stringify(r.lineas.slice(1)) === JSON.stringify([["item", "PtP-E (Red Administrativa · Apuntando a la torre principal del lote M, junto a la garita) → PtP-R (Red Administrativa)"], ["clic", "Clic: elige «PtP-R (Red Administrativa)»"]]), JSON.stringify(r.lineas));
+    exigir(!/ en Torre|conectad|enlazad/.test(r.texto), "con el nombre largo: " + r.texto);
+    exigir(r.ancho <= 322 && r.ancho > 250 && r.alto > 50, "no quedó en 300 px, partido en líneas: " + JSON.stringify([r.ancho, r.alto]));
+  });
+  await verificar("3.23 (v21): en la línea, el aria-label dice lo mismo en un solo texto", async ()=>{
+    const etiqueta = await page.getAttribute(LINEA_SA, "aria-label");
+    exigir(/^Torre Cerro Azul → Torre Santa Ana · .+\. PtP-E \(Red Administrativa · Apuntando a la torre principal del lote M, junto a la garita\) → PtP-R \(Red Administrativa\)\. Clic: elige «PtP-R \(Red Administrativa\)»$/.test(etiqueta), etiqueta);
+  });
+  await verificar("3.23 (v21): con la simulación, el estado va en su propia línea", async ()=>{
+    await seleccionarEquipoDesdeSuUbicacion(page, 1, 12);
+    await page.click(SEL.simular(12));
+    await page.waitForFunction(()=>/caído/.test(document.getElementById("inventario-tecnologico-mapa-aviso-sim")?.innerText || ""), null, { timeout: 4000 });
+    await page.click(`${SEL.panel} [data-accion="volver-resumen"]`);
+    const r = await verTooltip(LINEA_SA);
+    exigir(r.lineas.some(([tipo, texto])=>tipo === "dato" && /^(Enlace cortado \(simulado\)|Sin servicio en la simulación)$/.test(texto)), JSON.stringify(r.lineas));
+    exigir(r.ancho <= 322, "ancho: " + r.ancho);
+  });
+  await verificar("sin errores de JavaScript (tooltips de las líneas)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+}
+
 // ------------------------------------------------------------------ main
 const srv = await servir(RAIZ);
 const base = `http://127.0.0.1:${srv.address().port}`;
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 try{
   // SOLO=plano (u otro nombre) corre un solo escenario, para depurar.
-  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo, campos: escenarioCampos, sin012: escenarioSin012, vacias: escenarioVacias, grosor0: escenarioGrosorCero, filtros: escenarioFiltros, solo: escenarioSoloTabla, buscar: escenarioBuscar, franjas: escenarioFranjas, tooltip: escenarioTooltip, cobertura: escenarioCobertura, tarjeta: escenarioTarjeta, todos: escenarioTodos, capa3: escenarioCapa3, visitante: escenarioVisitante, cableado: escenarioCableado, bolitas: escenarioBolitas, cifras: escenarioCifras };
+  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo, campos: escenarioCampos, sin012: escenarioSin012, vacias: escenarioVacias, grosor0: escenarioGrosorCero, filtros: escenarioFiltros, solo: escenarioSoloTabla, buscar: escenarioBuscar, franjas: escenarioFranjas, tooltip: escenarioTooltip, cobertura: escenarioCobertura, tarjeta: escenarioTarjeta, todos: escenarioTodos, capa3: escenarioCapa3, visitante: escenarioVisitante, cableado: escenarioCableado, bolitas: escenarioBolitas, cifras: escenarioCifras, lineas: escenarioLineas };
   // SOLO=plano o SOLO=plano,torre (varios, separados por comas).
   const solo = process.env.SOLO ? process.env.SOLO.split(",").map(x=>x.trim()).filter(Boolean) : null;
   for(const [nombre, fn] of Object.entries(escenarios)) if(!solo || solo.includes(nombre)) await fn(browser, base);

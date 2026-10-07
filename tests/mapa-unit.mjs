@@ -1363,32 +1363,35 @@ prueba("v13: buscador de las listas de casillas (sin mayúsculas ni tildes, pala
     assert.deepEqual(cable.map(x=>x.red), [2], "quedan los de CCTV: una sola red, sin franjas");
     assert.equal(cable[0].franja, false);
   });
-  prueba("v14: tooltip de un tramo con varios enlaces: cuántos, entre qué ubicaciones, por red, la lista y qué elige el clic", ()=>{
+  prueba("v14 y v21 (3.23): tooltip de un tramo con varios enlaces: cuántos, entre qué ubicaciones, por red, hasta 4 enlaces (servidor → cliente) y qué elige el clic", ()=>{
     const g = agrupar().grupos;
     const opciones = { nombreEquipo:nombre, nombreUbicacion:id=>U.find(u=>u.id === id).nombre, nombreRed:id=>NOMBRE_RED[id], hayRedes:true };
+    const textos = l=>l.map(x=>x.texto);
     const [entero] = LA.planDeTrazos(g, { colorPorRed:false, anchoDe }).filter(x=>x.grupo.clave === "1-2|cable");
     const txt = LA.textoTrazo(entero, opciones);
-    assert.match(txt[0], /^4 enlaces por cable entre Torre principal y Data Center · \d+ m$/);
-    assert.equal(txt[1], "2 de CCTV, 1 de Red Oficina, 1 sin red");
-    assert.deepEqual(txt.slice(2), ["Cámara A ← Router DC", "Cámara B ← Router DC", "Switch Oficina ← Router DC", "Equipo suelto ← Router DC", "Clic: elige «Cámara A»"]);
+    assert.deepEqual(txt.map(x=>x.tipo), ["titulo", "dato", "item", "item", "item", "item", "clic"]);
+    assert.match(txt[0].texto, /^4 enlaces por cable entre Torre principal y Data Center · \d+ m$/);
+    assert.equal(txt[1].texto, "2 de CCTV, 1 de Red Oficina, 1 sin red");
+    assert.deepEqual(textos(txt.slice(2)), ["Router DC → Cámara A", "Router DC → Cámara B", "Router DC → Switch Oficina", "Router DC → Equipo suelto", "Clic: elige el primero"]);
     const franja = LA.planDeTrazos(g, { colorPorRed:true, anchoDe }).find(x=>x.grupo.clave === "1-2|cable" && x.red === 3);
     const tf = LA.textoTrazo(franja, opciones);
-    assert.equal(tf[0], "Red Oficina: 1 de 4 enlaces por cable");
-    assert.match(tf[1], /^entre Torre principal y Data Center/);
-    assert.equal(tf[2], "En total: 2 de CCTV, 1 de Red Oficina, 1 sin red");
-    assert.deepEqual(tf.slice(3), ["Switch Oficina ← Router DC", "Clic: elige «Switch Oficina»"]);
+    assert.equal(tf[0].texto, "Red Oficina: 1 de 4 enlaces por cable");
+    assert.match(tf[1].texto, /^entre Torre principal y Data Center/);
+    assert.equal(tf[2].texto, "En total: 2 de CCTV, 1 de Red Oficina, 1 sin red");
+    assert.deepEqual(textos(tf.slice(3)), ["Router DC → Switch Oficina", "Clic: elige «Switch Oficina»"], "con un solo enlace, el clic lo nombra");
     const sinRed = LA.planDeTrazos(g, { colorPorRed:true, anchoDe }).find(x=>x.grupo.clave === "1-2|cable" && x.red === null);
-    assert.equal(LA.textoTrazo(sinRed, opciones)[0], "Sin red: 1 de 4 enlaces por cable");
+    assert.equal(LA.textoTrazo(sinRed, opciones)[0].texto, "Sin red: 1 de 4 enlaces por cable");
     const sinRedes = LA.textoTrazo(entero, { ...opciones, hayRedes:false });
-    assert.ok(!sinRedes.some(x=>/de CCTV/.test(x)), "sin la 007, sin el detalle por red");
+    assert.ok(!sinRedes.some(x=>/de CCTV/.test(x.texto)), "sin la 007, sin el detalle por red");
   });
-  prueba("v14: la lista del tooltip se corta en 6 («y N más»); clases en singular y plural", ()=>{
+  prueba("v21: la lista del tooltip se corta en 4 («y N más»); clases en singular y plural", ()=>{
     const muchos = Array.from({ length: 8 }, (_, i)=>({ tipo:"principal", estilo:"cable", clienteId:100 + i, servidorId:1, desdeId:1, hastaId:2, desde:{ lat:0, lng:0 }, hasta:{ lat:0, lng:1 } }));
     const { grupos } = LA.agruparLineas(muchos, { nombreDe:id=>`E${id}` });
     const [t] = LA.planDeTrazos(grupos, { anchoDe });
     const txt = LA.textoTrazo(t, { nombreEquipo:id=>`E${id}` });
-    assert.equal(txt.filter(x=>/←/.test(x)).length, 6);
-    assert.ok(txt.includes("y 2 más"));
+    assert.equal(LA.MAXIMO_LISTADOS, 4);
+    assert.equal(txt.filter(x=>x.tipo === "item").length, 4);
+    assert.deepEqual(txt.filter(x=>x.tipo === "mas").map(x=>x.texto), ["y 4 más"]);
     assert.equal(LA.textoCantidadEnlaces("radio", 1), "1 enlace inalámbrico");
     assert.equal(LA.textoCantidadEnlaces("radio", 2), "2 enlaces inalámbricos");
     assert.equal(LA.textoCantidadEnlaces("fibra", 3), "3 enlaces por fibra óptica");
@@ -1573,6 +1576,44 @@ prueba("v20: cifras del panel: torres, equipos de red, radioenlaces (PtP-R colga
   assert.deepEqual([par(filtrado.torres), par(filtrado.equipos), par(filtrado.radioenlaces), par(filtrado.camaras)], [[1, 2], [6, 11], [1, 3], [1, 2]], "con filtros: lo visible y el total");
   assert.deepEqual(J.cifrasPanel({}), { torres: { visibles: 0, total: 0 }, equipos: { visibles: 0, total: 0 }, radioenlaces: { visibles: 0, total: 0 }, camaras: { visibles: 0, total: 0 } });
   assert.equal(J.TIPO_UBICACION_TORRE, "torre");
+});
+// ---------------------------------------------------------------- v21 (3.23): tooltips de las líneas, más cortos
+prueba("v21: el nombre corto de un equipo: su tipo con la red y la referencia, el número si lo lleva; sin tipo, su nombre recortado", ()=>{
+  const tipoPorValor = new Map([["ptp", { valor:"ptp", etiqueta:"PtP-E" }], ["estacion", { valor:"estacion", etiqueta:"PtP-R" }], ["camara", { valor:"camara", etiqueta:"Cámara" }]]);
+  const redes = { 2:"CCTV", 4:"AQ1" };
+  const opciones = { tipoPorValor, nombreRed:e=>redes[e.red_efectiva ?? e.red_id] || null };
+  assert.equal(N.nombreCortoEquipo({ tipo_equipo:"ptp", red_id:2, referencia:"Apuntando a la torre principal del lote M", nombre:"PtP-E (CCTV · Apuntando a la torre principal del lote M) en Torre principal conectado a Router en Data Center" }, opciones), "PtP-E (CCTV · Apuntando a la torre principal del lote M)");
+  assert.equal(N.nombreCortoEquipo({ tipo_equipo:"estacion", red_id:null, red_efectiva:2, referencia:null, nombre:"PtP-R (CCTV) en Torre M25 enlazada a PtP-E en Torre principal" }, opciones), "PtP-R (CCTV)", "con la red heredada");
+  assert.equal(N.nombreCortoEquipo({ tipo_equipo:"camara", red_id:2, referencia:null, nombre:"Cámara (CCTV) en Torre principal conectada a Router en Data Center (2)" }, opciones), "Cámara (CCTV) (2)", "conserva el número de un nombre repetido");
+  assert.equal(N.nombreCortoEquipo({ tipo_equipo:"camara", red_id:null, referencia:"2", nombre:"Cámara (2) en Torre principal" }, opciones), "Cámara (2)", "una referencia «2» no es un número de repetido");
+  assert.equal(N.nombreCortoEquipo({ tipo_equipo:null, nombre:"Router DC" }, opciones), "Router DC", "sin tipo, su nombre");
+  assert.equal(N.nombreCortoEquipo({ tipo_equipo:null, nombre:"x".repeat(80) }, opciones), "x".repeat(59) + "…", "recortado a 60");
+  assert.equal(N.nombreCortoEquipo({ tipo_equipo:"desconocido", nombre:"Algo" }, opciones), "Algo", "un tipo que no está en el catálogo, como sin tipo");
+  assert.equal(N.nombreCortoEquipo(null), "?");
+});
+prueba("v21: el número del nombre corto es el que dejó aplicarNombres, no un «(2)» del servidor o de la ubicación", ()=>{
+  const ub = [...UB_RED, { id:5, nombre:"Piscina (3)" }];
+  const equipos = N.aplicarNombres([eqN(1, 1, null, null, { nombre:"Switch viejo (2)" }), eqN(2, 1, "camara", 1), eqN(3, 1, "camara", 1), eqN(4, 5, "camara")], { ubicaciones: ub, tipos: TIPOS_RED });
+  assert.deepEqual(equipos.map(e=>[e.nombre, e.numero_nombre]), [["Switch viejo (2)", null], ["Cámara en Torre K conectada a Switch viejo (2)", 1], ["Cámara en Torre K conectada a Switch viejo (2) (2)", 2], ["Cámara en Piscina (3)", 1]]);
+  const tipoPorValor = new Map(TIPOS_RED.map(t=>[t.valor, t]));
+  assert.deepEqual(equipos.map(e=>N.nombreCortoEquipo(e, { tipoPorValor })), ["Switch viejo (2)", "Cámara", "Cámara (2)", "Cámara"]);
+  assert.equal(N.nombreCortoEquipo({ tipo_equipo:"camara", numero_nombre:3, nombre:"Cámara en Torre K" }, { tipoPorValor }), "Cámara (3)");
+  const numeros = new Map();
+  N.nombresAutomaticos({ equipos, ubicaciones: ub, tipos: TIPOS_RED }, numeros);
+  assert.deepEqual([...numeros], [[2, 1], [3, 2], [4, 1]], "nombresAutomaticos los deja en el Map, solo los que tienen tipo");
+});
+prueba("v21: el tooltip de un enlace solo: ubicaciones, distancia y medio arriba; servidor → cliente; su estado y el clic", ()=>{
+  const l = LA.textoEnlace({ desde:"Torre principal", hasta:"Torre principal del lote M", distanciaKm:1.44, clase:"radio", servidor:"PtP-E (CCTV · Apuntando a la torre principal del lote M)", cliente:"PtP-R (CCTV)" });
+  assert.deepEqual(l.map(x=>[x.tipo, x.texto]), [["titulo", "Torre principal → Torre principal del lote M · 1.44 km"], ["item", "PtP-E (CCTV · Apuntando a la torre principal del lote M) → PtP-R (CCTV)"], ["clic", "Clic: elige «PtP-R (CCTV)»"]]);
+  const cable = LA.textoEnlace({ desde:"Data Center", hasta:"Torre principal", distanciaKm:0.044, clase:"fibra", estado:"enlace cortado (simulado)", servidor:"Router (CCTV)", cliente:"Conversor" });
+  assert.deepEqual(cable.map(x=>x.texto), ["Data Center → Torre principal · 44 m · por fibra óptica", "Router (CCTV) → Conversor", "Enlace cortado (simulado)", "Clic: elige «Conversor»"]);
+  assert.equal(LA.textoEnlace({ distanciaKm:null })[0].texto, "? → ?", "sin distancia, sin «·»");
+});
+prueba("v21: el texto para lectores de pantalla une las líneas con «. », y con un espacio si la siguiente empieza en minúscula", ()=>{
+  assert.equal(LA.textoParaLector([{ texto:"CCTV: 9 de 11 enlaces por cable" }, { texto:"entre Data Center y Torre principal · 44 m" }, { texto:"En total: 9 de CCTV" }, { texto:"Router DC → Cámara 1" }, { texto:"y 5 más" }, { texto:"Clic: elige el primero" }]),
+    "CCTV: 9 de 11 enlaces por cable entre Data Center y Torre principal · 44 m. En total: 9 de CCTV. Router DC → Cámara 1 y 5 más. Clic: elige el primero");
+  assert.equal(LA.textoParaLector(["a", "B"]), "a. B", "también con textos sueltos");
+  assert.equal(LA.textoParaLector([]), "");
 });
 prueba("v15: modos del tooltip y sus textos", ()=>{
   assert.deepEqual(TU.MODOS_TOOLTIP.map(m=>m.id), ["nombre", "tipos", "redes", "ambos"]);
