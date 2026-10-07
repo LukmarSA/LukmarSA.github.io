@@ -1199,9 +1199,9 @@ async function escenarioRed(browser, base){
     exigir(/inalámbrico · \d/.test(entrada) && /desde Punto a Punto .*· Oficina Centro/.test(entrada), "entrada: " + entrada);
     exigir(/9 clientes por radio/.test(await texto(page, `${SEL.panel} .inventario-tecnologico-mapa-cab`)), "sin la salida por radio del AP");
   });
-  await verificar("la torre muestra sus secciones como tarjetas de colores distintos (equipos, cableado, activos)", async ()=>{
+  await verificar("la torre muestra sus secciones como tarjetas de colores distintos (v19, 3.19: cableado, equipos, activos)", async ()=>{
     const tarjetas = await page.locator(`${SEL.panel} .inventario-tecnologico-mapa-tarjeta`).evaluateAll(l=>l.map(t=>({ clase: [...t.classList].find(c=>/tarjeta-(equipos|cableado|activos)$/.test(c)), borde: getComputedStyle(t).borderTopColor, titulo: t.querySelector(".inventario-tecnologico-mapa-tarjeta-titulo").textContent })));
-    exigir(tarjetas.map(t=>t.clase && t.clase.replace(/.*tarjeta-/, "")).join("|") === "equipos|cableado|activos", JSON.stringify(tarjetas));
+    exigir(tarjetas.map(t=>t.clase && t.clase.replace(/.*tarjeta-/, "")).join("|") === "cableado|equipos|activos", JSON.stringify(tarjetas));
     exigir(new Set(tarjetas.map(t=>t.borde)).size === 3, "los tres bordes deberían ser de colores distintos: " + tarjetas.map(t=>t.borde).join(", "));
   });
   await page.screenshot({ path: path.join(CAPTURAS, "14-red-torre.png") });
@@ -3867,6 +3867,35 @@ function fixtureCobertura({ m013 = true, conCobertura = true, red007 = true } = 
 }
 // Las filas de la tablita del tooltip abierto: [etiqueta, cantidad, ¿tiene ícono?].
 const filasTooltip = (page, cual = "")=>page.locator(`${TT_UBIC} table${cual}`).last().evaluate(t=>[...t.querySelectorAll("tr")].map(tr=>[(tr.querySelector(".inventario-tecnologico-mapa-tt-etq-texto") || tr.querySelector(".inventario-tecnologico-mapa-tt-etq")).textContent, Number(tr.querySelector(".inventario-tecnologico-mapa-tt-n").textContent), !!tr.querySelector("svg, .inventario-tecnologico-mapa-tt-punto")]));
+// v18 (3.17): «Tipos y redes» del tooltip abierto. Por fila: la etiqueta, las
+// cantidades [red, cantidad, color, ¿con borde?] (red null = «Sin red»), los
+// separadores, el texto para lectores de pantalla (y si queda oculto a la
+// vista) y si las cifras de colores quedan ocultas al lector. La leyenda:
+// [nombre, color del punto, ¿punto con borde?].
+const cruzadoTooltip = page=>page.locator(TT_UBIC).last().evaluate(tt=>{
+  const P = "inventario-tecnologico-";
+  const filas = [...tt.querySelectorAll(`table.${P}mapa-tt-tabla tr`)].map(tr=>{
+    const sr = tr.querySelector(`.${P}mapa-tt-sr`);
+    const cifras = tr.querySelector(`.${P}mapa-tt-nr-cifras`);
+    return {
+      etq: (tr.querySelector(`.${P}mapa-tt-etq-texto`) || tr.querySelector(`.${P}mapa-tt-etq`)).textContent,
+      nums: [...tr.querySelectorAll(`.${P}mapa-tt-nr`)].map(s=>[s.dataset.red === "" ? null : Number(s.dataset.red), Number(s.textContent), getComputedStyle(s).color, s.classList.contains(`${P}mapa-tt-nr-claro`) && getComputedStyle(s).textShadow !== "none"]),
+      seps: [...tr.querySelectorAll(`.${P}mapa-tt-sep`)].map(s=>s.textContent),
+      sr: sr ? sr.textContent : null,
+      srOculto: sr ? sr.getBoundingClientRect().width <= 1 && sr.getBoundingClientRect().height <= 1 : null,
+      cifrasOcultasAlLector: cifras ? cifras.getAttribute("aria-hidden") === "true" : null,
+    };
+  });
+  const items = [...tt.querySelectorAll(`.${P}mapa-tt-leyenda .${P}mapa-tt-ley`)];
+  const leyenda = items.map(l=>{ const p = l.querySelector(`.${P}mapa-tt-punto`); return [l.textContent, getComputedStyle(p).backgroundColor, p.classList.contains(`${P}mapa-tt-punto-claro`)]; });
+  // Cuántas líneas ocupa la leyenda, su ancho y si algo se sale del tooltip.
+  const caja = tt.getBoundingClientRect();
+  const lista = tt.querySelector(`.${P}mapa-tt-leyenda-lista`);
+  const forma = { lineas: new Set(items.map(i=>Math.round(i.getBoundingClientRect().top))).size, ancho: lista ? Math.round(lista.getBoundingClientRect().width) : 0, tooltip: Math.round(caja.width),
+    seSale: [...tt.querySelectorAll("*")].some(e=>{ const r = e.getBoundingClientRect(); return r.width > 1 && (r.right > caja.right + 0.5 || r.left < caja.left - 0.5); }) };
+  return { tablas: tt.querySelectorAll("table").length, aria: tt.querySelector("table")?.getAttribute("aria-label") ?? null, filas, leyenda, forma };
+});
+const rgb = hex=>{ const h = hex.replace("#", ""); return `rgb(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)})`; };
 async function tooltipDe(page, ubicacionId, { teclado = false } = {}){
   const sel = `.leaflet-marker-icon[data-ubicacion-id="${ubicacionId}"]`;
   if(teclado) await page.focus(sel); else await page.hover(sel);
@@ -3939,17 +3968,27 @@ async function escenarioTooltip(browser, base){
       await captura(page, "v15-tooltip-borde.png");
       await soltarTooltip(page);
     });
-    await verificar("3.10: «Redes»: cuántos equipos de cada red (con su color); «Tipos y redes», las dos tablitas", async ()=>{
+    await verificar("3.10: «Redes»: cuántos equipos de cada red (con su color)", async ()=>{
       await elegirModoTooltip(page, "redes");
       await tooltipDe(page, 1, { teclado: true });
       const redes = await filasTooltip(page);
       exigir(JSON.stringify(redes) === '[["Red Administrativa",3,true],["Red Cámaras",3,true]]', JSON.stringify(redes));
+      exigir(await cuenta(page, `${TT_UBIC} .inventario-tecnologico-mapa-tt-leyenda, ${TT_UBIC} .inventario-tecnologico-mapa-tt-nr`) === 0, "«Redes» cambió");
       await soltarTooltip(page);
+    });
+    await verificar("3.17 (v18): «Tipos y redes», una sola tablita: cada tipo con su cantidad del color de su red y abajo el color de cada red", async ()=>{
       await elegirModoTooltip(page, "ambos");
       await tooltipDe(page, 1, { teclado: true });
-      exigir(await page.locator(`${TT_UBIC} table`).count() === 2, "no son dos tablitas");
-      exigir(JSON.stringify(await filasTooltip(page, ".inventario-tecnologico-mapa-tt-tabla-redes")) === '[["Red Administrativa",3,true],["Red Cámaras",3,true]]', "redes en «ambos»");
-      await captura(page, "v15-tooltip-ambos.png");
+      const x = await cruzadoTooltip(page);
+      exigir(x.tablas === 1 && x.aria === "Equipos por tipo y red", "no es una sola tablita: " + JSON.stringify(x));
+      const ADM = rgb("#004DAB"), CAM = rgb("#EC741D");
+      // En Cerro Azul cada tipo es de una sola red: un número de su color, sin «/».
+      exigir(JSON.stringify(x.filas.map(f=>[f.etq, f.nums.map(([red, n, color])=>[red, n, color])])) === JSON.stringify([["Switch", [[2, 1, CAM]]], ["Punto a Punto", [[1, 2, ADM]]], ["AP", [[1, 1, ADM]]], ["Cámara", [[2, 2, CAM]]]]), JSON.stringify(x.filas));
+      exigir(x.filas.every(f=>!f.seps.length && !f.nums.some(n=>n[3])), "con «/» o con borde: " + JSON.stringify(x.filas));
+      exigir(x.filas[0].sr === "1 en Red Cámaras" && x.filas.every(f=>f.srOculto && f.cifrasOcultasAlLector), "lectores de pantalla: " + JSON.stringify(x.filas));
+      exigir(JSON.stringify(x.leyenda) === JSON.stringify([["Red Administrativa", ADM, false], ["Red Cámaras", CAM, false]]), "leyenda: " + JSON.stringify(x.leyenda));
+      exigir(x.forma.lineas === 1 && !x.forma.seSale, "la leyenda no va en una línea o algo se sale: " + JSON.stringify(x.forma));
+      await captura(page, "v18-tooltip-ambos.png");
       await soltarTooltip(page);
     });
     await verificar("3.10: «Solo el nombre» deja el tooltip de siempre", async ()=>{
@@ -3959,14 +3998,46 @@ async function escenarioTooltip(browser, base){
       await soltarTooltip(page);
       await elegirModoTooltip(page, "tipos");
     });
-    await verificar("3.10: cuenta todo lo que hay, aunque los filtros oculten algo, y avisa cuántos oculta", async ()=>{
+    await verificar("3.20 (v19): cuenta solo lo que dejan a la vista los filtros (aquí, sin la Red Cámaras) y avisa cuántos esconden", async ()=>{
       await clicFiltro(page, SEL.chip("red", "2"));
       await tooltipDe(page, 1, { teclado: true });
       const filas = await filasTooltip(page);
-      exigir(JSON.stringify(filas) === '[["Switch",1,true],["Punto a Punto",2,true],["AP",1,true],["Cámara",2,true]]', "las cuentas cambiaron con el filtro: " + JSON.stringify(filas));
+      exigir(JSON.stringify(filas) === '[["Punto a Punto",2,true],["AP",1,true]]', "cuenta lo que esconde el filtro: " + JSON.stringify(filas));
       exigir(/3 ocultos por los filtros/.test(await page.locator(TT_UBIC).last().innerText()), "sin el aviso: " + await page.locator(TT_UBIC).last().innerText());
       await soltarTooltip(page);
+    });
+    await verificar("3.20 (v19): en «Tipos y redes», también las redes y la leyenda son solo las de lo visible", async ()=>{
+      await elegirModoTooltip(page, "ambos");
+      await tooltipDe(page, 1, { teclado: true });
+      const x = await cruzadoTooltip(page);
+      exigir(JSON.stringify(x.filas.map(f=>[f.etq, f.nums.map(([red, n])=>[red, n])])) === JSON.stringify([["Punto a Punto", [[1, 2]]], ["AP", [[1, 1]]]]), JSON.stringify(x.filas));
+      exigir(JSON.stringify(x.leyenda.map(l=>l[0])) === '["Red Administrativa"]', "leyenda: " + JSON.stringify(x.leyenda));
+      exigir(/3 ocultos por los filtros/.test(await page.locator(TT_UBIC).last().innerText()), "sin el aviso");
+      await soltarTooltip(page);
+      await elegirModoTooltip(page, "tipos");
       await clicFiltro(page, SEL.chip("red", "2"));
+    });
+    await verificar("3.20 (v19): con «solo esta» en un tipo de equipo, el tooltip muestra solo ese tipo", async ()=>{
+      await page.click(DD("tiposEquipo"));
+      await page.dblclick(OPCION("tiposEquipo", "ptp") + " [data-tipo-equipo]");
+      await cerrarFiltros(page);
+      await tooltipDe(page, 1, { teclado: true });
+      exigir(JSON.stringify(await filasTooltip(page)) === '[["Punto a Punto",2,true]]', JSON.stringify(await filasTooltip(page)));
+      exigir(/4 ocultos por los filtros/.test(await page.locator(TT_UBIC).last().innerText()), "sin el aviso: " + await page.locator(TT_UBIC).last().innerText());
+      await soltarTooltip(page);
+      await page.click(DD("tiposEquipo"));
+      await page.dblclick(OPCION("tiposEquipo", "ptp") + " [data-tipo-equipo]");
+      await cerrarFiltros(page);
+    });
+    await verificar("3.20 (v19): la ubicación elegida con todos sus equipos ocultos solo dice cuántos esconden (no «Sin equipos de red»)", async ()=>{
+      await irAUbicacionDesdePanel(page, 4); // Bodega Sur: su único equipo no tiene tipo
+      await clicFiltro(page, SEL.chip("tipo-equipo", "-sin-tipo"));
+      await tooltipDe(page, 4, { teclado: true });
+      const t = await page.locator(TT_UBIC).last().innerText();
+      exigir(/1 oculto por los filtros/.test(t) && !/Sin equipos de red/.test(t) && await cuenta(page, `${TT_UBIC} table`) === 0, t);
+      await soltarTooltip(page);
+      await clicFiltro(page, SEL.chip("tipo-equipo", "-sin-tipo"));
+      await page.click(`${SEL.panel} [data-accion="volver-resumen"]`);
     });
     await verificar("3.10: el modo elegido se recuerda en este navegador (al volver a abrir la app)", async ()=>{
       await elegirModoTooltip(page, "ambos");
@@ -3977,6 +4048,65 @@ async function escenarioTooltip(browser, base){
       await elegirModoTooltip(page, "tipos");
     });
     await verificar("sin errores de JavaScript (tooltip de las ubicaciones)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+  {
+    // v18 (3.17): en Cerro Azul, un PtP en cada red y otro sin red, y la Red
+    // Cámaras en amarillo (como tuvo CCTV en la base real).
+    const fx = fixtureCobertura();
+    const ptpCA = fx.tablas.equipos_radioenlace.find(e=>e.id === 12);
+    ptpCA.red_id = 2;
+    fx.tablas.equipos_radioenlace.push({ ...ptpCA, id: 60, nombre: "PTP de repuesto CA", servidor_id: 10, red_id: null, referencia: "Repuesto" });
+    fx.tablas.redes.find(r=>r.id === 2).color = "#FBFF14";
+    const { context, page, errores } = await abrirApp(browser, base, fx);
+    await irAlMapa(page);
+    await elegirModoTooltip(page, "ambos");
+    const ADM = rgb("#004DAB"), AMA = rgb("#FBFF14"), GRIS = rgb("#57697C");
+    await verificar("3.17 (v18): un tipo en varias redes: sus cantidades separadas por «/», en el orden de las redes y «Sin red» en gris, al final", async ()=>{
+      await tooltipDe(page, 1, { teclado: true });
+      const x = await cruzadoTooltip(page);
+      exigir(x.tablas === 1, "más de una tablita");
+      const ptp = x.filas.find(f=>f.etq === "Punto a Punto");
+      exigir(ptp && JSON.stringify(ptp.nums.map(([red, n, color])=>[red, n, color])) === JSON.stringify([[1, 1, ADM], [2, 1, AMA], [null, 1, GRIS]]), JSON.stringify(ptp));
+      exigir(JSON.stringify(ptp.seps) === '["/","/"]', "separadores: " + JSON.stringify(ptp.seps));
+      exigir(ptp.sr === "1 en Red Administrativa, 1 en Red Cámaras y 1 sin red" && ptp.srOculto && ptp.cifrasOcultasAlLector, "lectores de pantalla: " + JSON.stringify(ptp));
+      exigir(JSON.stringify(x.filas.map(f=>[f.etq, f.nums.map(([red, n])=>[red, n])])) === JSON.stringify([["Switch", [[2, 1]]], ["Punto a Punto", [[1, 1], [2, 1], [null, 1]]], ["AP", [[1, 1]]], ["Cámara", [[2, 2]]]]), JSON.stringify(x.filas));
+      exigir(JSON.stringify(x.leyenda.map(l=>l[0])) === '["Red Administrativa","Red Cámaras","Sin red"]', "leyenda: " + JSON.stringify(x.leyenda));
+      if(process.env.DEPURAR) console.log("   [leyenda]", JSON.stringify(x.forma));
+      exigir(!x.forma.seSale && x.forma.ancho <= 260, "la leyenda se sale o pasa de 260 px: " + JSON.stringify(x.forma));
+      await captura(page, "v18-tooltip-varias-redes.png");
+      await soltarTooltip(page);
+    });
+    await verificar("3.17 (v18): el amarillo lleva un borde fino oscuro (en los números y en su punto de la leyenda); los demás colores, no", async ()=>{
+      await tooltipDe(page, 1, { teclado: true });
+      const x = await cruzadoTooltip(page);
+      const nums = x.filas.flatMap(f=>f.nums);
+      exigir(nums.filter(n=>n[0] === 2).length === 3 && nums.filter(n=>n[0] === 2).every(n=>n[3]), "amarillos sin borde: " + JSON.stringify(nums));
+      exigir(nums.filter(n=>n[0] !== 2).every(n=>!n[3]), "otros con borde: " + JSON.stringify(nums));
+      exigir(JSON.stringify(x.leyenda.map(l=>l[2])) === "[false,true,false]", "puntos: " + JSON.stringify(x.leyenda));
+      await soltarTooltip(page);
+    });
+    await verificar("3.17 (v18): «Sin tipo» también se reparte, y donde no hay redes la leyenda solo dice «Sin red»", async ()=>{
+      await tooltipDe(page, 4, { teclado: true }); // Bodega Sur: SM Bodega, sin tipo ni red
+      const x = await cruzadoTooltip(page);
+      exigir(JSON.stringify(x.filas.map(f=>[f.etq, f.nums.map(([red, n, color])=>[red, n, color])])) === JSON.stringify([["Sin tipo", [[null, 1, GRIS]]]]), JSON.stringify(x.filas));
+      exigir(JSON.stringify(x.leyenda.map(l=>l[0])) === '["Sin red"]', JSON.stringify(x.leyenda));
+      await soltarTooltip(page);
+    });
+    await verificar("3.17 (v18): «Tipos» y «Redes» quedan como antes", async ()=>{
+      await elegirModoTooltip(page, "tipos");
+      await tooltipDe(page, 1, { teclado: true });
+      exigir(await cuenta(page, `${TT_UBIC} .inventario-tecnologico-mapa-tt-nr, ${TT_UBIC} .inventario-tecnologico-mapa-tt-leyenda`) === 0, "con colores en «Tipos»");
+      exigir(JSON.stringify(await filasTooltip(page)) === '[["Switch",1,true],["Punto a Punto",3,true],["AP",1,true],["Cámara",2,true]]', JSON.stringify(await filasTooltip(page)));
+      await soltarTooltip(page);
+      await elegirModoTooltip(page, "redes");
+      await tooltipDe(page, 1, { teclado: true });
+      exigir(JSON.stringify(await filasTooltip(page)) === '[["Red Administrativa",2,true],["Red Cámaras",4,true],["Sin red",1,true]]', JSON.stringify(await filasTooltip(page)));
+      exigir(await cuenta(page, `${TT_UBIC} .inventario-tecnologico-mapa-tt-leyenda, ${TT_UBIC} .inventario-tecnologico-mapa-tt-nr`) === 0, "con la leyenda o los colores en «Redes»");
+      await soltarTooltip(page);
+      await elegirModoTooltip(page, "tipos");
+    });
+    await verificar("sin errores de JavaScript (tooltip con varias redes)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
     await context.close();
   }
   {
@@ -4980,13 +5110,289 @@ async function escenarioTodos(browser, base){
   }
 }
 
+// ------------------------------------------------------------------ v18 (3.18): el mapa de solo lectura de un visitante
+// Desde el 2-oct, en la base real, visitante y registrador tienen «Ver el
+// mapa». Con la misma red que el administrador (la de capa 3, con piscinas y
+// plano): ve lo mismo, puede simular caídas (solo en su pantalla) y no tiene
+// nada que cambie algo; tampoco escribe nada en toda la sesión.
+function comoVisitante(fx, { verMapa = true } = {}){
+  fx.sesion = { user: { id: "u-usuario", email: "visitante@lukmar.local" } };
+  fx.tablas.perfiles = fx.tablas.perfiles.map(p=>p.id === "u-usuario" ? { ...p, rol: "visitante", nombre_completo: "Visitante Pruebas" } : p);
+  for(const p of fx.tablas.permisos) if(p.rol === "visitante" && p.accion === "ver_mapa") p.permitido = verMapa;
+  return fx;
+}
+function fixtureVisitante(){
+  const fx = fixtureCapa3();
+  fx.tablas.piscinas = PISCINAS_POLIGONOS.map(p=>JSON.parse(JSON.stringify(p)));
+  return fx;
+}
+// Lo que solo el administrador tiene: en la barra, el plano y el panel.
+const SOLO_ADMIN_BARRA = ["#inventario-tecnologico-mapa-nueva-ubicacion", "#inventario-tecnologico-mapa-redes-tipos", "#inventario-tecnologico-mapa-lote"];
+const ACCIONES_SOLO_ADMIN = ["editar-ubicacion", "archivar-ubicacion", "eliminar-ubicacion", "nuevo-equipo", "editar-equipo", "eliminar-equipo", "nuevo-respaldo", "editar-respaldo", "eliminar-respaldo", "editar-atajo", "guardar-atajo", "asignar-activos"];
+const accionesPanel = page=>page.locator(`${SEL.panel} [data-accion]`).evaluateAll(l=>[...new Set(l.map(x=>x.dataset.accion))].sort());
+const fotoDelMapa = page=>page.evaluate(()=>({
+  marcadores: [...document.querySelectorAll(".leaflet-marker-icon[data-ubicacion-id]")].map(m=>Number(m.dataset.ubicacionId)).sort((a, b)=>a - b),
+  lineas: document.querySelectorAll("path.inventario-tecnologico-mapa-linea").length,
+  cifras: document.querySelector("#inventario-tecnologico-mapa-panel .inventario-tecnologico-mapa-cifras")?.innerText.replace(/\s+/g, " ").trim() || "",
+}));
+async function escenarioVisitante(browser, base){
+  let admin;
+  {
+    // El administrador, con la misma red, para comparar.
+    const { context, page, errores } = await abrirApp(browser, base, fixtureVisitante());
+    await irAlMapa(page);
+    await mapaQuieto(page);
+    admin = await fotoDelMapa(page);
+    admin.barra = await Promise.all(SOLO_ADMIN_BARRA.map(s=>cuenta(page, s)));
+    admin.ayuda = await texto(page, `${SEL.panel} .inventario-tecnologico-mapa-panel-sub`);
+    await irAUbicacionDesdePanel(page, 1);
+    admin.accionesUbicacion = await accionesPanel(page);
+    await seleccionarEquipoDesdeSuUbicacion(page, 1, 50);
+    admin.accionesEquipo = await accionesPanel(page);
+    await verificar("3.18 (v18): el administrador, para comparar, tiene sus herramientas de edición", async ()=>{
+      exigir(admin.barra.every(n=>n === 1), "barra: " + JSON.stringify(admin.barra));
+      exigir(/Clic derecho en el mapa/.test(admin.ayuda), admin.ayuda);
+      exigir(["editar-ubicacion", "nuevo-equipo"].every(a=>admin.accionesUbicacion.includes(a)) && ["editar-equipo", "eliminar-equipo"].every(a=>admin.accionesEquipo.includes(a)), JSON.stringify([admin.accionesUbicacion, admin.accionesEquipo]));
+      exigir(admin.marcadores.length > 5 && admin.lineas > 0, JSON.stringify(admin));
+      exigir(errores.length === 0, errores.join(" | "));
+    });
+    await context.close();
+  }
+  {
+    const { context, page, errores } = await abrirApp(browser, base, comoVisitante(fixtureVisitante(), { verMapa: false }));
+    await verificar("3.18 (v18): sin «Ver el mapa» (así estaba en la base real hasta el 2-oct), el visitante no tiene la pestaña Mapa ni «Ver en mapa»", async ()=>{
+      const tabs = await page.locator(".inventario-tecnologico-tab-btn").allInnerTexts();
+      exigir(!tabs.includes("Mapa") && tabs.includes("Activos"), tabs.join(", "));
+      await page.locator("tr", { hasText: "LKM-002" }).first().click();
+      await page.waitForFunction(()=>/Oficina Centro/.test(document.getElementById("inventario-tecnologico-ubicacion-activo")?.innerText || ""));
+      exigir(!/Ver en mapa/.test(await texto(page, "#inventario-tecnologico-ubicacion-activo")), "ve «Ver en mapa»");
+      exigir(errores.length === 0, errores.join(" | "));
+    });
+    await context.close();
+  }
+  {
+    const { context, page, errores } = await abrirApp(browser, base, comoVisitante(fixtureVisitante()));
+    await verificar("3.18 (v18): con «Ver el mapa», el visitante tiene la pestaña Mapa y ve el mismo mapa que el administrador", async ()=>{
+      const tabs = await page.locator(".inventario-tecnologico-tab-btn").allInnerTexts();
+      exigir(tabs.includes("Mapa"), tabs.join(", "));
+      await irAlMapa(page);
+      await mapaQuieto(page);
+      const v = await fotoDelMapa(page);
+      exigir(JSON.stringify(v.marcadores) === JSON.stringify(admin.marcadores) && v.lineas === admin.lineas && v.cifras === admin.cifras, JSON.stringify({ visitante: v, admin: { marcadores: admin.marcadores, lineas: admin.lineas, cifras: admin.cifras } }));
+      await captura(page, "v18-visitante.png");
+    });
+    await verificar("3.18 (v18): … sin nada que cambie algo: ni «+ Ubicación», «Redes y tipos» ni el lote, y la ayuda no habla del clic derecho", async ()=>{
+      exigir((await Promise.all(SOLO_ADMIN_BARRA.map(s=>cuenta(page, s)))).every(n=>n === 0), "ve botones de administrador en la barra");
+      const ayuda = await texto(page, `${SEL.panel} .inventario-tecnologico-mapa-panel-sub`);
+      exigir(/Haz clic en un marcador/.test(ayuda) && !/Clic derecho/.test(ayuda), ayuda);
+    });
+    await verificar("3.18 (v18): … el clic derecho en el mapa no abre «Nueva ubicación»", async ()=>{
+      const lienzo = await page.locator("#inventario-tecnologico-mapa-canvas").boundingBox();
+      await page.mouse.click(lienzo.x + lienzo.width / 2, lienzo.y + lienzo.height - 60, { button: "right" });
+      await page.waitForTimeout(400);
+      exigir(await cuenta(page, "#inventario-tecnologico-modal-host .inventario-tecnologico-modal") === 0, "se abrió un formulario");
+    });
+    await verificar("3.18 (v18): … en una ubicación y en un equipo solo puede mirar y simular", async ()=>{
+      await irAUbicacionDesdePanel(page, 1);
+      const enUbicacion = await accionesPanel(page);
+      await seleccionarEquipoDesdeSuUbicacion(page, 1, 50);
+      const enEquipo = await accionesPanel(page);
+      const prohibidas = [...enUbicacion, ...enEquipo].filter(a=>ACCIONES_SOLO_ADMIN.includes(a));
+      exigir(!prohibidas.length, "ve acciones de administrador: " + prohibidas.join(", "));
+      exigir(enEquipo.includes("simular-caida") && enUbicacion.includes("casilla-caida-ubicacion"), "no puede simular: " + JSON.stringify([enUbicacion, enEquipo]));
+    });
+    await verificar("3.18 (v18): … simula la caída de un equipo en su pantalla, y no se guarda nada", async ()=>{
+      await page.click(SEL.simular(50));
+      await page.waitForFunction(()=>/caído/.test(document.getElementById("inventario-tecnologico-mapa-aviso-sim")?.innerText || ""), null, { timeout: 4000 });
+      exigir(await page.evaluate(()=>window.__ESCRITURAS__.length) === 0, "escribió en la base");
+      await page.click(SEL.simular(50));
+    });
+    await verificar("3.18 (v18): … el plano se ve, con su opacidad, pero sin «Ajustar plano»", async ()=>{
+      await alternarSuperpuesta(page, "Plano de lotes");
+      await page.waitForSelector(IMG_PLANO, { timeout: 8000 });
+      exigir(await cuenta(page, ".inventario-tecnologico-mapa-plano-control") === 1, "sin el control del plano");
+      exigir(await cuenta(page, "#inventario-tecnologico-mapa-plano-ajustar") === 0, "ve «Ajustar plano»");
+      await alternarSuperpuesta(page, "Plano de lotes");
+    });
+    await verificar("3.18 (v18): … y el tooltip «Tipos y redes» (3.17) también", async ()=>{
+      await elegirModoTooltip(page, "ambos");
+      await clicVacio(page);
+      await tooltipDe(page, 1, { teclado: true });
+      const x = await cruzadoTooltip(page);
+      exigir(x.tablas === 1 && x.filas.length > 0 && x.leyenda.length > 0, JSON.stringify(x));
+      await soltarTooltip(page);
+      await elegirModoTooltip(page, "tipos");
+    });
+    await verificar("3.18 (v18): en el detalle de un activo tiene «Ver en mapa», pero no «Mover…» ni «Asignar…»", async ()=>{
+      await page.click(SEL.tab("activos"));
+      await page.waitForFunction(()=>!document.querySelector("#inventario-tecnologico-mapa-canvas"));
+      await page.locator("tr", { hasText: "LKM-001" }).first().click();
+      await page.waitForFunction(()=>/Oficina Centro/.test(document.getElementById("inventario-tecnologico-ubicacion-activo")?.innerText || ""));
+      exigir(await cuenta(page, '[data-ubic-accion="ver-en-mapa"]') === 1, "sin «Ver en mapa»");
+      exigir(await cuenta(page, '[data-ubic-accion="mover"]') === 0, "ve «Mover…»");
+      await page.click('[data-ubic-accion="ver-en-mapa"]');
+      await page.waitForSelector(`${SEL.titulo}`, { timeout: 10000 });
+      exigir(/Oficina Centro/.test(await texto(page, SEL.titulo)), "no abrió su ubicación: " + await texto(page, SEL.titulo));
+    });
+    await verificar("3.18 (v18): en toda la sesión del visitante no se escribió nada en la base", async ()=>{
+      exigir(await page.evaluate(()=>window.__ESCRITURAS__.length) === 0, JSON.stringify(await page.evaluate(()=>window.__ESCRITURAS__)));
+    });
+    await verificar("sin errores de JavaScript (visitante)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+    await context.close();
+  }
+}
+
+// ------------------------------------------------------------------ v19 (3.19): el cableado primero en el panel de la ubicación
+const titulosTarjetas = page=>page.locator(`${SEL.panel} .inventario-tecnologico-mapa-tarjeta-titulo`).allInnerTexts();
+async function escenarioCableado(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixtureCobertura());
+  await irAlMapa(page);
+  await verificar("3.19 (v19): con cableado interno, el panel de la ubicación va Cableado → Equipos de red → Activos", async ()=>{
+    for(const id of [1, 2, 3]){
+      await irAUbicacionDesdePanel(page, id);
+      const t = await titulosTarjetas(page);
+      exigir(JSON.stringify(t) === JSON.stringify(["Cableado en esta ubicación", "Equipos de red", "Activos en esta ubicación"]), `ubicación ${id}: ` + JSON.stringify(t));
+    }
+    await irAUbicacionDesdePanel(page, 1);
+    await captura(page, "v19-cableado-primero.png");
+  });
+  await verificar("3.19 (v19): las casillas para simular siguen en «Equipos de red», abierta", async ()=>{
+    exigir(await cuenta(page, `${SEL.panel} .inventario-tecnologico-mapa-tarjeta-equipos input[data-accion="casilla-caida"]`) === 6, "casillas: " + await cuenta(page, `${SEL.panel} .inventario-tecnologico-mapa-tarjeta-equipos input[data-accion="casilla-caida"]`));
+    exigir(await cuenta(page, `${SEL.panel} .inventario-tecnologico-mapa-tarjeta-equipos input[data-accion="casilla-caida-ubicacion"]`) === 1, "sin «Todos los equipos»");
+    exigir(await page.locator(`${SEL.panel} .inventario-tecnologico-mapa-tarjeta-equipos`).isVisible(), "la caja no se ve");
+  });
+  await verificar("3.19 (v19): sin cableado interno (Bodega Sur), como antes: Equipos de red → Activos", async ()=>{
+    await irAUbicacionDesdePanel(page, 4);
+    const t = await titulosTarjetas(page);
+    exigir(JSON.stringify(t) === JSON.stringify(["Equipos de red", "Activos en esta ubicación"]), JSON.stringify(t));
+  });
+  await verificar("sin errores de JavaScript (cableado primero)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+}
+
+// ------------------------------------------------------------------ v19 (3.21): un solo tipo de equipo a la vista
+const PIN = id=>`.leaflet-marker-icon[data-ubicacion-id="${id}"] .inventario-tecnologico-mapa-pin`;
+const pinesDelMapa = page=>page.evaluate(()=>[...document.querySelectorAll(".leaflet-marker-icon[data-ubicacion-id]")].map(m=>{
+  const p = m.querySelector(".inventario-tecnologico-mapa-pin");
+  return { id: Number(m.dataset.ubicacionId), porTipo: p.classList.contains("inventario-tecnologico-mapa-pin-por-tipo"), tipo: p.dataset.tipoEquipo || null,
+    n: p.querySelector(".inventario-tecnologico-mapa-pin-cantidad")?.textContent || "", color: p.style.getPropertyValue("--pin-color"), glifo: p.querySelector(".inventario-tecnologico-mapa-pin-glifo").innerHTML };
+}).sort((a, b)=>a.id - b.id));
+async function soloTipo(page, valor){
+  await page.click(DD("tiposEquipo"));
+  await page.dblclick(OPCION("tiposEquipo", valor) + " [data-tipo-equipo]");
+  await cerrarFiltros(page);
+}
+async function escenarioBolitas(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixtureCobertura());
+  await irAlMapa(page);
+  const antes = await pinesDelMapa(page);
+  const GLIFO_PTP = await page.evaluate(async ()=>(await import("/assets/js/inventario-tecnologico/ui/mapa/iconos-equipo.js")).GLIFOS_TIPO_EQUIPO.ptp);
+  const trazo = s=>(s.match(/ d="[^"]+"/g) || []).join("");
+  await verificar("3.21 (v19): sin filtro de tipos, las bolitas llevan el ícono de su ubicación, como siempre", async ()=>{
+    exigir(antes.length > 4 && antes.every(p=>!p.porTipo && !p.tipo), JSON.stringify(antes.slice(0, 3)));
+    exigir(await page.locator("#inventario-tecnologico-mapa-leyenda-tipo-unico").evaluate(e=>e.hidden), "la leyenda del tipo se ve");
+  });
+  await verificar("3.21 (v19): con «solo esta» en Punto a Punto, cada bolita lleva su ícono y cuántos hay ahí, con el color de su ubicación", async ()=>{
+    await soloTipo(page, "ptp");
+    await esperarCuenta(page, ".leaflet-marker-icon[data-ubicacion-id]", 3, "ubicaciones con PtP");
+    const p = await pinesDelMapa(page);
+    exigir(JSON.stringify(p.map(x=>[x.id, x.porTipo, x.tipo, x.n])) === JSON.stringify([[1, true, "ptp", "2"], [2, true, "ptp", "1"], [3, true, "ptp", "1"]]), JSON.stringify(p.map(x=>[x.id, x.porTipo, x.tipo, x.n])));
+    exigir(p.every(x=>trazo(x.glifo) === trazo(GLIFO_PTP) && /width="15"/.test(x.glifo)), "no es el ícono de PtP: " + p[0].glifo.slice(0, 160));
+    exigir(p.every(x=>x.color === antes.find(a=>a.id === x.id).color), "cambió el color: " + JSON.stringify(p.map(x=>x.color)));
+    const leyenda = page.locator("#inventario-tecnologico-mapa-leyenda-tipo-unico");
+    exigir(!(await leyenda.evaluate(e=>e.hidden)) && /«Punto a Punto»/.test(await leyenda.textContent()) && await leyenda.locator("svg").count() === 1, "leyenda: " + await leyenda.textContent());
+    await captura(page, "v19-bolitas-ptp.png");
+  });
+  await verificar("3.21 (v19): la ubicación elegida que no tiene ninguno de ese tipo sigue con su ícono", async ()=>{
+    await soloTipo(page, "ptp"); // vuelven todos
+    await irAUbicacionDesdePanel(page, 4);
+    await soloTipo(page, "ptp");
+    await page.waitForSelector(PIN(4));
+    const p = (await pinesDelMapa(page)).find(x=>x.id === 4);
+    exigir(p && !p.porTipo && p.glifo === antes.find(a=>a.id === 4).glifo && p.n === antes.find(a=>a.id === 4).n, JSON.stringify(p));
+    await soloTipo(page, "ptp");
+    await page.click(`${SEL.panel} [data-accion="volver-resumen"]`);
+  });
+  await verificar("3.21 (v19): con «Sin tipo» como único, la bolita lleva el ícono genérico", async ()=>{
+    await soloTipo(page, "-sin-tipo");
+    await esperarCuenta(page, ".leaflet-marker-icon[data-ubicacion-id]", 1, "la bodega");
+    const [p] = await pinesDelMapa(page);
+    const GENERICO = await page.evaluate(async ()=>(await import("/assets/js/inventario-tecnologico/ui/mapa/leaflet.js")).GLIFO_RADIO);
+    exigir(p.id === 4 && p.porTipo && p.tipo === "-sin-tipo" && p.n === "1" && trazo(p.glifo) === trazo(GENERICO), JSON.stringify(p));
+    await soloTipo(page, "-sin-tipo");
+  });
+  await verificar("3.21 (v19): al volver todos los tipos, las bolitas quedan como antes", async ()=>{
+    await esperarCuenta(page, ".leaflet-marker-icon[data-ubicacion-id]", antes.length, "todas");
+    const p = await pinesDelMapa(page);
+    exigir(JSON.stringify(p) === JSON.stringify(antes), "no quedaron igual");
+    exigir(await page.locator("#inventario-tecnologico-mapa-leyenda-tipo-unico").evaluate(e=>e.hidden), "la leyenda del tipo sigue");
+    exigir(await page.evaluate(()=>window.__ESCRITURAS__.length) === 0, "escribió en la base");
+  });
+  await verificar("sin errores de JavaScript (bolitas por tipo)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+}
+
+// ------------------------------------------------------------------ v20 (3.22): las cifras del panel, según los filtros
+// En la red de prueba: 2 torres (Cerro Azul y Santa Ana), 22 equipos, 2
+// radioenlaces (SM Oficina, ahora colgado del PTP CA → SA, y una estación nueva
+// en la bodega colgada del PTP de Santa Ana; las CPE de las piscinas cuelgan
+// de un AP y no cuentan) y 2 cámaras (en Cerro Azul, en la Red Cámaras).
+function fixtureCifras(){
+  const fx = fixtureCobertura();
+  const buscar = id=>fx.tablas.equipos_radioenlace.find(e=>e.id === id);
+  buscar(32).servidor_id = 12;
+  fx.tablas.equipos_radioenlace.push({ ...buscar(40), id: 61, nombre: "Estación Bodega", servidor_id: 20, tipo_equipo: "estacion", red_id: 1, referencia: "Bodega", activo_id: null });
+  return fx;
+}
+const cifrasDelPanel = page=>page.locator(`${SEL.panel} .inventario-tecnologico-mapa-cifra`).evaluateAll(l=>l.map(c=>[c.dataset.cifra || null, c.querySelector(".inventario-tecnologico-mapa-cifra-num").textContent, c.querySelector(".inventario-tecnologico-mapa-cifra-lbl").textContent, c.classList.contains("inventario-tecnologico-mapa-cifra-filtrada")]));
+const filaUbicacion = (page, id)=>texto(page, `${SEL.panel} [data-accion="ver-ubicacion"][data-id="${id}"] .inventario-tecnologico-mapa-fila-sub`);
+async function escenarioCifras(browser, base){
+  const { context, page, errores } = await abrirApp(browser, base, fixtureCifras());
+  await irAlMapa(page);
+  await verificar("3.22 (v20): sin nada elegido, el panel cuenta Torres, Equipos de red, Radioenlaces (PtP-R de un PtP-E) y Cámaras", async ()=>{
+    const c = await cifrasDelPanel(page);
+    exigir(JSON.stringify(c) === JSON.stringify([["torres", "2", "torres", false], ["equipos", "22", "equipos de red", false], ["radioenlaces", "2", "radioenlaces", false], ["camaras", "2", "cámaras", false]]), JSON.stringify(c));
+    exigir(!/activos ubicados|ubicaciones\b/.test(await texto(page, `${SEL.panel} .inventario-tecnologico-mapa-cifras`)), "quedó una cifra vieja");
+    await captura(page, "v20-cifras.png");
+  });
+  await verificar("3.22 (v20): sin la Red Cámaras, las cifras que cambian dicen el total («de 22 equipos de red») y la lista cuenta lo visible", async ()=>{
+    await clicFiltro(page, SEL.chip("red", "2"));
+    const c = await cifrasDelPanel(page);
+    exigir(JSON.stringify(c) === JSON.stringify([["torres", "2", "torres", false], ["equipos", "19", "de 22 equipos de red", true], ["radioenlaces", "2", "radioenlaces", false], ["camaras", "0", "de 2 cámaras", true]]), JSON.stringify(c));
+    exigir(/Torre · 3 equipos/.test(await filaUbicacion(page, 1)), "la fila de Cerro Azul: " + await filaUbicacion(page, 1));
+    await captura(page, "v20-cifras-filtradas.png");
+    await clicFiltro(page, SEL.chip("red", "2"));
+    exigir(/Torre · 6 equipos/.test(await filaUbicacion(page, 1)), "no volvió: " + await filaUbicacion(page, 1));
+  });
+  await verificar("3.22 (v20): con «solo esta» en Cámara, una torre de dos y ningún radioenlace", async ()=>{
+    await page.click(DD("tiposEquipo"));
+    await page.dblclick(OPCION("tiposEquipo", "camara") + " [data-tipo-equipo]");
+    await cerrarFiltros(page);
+    const c = await cifrasDelPanel(page);
+    exigir(JSON.stringify(c) === JSON.stringify([["torres", "1", "de 2 torres", true], ["equipos", "2", "de 22 equipos de red", true], ["radioenlaces", "0", "de 2 radioenlaces", true], ["camaras", "2", "cámaras", false]]), JSON.stringify(c));
+    await page.click(DD("tiposEquipo"));
+    await page.dblclick(OPCION("tiposEquipo", "camara") + " [data-tipo-equipo]");
+    await cerrarFiltros(page);
+  });
+  await verificar("3.22 (v20): sin las torres (filtro de ubicaciones), «0» y «de 2 torres»; los equipos de las torres tampoco cuentan", async ()=>{
+    await clicFiltro(page, SEL.chip("tipo", "torre"));
+    const c = await cifrasDelPanel(page);
+    exigir(JSON.stringify(c.map(x=>x.slice(0, 3))) === JSON.stringify([["torres", "0", "de 2 torres"], ["equipos", "14", "de 22 equipos de red"], ["radioenlaces", "2", "radioenlaces"], ["camaras", "0", "de 2 cámaras"]]), JSON.stringify(c));
+    await clicFiltro(page, SEL.chip("tipo", "torre"));
+    const despues = await cifrasDelPanel(page);
+    exigir(despues.every(x=>!x[3]), "quedó alguna con «de N»: " + JSON.stringify(despues));
+  });
+  await verificar("sin errores de JavaScript (cifras del panel)", async ()=>{ exigir(errores.length === 0, errores.join(" | ")); });
+  await context.close();
+}
+
 // ------------------------------------------------------------------ main
 const srv = await servir(RAIZ);
 const base = `http://127.0.0.1:${srv.address().port}`;
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 try{
   // SOLO=plano (u otro nombre) corre un solo escenario, para depurar.
-  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo, campos: escenarioCampos, sin012: escenarioSin012, vacias: escenarioVacias, grosor0: escenarioGrosorCero, filtros: escenarioFiltros, solo: escenarioSoloTabla, buscar: escenarioBuscar, franjas: escenarioFranjas, tooltip: escenarioTooltip, cobertura: escenarioCobertura, tarjeta: escenarioTarjeta, todos: escenarioTodos, capa3: escenarioCapa3 };
+  const escenarios = { admin: escenarioAdmin, permisos: escenarioPermisos, fallas: escenarioFallas, celular: escenarioCelular, plano: escenarioPlano, torre: escenarioTorre, red: escenarioRed, medio: escenarioMedio, lote: escenarioLote, redes: escenarioRedes, piscinas: escenarioPiscinas, servidor: escenarioServidor, herencia: escenarioHerencia, pantalla: escenarioPantalla, activo: escenarioActivo, campos: escenarioCampos, sin012: escenarioSin012, vacias: escenarioVacias, grosor0: escenarioGrosorCero, filtros: escenarioFiltros, solo: escenarioSoloTabla, buscar: escenarioBuscar, franjas: escenarioFranjas, tooltip: escenarioTooltip, cobertura: escenarioCobertura, tarjeta: escenarioTarjeta, todos: escenarioTodos, capa3: escenarioCapa3, visitante: escenarioVisitante, cableado: escenarioCableado, bolitas: escenarioBolitas, cifras: escenarioCifras };
   // SOLO=plano o SOLO=plano,torre (varios, separados por comas).
   const solo = process.env.SOLO ? process.env.SOLO.split(",").map(x=>x.trim()).filter(Boolean) : null;
   for(const [nombre, fn] of Object.entries(escenarios)) if(!solo || solo.includes(nombre)) await fn(browser, base);

@@ -182,8 +182,11 @@ export function glifoTipoUbicacion(tipo){
 
 // icono = el SVG del tipo de ubicación (v10, migración 012), ya limpio al
 // cargarlo; sin él, el glifo de fábrica.
-export function htmlPin({ color, tipo, icono = null, cantidad = 0, seleccionada = false, enlazada = false, archivada = false, atenuada = false, sinConexion = false, parcial = false, caida = false }){
+// v19 (3.21): tipoEquipo, si la bolita lleva el ícono de un tipo de equipo
+// (el único que dejan a la vista los filtros) en vez del de su ubicación.
+export function htmlPin({ color, tipo, icono = null, cantidad = 0, seleccionada = false, enlazada = false, archivada = false, atenuada = false, sinConexion = false, parcial = false, caida = false, tipoEquipo = null }){
   const clases = ["inventario-tecnologico-mapa-pin"];
+  if(tipoEquipo) clases.push("inventario-tecnologico-mapa-pin-por-tipo");
   if(seleccionada) clases.push("inventario-tecnologico-mapa-pin-seleccionada");
   if(enlazada) clases.push("inventario-tecnologico-mapa-pin-enlazada");
   if(archivada) clases.push("inventario-tecnologico-mapa-pin-archivada");
@@ -191,7 +194,7 @@ export function htmlPin({ color, tipo, icono = null, cantidad = 0, seleccionada 
   if(sinConexion) clases.push("inventario-tecnologico-mapa-pin-sin-conexion");
   else if(parcial) clases.push("inventario-tecnologico-mapa-pin-parcial");
   if(caida) clases.push("inventario-tecnologico-mapa-pin-caida");
-  return `<div class="${clases.join(" ")}" style="--pin-color:${color}">`
+  return `<div class="${clases.join(" ")}" style="--pin-color:${color}"${tipoEquipo ? ` data-tipo-equipo="${String(tipoEquipo).replace(/[^a-z0-9_-]/gi, "")}"` : ""}>`
     + `<span class="inventario-tecnologico-mapa-pin-cuerpo"><span class="inventario-tecnologico-mapa-pin-glifo">${icono ? svgConTamano(icono, 15) : glifoTipoUbicacion(tipo)}</span></span>`
     + (cantidad > 0 ? `<span class="inventario-tecnologico-mapa-pin-cantidad">${cantidad > 99 ? "99+" : cantidad}</span>` : "")
     + (sinConexion || parcial ? `<span class="inventario-tecnologico-mapa-pin-alerta" aria-hidden="true">!</span>` : "")

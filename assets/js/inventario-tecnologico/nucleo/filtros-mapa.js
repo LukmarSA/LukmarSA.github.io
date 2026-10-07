@@ -53,6 +53,18 @@ export function opcionesTiposEquipo(tipos = [], equipos = [], vacias = 0){
   return lista;
 }
 
+// v19 (3.21, pedido y decidido el 7-oct): el único tipo de equipo que
+// «Tipos de equipo» deja a la vista (un valor o TIPO_EQUIPO_SIN), o null si se
+// ven varios, ninguno, o si no hay filtro (un solo tipo con equipos en toda la
+// red no cuenta). Solo cuentan las opciones con equipos; «Sin equipos» es de
+// ubicaciones, no un tipo. Con él, las bolitas llevan el ícono de ese tipo.
+export function tipoEquipoUnico(opciones = [], ocultos = []){
+  const fuera = new Set(ocultos || []);
+  const conEquipos = (opciones || []).filter(o=>o.valor !== UBICACION_SIN_EQUIPOS && (o.n || 0) > 0);
+  const visibles = conEquipos.filter(o=>!fuera.has(o.valor));
+  return visibles.length === 1 && conEquipos.length > 1 ? visibles[0].valor : null;
+}
+
 // «Todas», «Ninguna» y «solo esta» sobre una lista de ocultos.
 export function ocultosTodas(){ return []; }
 export function ocultosNinguna(valores){ return [...valores]; }

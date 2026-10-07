@@ -122,8 +122,11 @@ function pillEstado(estado){
   return `<span class="${P}mapa-estado ${P}mapa-estado-${estado}" style="--estado-color:${e.color}">${esc(estado === "caido" ? "Caído" : e.etiqueta)}</span>`;
 }
 
+// v20 (3.22): en la lista de ubicaciones, los equipos que dejan a la vista
+// los filtros (como el tooltip, 3.20).
 function contarEnUbicacion(ctx, ubicacionId){
-  const equipos = (ctx.indices.equiposPorUbicacion.get(ubicacionId) || []).length;
+  const lista = ctx.indices.equiposPorUbicacion.get(ubicacionId) || [];
+  const equipos = ctx.visibleEquipo ? lista.filter(e=>ctx.visibleEquipo(e.id)).length : lista.length;
   const activos = (ctx.indices.activosPorUbicacion.get(ubicacionId) || []).length;
   return { equipos, activos };
 }
@@ -164,6 +167,25 @@ function nombreUbicacionDe(ctx, id){
 // Sin selección: cifras + lista de ubicaciones (también sirve para llegar a
 // una ubicación con teclado o cuando dos marcadores se tapan).
 // ---------------------------------------------------------------------------
+// v20 (3.22, pedido y decidido el 7-oct): con la 007, las cifras del panel
+// son Torres, Equipos de red, Radioenlaces (PtP-R colgados por radio de un
+// PtP-E) y Cámaras, contadas con los filtros (cifrasPanel). Si un filtro
+// esconde algo, la etiqueta dice el total: «12» y «de 20 torres».
+const CIFRAS = [
+  ["torres", "torre", "torres"],
+  ["equipos", "equipo de red", "equipos de red"],
+  ["radioenlaces", "radioenlace", "radioenlaces"],
+  ["camaras", "cámara", "cámaras"],
+];
+function htmlCifras(cifras){
+  return `<div class="${P}mapa-cifras">${CIFRAS.map(([clave, uno, varios])=>{
+    const c = cifras[clave] || { visibles: 0, total: 0 };
+    const filtrada = c.visibles !== c.total;
+    const etiqueta = filtrada ? `de ${c.total} ${c.total === 1 ? uno : varios}` : (c.visibles === 1 ? uno : varios);
+    return `<div class="${P}mapa-cifra${filtrada ? ` ${P}mapa-cifra-filtrada` : ""}" data-cifra="${clave}"><span class="${P}mapa-cifra-num">${c.visibles}</span><span class="${P}mapa-cifra-lbl">${esc(etiqueta)}</span></div>`;
+  }).join("")}</div>`;
+}
+
 export function htmlPanelResumen(ctx){
   const r = ctx.resumen;
   const rr = ctx.resumenRed;
@@ -186,12 +208,12 @@ export function htmlPanelResumen(ctx){
     </div>
     ${ctx.red007 && ctx.puedeSimular ? htmlAtajos(ctx) : ""}
     ${ctx.simActiva ? htmlResumenSimulacion(ctx) : ""}
-    <div class="${P}mapa-cifras">
+    ${ctx.cifras ? htmlCifras(ctx.cifras) : `<div class="${P}mapa-cifras">
       <div class="${P}mapa-cifra"><span class="${P}mapa-cifra-num">${r.ubicaciones}</span><span class="${P}mapa-cifra-lbl">${r.ubicaciones === 1 ? "ubicación" : "ubicaciones"}</span></div>
       <div class="${P}mapa-cifra"><span class="${P}mapa-cifra-num">${r.equipos}</span><span class="${P}mapa-cifra-lbl">equipos de red</span></div>
       <div class="${P}mapa-cifra"><span class="${P}mapa-cifra-num">${r.enlaces}</span><span class="${P}mapa-cifra-lbl">${r.enlaces === 1 ? "radioenlace" : "radioenlaces"}</span></div>
       <div class="${P}mapa-cifra"><span class="${P}mapa-cifra-num">${r.activosUbicados}</span><span class="${P}mapa-cifra-lbl">activos ubicados</span></div>
-    </div>
+    </div>`}
     ${r.equipos ? `<div class="${P}mapa-nota ${P}mapa-nota-red">${[plural(rr.raices, "raíz", "raíces"), plural(rr.backbone, "enlace backbone", "enlaces backbone"), plural(rr.p2mp, "enlace P2MP", "enlaces P2MP"), plural(rr.respaldos, "respaldo registrado", "respaldos registrados")].join(" · ")}</div>` : ""}
     ${r.activosSinUbicacion ? `<div class="${P}mapa-nota">${plural(r.activosSinUbicacion, "activo todavía no tiene", "activos todavía no tienen")} ubicación.${ctx.puedeAsignar ? " Se asignan desde el panel de cada ubicación (botón «+ Asignar»)." : ""}</div>` : ""}
     <div class="${P}section-title">Ubicaciones${ocultas > 0 ? ` <span class="${P}mapa-muted">(${ocultas} oculta${ocultas === 1 ? "" : "s"} por filtros)</span>` : ""}</div>
@@ -281,6 +303,9 @@ function htmlResumenSimulacion(ctx){
 // ---------------------------------------------------------------------------
 // Ubicación seleccionada
 // ---------------------------------------------------------------------------
+// v19 (3.19, pedido y decidido el 7-oct): debajo de la cabecera va primero
+// «Cableado en esta ubicación» (es el mejor resumen; solo aparece si hay alguna
+// conexión interna), después «Equipos de red» y al final los activos.
 export function htmlPanelUbicacion(ctx, u){
   const s = ctx.seleccion;
   const equipos = ctx.indices.equiposPorUbicacion.get(u.id) || [];
@@ -307,6 +332,8 @@ export function htmlPanelUbicacion(ctx, u){
     </div>
     ${ctx.simActiva ? htmlResumenSimulacionCorto(ctx) : ""}
 
+    ${htmlCableado(ctx, u, equipos)}
+
     ${tarjeta({
       tipo: "equipos", icono: GLIFO_RADIO, titulo: "Equipos de red", n: equipos.length,
       accion: ctx.esAdmin ? btn("nuevo-equipo", "+ Equipo", { id: u.id }) : "",
@@ -317,8 +344,6 @@ export function htmlPanelUbicacion(ctx, u){
         ? `${htmlCaidaTodos(ctx, u, equipos)}<ul class="${P}mapa-lista">${equipos.map(e=>htmlEquipo(ctx, e, s.equipoId === e.id, u)).join("")}</ul>`
         : `<div class="${P}mapa-vacio">Sin equipos de red.</div>`,
     })}
-
-    ${htmlCableado(ctx, u, equipos)}
 
     ${tarjeta({
       tipo: "activos", icono: ICONO_CAJA, titulo: "Activos en esta ubicación", n: activos.length,

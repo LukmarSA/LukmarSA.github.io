@@ -646,6 +646,8 @@ main.inventario-tecnologico-main-mapa{max-width:none;padding:14px 18px 18px;}
 .inventario-tecnologico-mapa-cifra{border:1px solid var(--border);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;}
 .inventario-tecnologico-mapa-cifra-num{font-size:20px;font-weight:700;color:var(--accent-ink);font-family:'IBM Plex Mono',monospace;line-height:1.1;}
 .inventario-tecnologico-mapa-cifra-lbl{font-size:11.5px;color:var(--ink-muted);}
+/* v20 (3.22): una cifra que los filtros recortan dice el total («de 20 torres»). */
+.inventario-tecnologico-mapa-cifra-filtrada .inventario-tecnologico-mapa-cifra-lbl{color:var(--accent-ink);font-weight:600;}
 @keyframes inventario-tecnologico-mapa-destello{0%{box-shadow:0 0 0 0 rgba(0,126,178,0.45);}100%{box-shadow:0 0 0 8px rgba(0,126,178,0);}}
 
 /* Marcadores (L.divIcon). La punta del pin está en (16,36) del ícono de 32×40. */
@@ -1561,7 +1563,6 @@ body.inventario-tecnologico-con-mapa-completo{overflow:hidden;}
 .inventario-tecnologico-mapa-tt-tipo{font-size:11px;color:var(--ink-muted);}
 .inventario-tecnologico-mapa-tt-tabla{border-collapse:collapse;margin:2px 0 0;}
 .inventario-tecnologico-mapa-tt-tabla td{padding:1px 0;vertical-align:middle;}
-.inventario-tecnologico-mapa-tt-tabla-redes{margin-top:4px;padding-top:3px;border-top:1px solid var(--border);}
 .inventario-tecnologico-mapa-tt-ico{width:18px;padding-right:6px !important;color:var(--accent-ink);line-height:0;}
 .inventario-tecnologico-mapa-tt-ico svg{width:16px;height:16px;display:inline-block;}
 .inventario-tecnologico-mapa-tt-etq{padding-right:14px !important;}
@@ -1570,6 +1571,32 @@ body.inventario-tecnologico-con-mapa-completo{overflow:hidden;}
 .inventario-tecnologico-mapa-tt-punto{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--chip-color);margin:0 3px;}
 .inventario-tecnologico-mapa-tt-nota{font-size:11px;color:var(--ink-muted);margin-top:3px;}
 .inventario-tecnologico-mapa-tt-ocultos{color:var(--accent-ink);}
+/* v18 (3.17): «Tipos y redes» en una sola tabla. Cada cantidad, del color de
+   su red y separadas por «/»; «Sin red», en gris; un color muy claro, con un
+   borde fino oscuro. Abajo, una línea con el color de cada red. */
+.inventario-tecnologico-mapa-tt-nr{color:var(--red-color,var(--ink));}
+.inventario-tecnologico-mapa-tt-nr-sinred{color:var(--ink-muted);}
+.inventario-tecnologico-mapa-tt-nr-claro{text-shadow:-.6px 0 #1B2733,.6px 0 #1B2733,0 -.6px #1B2733,0 .6px #1B2733;}
+.inventario-tecnologico-mapa-tt-sep{color:var(--ink-muted);font-weight:500;margin:0 1px;}
+.inventario-tecnologico-mapa-tt-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;}
+.inventario-tecnologico-mapa-tt-tabla-cruzada{width:100%;}
+/* La leyenda va en una línea: el tooltip de Leaflet toma el ancho mínimo de
+   lo que tiene adentro, así que la lista declara el suyo («max-content», hasta
+   260 px) y el tooltip se ensancha para que quepa. Si no cabe, pasa de a una
+   red entera a la línea siguiente; solo un nombre más largo que todo el ancho
+   se parte. La raya de arriba va de lado a lado. */
+.inventario-tecnologico-mapa-tt-leyenda{margin-top:4px;padding-top:3px;border-top:1px solid var(--border);font-size:11px;font-weight:500;line-height:1.5;color:var(--ink-muted);}
+.inventario-tecnologico-mapa-tt-leyenda-lista{width:max-content;max-width:260px;white-space:normal;}
+.inventario-tecnologico-mapa-tt-ley{display:inline-flex;align-items:center;gap:4px;max-width:100%;margin-right:7px;vertical-align:top;}
+.inventario-tecnologico-mapa-tt-ley:last-child{margin-right:0;}
+.inventario-tecnologico-mapa-tt-ley > span:last-child{white-space:normal;}
+.inventario-tecnologico-mapa-tt-ley .inventario-tecnologico-mapa-tt-punto{width:8px;height:8px;margin:0;flex:none;}
+.inventario-tecnologico-mapa-tt-ley-sinred{font-style:italic;}
+.inventario-tecnologico-mapa-tt-punto-claro{box-shadow:inset 0 0 0 1px rgba(27,39,51,.45);}
+/* v19 (3.21): con un solo tipo de equipo a la vista, la leyenda dice qué
+   llevan las bolitas (el ícono de ese tipo y cuántos se ven ahí). */
+.inventario-tecnologico-mapa-leyenda-tipo-icono{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-right:6px;vertical-align:middle;color:var(--accent-ink);}
+.inventario-tecnologico-mapa-leyenda-tipo-icono svg{width:16px;height:16px;}
 .inventario-tecnologico-mapa-tooltip-modo{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-muted);white-space:nowrap;}
 .inventario-tecnologico-mapa-tooltip-modo label{font-weight:600;}
 .inventario-tecnologico-mapa-tooltip-modo select{font:inherit;font-size:12.5px;padding:3px 6px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--ink);}

@@ -23,7 +23,7 @@ import { cargarPiscinas, cargarPlanoMapa, estadoMapa, hayCobertura, hayMedio, ha
 import { cargarTiposActivo } from "../nucleo/datos.js";
 import { normalizarCobertura, puntosSector, textoCobertura } from "../nucleo/cobertura.js";
 import { llevaMarcaRouter } from "../nucleo/modo-red.js";
-import { MODOS_TOOLTIP, conRedes, conTipos, resumenUbicacion, textoActivos, textoOcultos, textoSinEquipos } from "../nucleo/tooltip-ubicacion.js";
+import { MODOS_TOOLTIP, colorMuyClaro, conRedes, conTipos, resumenUbicacion, textoActivos, textoOcultos, textoPorRed, textoSinEquipos } from "../nucleo/tooltip-ubicacion.js";
 import { cajaPiscinas } from "../nucleo/piscinas.js";
 import { caidosEfectivos } from "../nucleo/mapa-nombres.js";
 import { cajaEsquinas } from "../nucleo/plano-mapa.js";
@@ -31,8 +31,8 @@ import { state } from "../nucleo/estado.js";
 import { fmtCoordenadas, fmtDistancia } from "../nucleo/geo.js";
 import { esc, fmtTag } from "../nucleo/helpers.js";
 import { buscarEnMapa, infoTipoUbicacion, resumenMapa, traducirErrorMapa, ubicacionesVisibles } from "../nucleo/mapa-logica.js";
-import { ESTADOS_SIMULACION, GROSOR_LINEAS, ROLES, TIPO_EQUIPO_SIN, UBICACION_SIN_EQUIPOS, UMBRAL_AGRUPAR_CLIENTES, caminoARaiz, claveRed, conGrosor, contarRoles, equipoVisible, estadoPorUbicacion, grosorDeLinea, normalizarGrosor, planDeAgrupados, planDeLineas, redEfectivaDe, resumenRed, textoGrosor, tituloSinRed, ubicacionVisiblePorEquipos, ubicacionesSinEquipos } from "../nucleo/mapa-jerarquia.js";
-import { LINEAS_POR_DEFECTO, cuantosFiltros, filtrosLimpios, lineasConVisibles, ocultosSoloEsta, opcionesTiposEquipo, resumenDesplegable } from "../nucleo/filtros-mapa.js";
+import { ESTADOS_SIMULACION, GROSOR_LINEAS, ROLES, TIPO_EQUIPO_SIN, UBICACION_SIN_EQUIPOS, UMBRAL_AGRUPAR_CLIENTES, caminoARaiz, cifrasPanel, claveRed, claveTipoEquipo, conGrosor, contarRoles, equipoVisible, estadoPorUbicacion, grosorDeLinea, normalizarGrosor, planDeAgrupados, planDeLineas, redEfectivaDe, resumenRed, textoGrosor, tituloSinRed, ubicacionVisiblePorEquipos, ubicacionesSinEquipos } from "../nucleo/mapa-jerarquia.js";
+import { LINEAS_POR_DEFECTO, cuantosFiltros, filtrosLimpios, lineasConVisibles, ocultosSoloEsta, opcionesTiposEquipo, resumenDesplegable, tipoEquipoUnico } from "../nucleo/filtros-mapa.js";
 import { AYUDA_SOLO, esMayusEnter, tituloSolo } from "../nucleo/solo-esta.js";
 import { AYUDA_BUSCAR_OPCION, coincideOpcion, textoSinCoincidencias } from "../nucleo/buscar-opciones.js";
 import { esAdmin, puede } from "../nucleo/permisos.js";
@@ -205,6 +205,7 @@ function htmlEsqueleto(){
             <ul class="${P}mapa-leyenda-cobertura" id="${P}mapa-leyenda-cobertura" aria-label="Cobertura" hidden>
               <li><span class="${P}mapa-leyenda-area"></span>Cobertura de un AP (círculo o sector)</li>
             </ul>
+            <ul class="${P}mapa-leyenda-tipo-unico" id="${P}mapa-leyenda-tipo-unico" aria-label="Bolitas con el ícono de un tipo de equipo" hidden></ul>
             <ul class="${P}mapa-leyenda-piscinas" id="${P}mapa-leyenda-piscinas" aria-label="Piscinas" hidden>
               <li><span class="${P}mapa-leyenda-piscina"></span>Piscina (clic: nombre y hectáreas)</li>
               <li><span class="${P}mapa-leyenda-piscina ${P}mapa-leyenda-piscina-revisar"></span>Piscina por revisar</li>
@@ -328,7 +329,9 @@ function calcular(){
     if(!base.has(id)) return false;
     return ubicacionVisiblePorEquipos(idx.equiposPorUbicacion.get(id) || [], f, visibleEquipo);
   };
-  return { m, idx, red, sim, seleccionId, camino, ubicacionesCamino, ubicacionesClientes, visibleEquipo, visibleUbicacion, expandidos: new Set(m.expandidos), estadoUbicaciones: estadoPorUbicacion(red, sim) };
+  // v19 (3.21): si «Tipos de equipo» deja a la vista un solo tipo, cuál.
+  const tipoUnico = hayRedFinca() ? tipoEquipoUnico(opcionesTiposEquipo(m.tiposEquipo, m.equipos, 0), f.tiposEquipoOcultos) : null;
+  return { m, idx, red, sim, seleccionId, camino, ubicacionesCamino, ubicacionesClientes, visibleEquipo, visibleUbicacion, tipoUnico, expandidos: new Set(m.expandidos), estadoUbicaciones: estadoPorUbicacion(red, sim) };
 }
 
 function contextoPanel(c){
@@ -359,6 +362,10 @@ function contextoPanel(c){
     estadoUbicaciones: c.estadoUbicaciones,
     resumen: resumenMapa(c.idx, { ubicaciones: m.ubicaciones, equipos: m.equipos, activos, red: c.red }),
     resumenRed: resumenRed(c.red),
+    // v20 (3.22): las cifras según los filtros (con la 007) y, en la lista de
+    // ubicaciones, cuántos equipos se ven de cada una.
+    visibleEquipo: c.visibleEquipo,
+    cifras: hayRedFinca() ? cifrasPanel({ ubicaciones: m.ubicaciones, equipos: m.equipos, verArchivadas: m.filtros.verArchivadas, visibleUbicacion: c.visibleUbicacion, visibleEquipo: c.visibleEquipo }) : null,
   };
 }
 
@@ -627,6 +634,18 @@ function pintarFiltros(c){
   if(chipCobertura){ chipCobertura.hidden = !hayAlgunaCobertura; chipCobertura.setAttribute("aria-pressed", String(verCobertura)); }
   const leyendaCobertura = document.getElementById(`${P}mapa-leyenda-cobertura`);
   if(leyendaCobertura) leyendaCobertura.hidden = !(hayAlgunaCobertura && verCobertura);
+  // v19 (3.21): con un solo tipo de equipo a la vista, qué dicen las bolitas.
+  const leyendaTipo = document.getElementById(`${P}mapa-leyenda-tipo-unico`);
+  if(leyendaTipo){
+    const t = c.tipoUnico;
+    leyendaTipo.hidden = t === null || t === undefined;
+    if(t === null || t === undefined) leyendaTipo.innerHTML = "";
+    else {
+      const tipo = t === TIPO_EQUIPO_SIN ? null : (m.tiposEquipo.find(x=>x.valor === t) || { valor: t, etiqueta: t });
+      const etiqueta = tipo ? (tipo.etiqueta || tipo.valor) : "Sin tipo";
+      leyendaTipo.innerHTML = `<li><span class="${P}mapa-leyenda-tipo-icono" aria-hidden="true">${iconoTipoEquipo(tipo, { tiposEquipo: m.tiposEquipo, tiposActivo: cargarTiposActivo() })}</span>Cada bolita: el ícono de «${esc(etiqueta)}», el único tipo a la vista, y cuántos se ven ahí</li>`;
+    }
+  }
   if(hayRedes){
     const n = new Map();
     for(const e of m.equipos){ const k = claveRed(e); n.set(k, (n.get(k) || 0) + 1); }
@@ -721,8 +740,23 @@ function opcionesIcono(c, u){
   const servidor = c.seleccionId !== null && c.camino.length > 1 ? c.red.equipoPorId.get(c.camino[1]) : null;
   const est = c.sim ? c.estadoUbicaciones.get(u.id) : null;
   const hayCadena = c.seleccionId !== null;
+  const infoTipo = infoTipoUbicacion(c.m.tiposUbicacion, u.tipo);
+  // v19 (3.21, decidido el 7-oct): con un solo tipo de equipo a la vista, la
+  // bolita lleva el ícono de ese tipo y cuántos de ellos se ven ahí; el color
+  // sigue siendo el del tipo de ubicación. Las que no tienen ninguno a la
+  // vista (la seleccionada, las del camino) siguen con lo suyo.
+  let icono = infoTipo.icono, cantidad = equipos + activos, tipoEquipo = null;
+  if(c.tipoUnico !== null && c.tipoUnico !== undefined){
+    const deEseTipo = (idx.equiposPorUbicacion.get(u.id) || []).filter(e=>claveTipoEquipo(e) === c.tipoUnico && c.visibleEquipo(e.id)).length;
+    if(deEseTipo){
+      const tipo = c.tipoUnico === TIPO_EQUIPO_SIN ? null : (c.m.tiposEquipo.find(t=>t.valor === c.tipoUnico) || { valor: c.tipoUnico });
+      icono = iconoTipoEquipo(tipo, { tiposEquipo: c.m.tiposEquipo, tiposActivo: cargarTiposActivo() });
+      cantidad = deEseTipo;
+      tipoEquipo = c.tipoUnico;
+    }
+  }
   return {
-    color: infoTipoUbicacion(c.m.tiposUbicacion, u.tipo).color, tipo: u.tipo, icono: infoTipoUbicacion(c.m.tiposUbicacion, u.tipo).icono, cantidad: equipos + activos,
+    color: infoTipo.color, tipo: u.tipo, icono, cantidad, tipoEquipo,
     seleccionada: s.ubicacionId === u.id,
     enlazada: !!(servidor && servidor.ubicacion_id === u.id && u.id !== s.ubicacionId),
     archivada: u.activa === false,
@@ -772,6 +806,12 @@ function pintarMarcadores(c){
 // ocultan los filtros. v17: ya no lista la cobertura de sus AP (lo pidió la
 // persona: lo agrandaba mucho; la cobertura se ve en el mapa y en el detalle
 // del equipo). Con la 014, junto al tipo, cuántos de ellos son routers.
+// v18 (3.17, pedido del 2-oct): en «Tipos y redes», una sola tabla: cada
+// tipo con sus cantidades del color de su red, separadas por «/» y en el
+// orden de las redes («Sin red» en gris, al final; un color muy claro lleva
+// un borde fino oscuro), y abajo una línea con el color de cada red de la
+// ubicación (decidido: solo los nombres). «Tipos» y «Redes», como antes.
+const COLOR_RED_SIN_COLOR = "#8B9AAA";
 function htmlTooltipUbicacion(c, u){
   const m = c.m;
   const equipos = c.idx.equiposPorUbicacion.get(u.id) || [];
@@ -783,17 +823,36 @@ function htmlTooltipUbicacion(c, u){
   const tiposActivo = cargarTiposActivo();
   const fila = (icono, etiqueta, n, clase = "", extra = "")=>`<tr${clase ? ` class="${P}${clase}"` : ""}><td class="${P}mapa-tt-ico">${icono}</td><td class="${P}mapa-tt-etq">${extra ? `<span class="${P}mapa-tt-etq-texto">${esc(etiqueta)}</span>${extra}` : esc(etiqueta)}</td><td class="${P}mapa-tt-n">${n}</td></tr>`;
   const marcaRouters = n=>n ? `<span class="${P}mapa-tt-router" title="${esc(n === 1 ? "1 de ellos trabaja como router" : `${n} de ellos trabajan como router`)}">${n === 1 ? "1 router" : `${n} routers`}</span>` : "";
+  const punto = color=>`<span class="${P}mapa-tt-punto${color && colorMuyClaro(color) ? ` ${P}mapa-tt-punto-claro` : ""}" style="--chip-color:${esc(color || COLOR_RED_SIN_COLOR)}"></span>`;
+  const cruzado = conTipos(modoTooltip) && conRedes(modoTooltip);
+  // v18: las cantidades de un tipo por red: del color de su red, con «/», y
+  // dichas con palabras para los lectores de pantalla.
+  const porRed = (lista, n)=>{
+    if(!lista.length) return String(n);
+    const partes = lista.map(x=>{
+      const color = x.id === null ? null : (x.color || COLOR_RED_SIN_COLOR);
+      const clase = x.id === null ? ` ${P}mapa-tt-nr-sinred` : (colorMuyClaro(color) ? ` ${P}mapa-tt-nr-claro` : "");
+      return `<span class="${P}mapa-tt-nr${clase}"${color ? ` style="--red-color:${esc(color)}"` : ""} data-red="${x.id === null ? "" : esc(String(x.id))}">${x.n}</span>`;
+    });
+    return `<span class="${P}mapa-tt-nr-cifras" aria-hidden="true">${partes.join(`<span class="${P}mapa-tt-sep">/</span>`)}</span><span class="${P}mapa-tt-sr">${esc(textoPorRed(lista))}</span>`;
+  };
   let cuerpo = "";
   if(!r.total) cuerpo += `<div class="${P}mapa-tt-nota">${esc(textoSinEquipos())}</div>`;
-  if(r.total && conTipos(modoTooltip)){
-    cuerpo += `<table class="${P}mapa-tt-tabla" aria-label="Equipos por tipo">`
-      + r.tipos.map(t=>fila(iconoTipoEquipo(tipoPorValor.get(t.valor) || { valor: t.valor }, { tiposEquipo: m.tiposEquipo, tiposActivo }), t.etiqueta, t.n, "", marcaRouters(t.routers))).join("")
-      + (r.sinTipo ? fila(iconoTipoEquipo(null), "Sin tipo", r.sinTipo, "mapa-tt-especial") : "")
+  if(r.visibles && conTipos(modoTooltip)){
+    cuerpo += `<table class="${P}mapa-tt-tabla${cruzado ? ` ${P}mapa-tt-tabla-cruzada` : ""}" aria-label="${cruzado ? "Equipos por tipo y red" : "Equipos por tipo"}">`
+      + r.tipos.map(t=>fila(iconoTipoEquipo(tipoPorValor.get(t.valor) || { valor: t.valor }, { tiposEquipo: m.tiposEquipo, tiposActivo }), t.etiqueta, cruzado ? porRed(t.porRed, t.n) : t.n, "", marcaRouters(t.routers))).join("")
+      + (r.sinTipo ? fila(iconoTipoEquipo(null), "Sin tipo", cruzado ? porRed(r.sinTipoPorRed, r.sinTipo) : r.sinTipo, "mapa-tt-especial") : "")
       + `</table>`;
+    if(cruzado && (r.redes.length || r.sinRed)){
+      const item = (color, nombre, clase = "")=>`<span class="${P}mapa-tt-ley${clase}">${punto(color)}<span>${esc(nombre)}</span></span>`;
+      // Separadas por un espacio: es donde la línea puede partirse.
+      cuerpo += `<div class="${P}mapa-tt-leyenda"><div class="${P}mapa-tt-leyenda-lista">`
+        + [...r.redes.map(x=>item(x.color, x.nombre)), ...(r.sinRed ? [item(null, "Sin red", ` ${P}mapa-tt-ley-sinred`)] : [])].join(" ")
+        + `</div></div>`;
+    }
   }
-  if(r.total && conRedes(modoTooltip) && (r.redes.length || r.sinRed)){
-    const punto = color=>`<span class="${P}mapa-tt-punto" style="--chip-color:${esc(color || "#8B9AAA")}"></span>`;
-    cuerpo += `<table class="${P}mapa-tt-tabla${conTipos(modoTooltip) ? ` ${P}mapa-tt-tabla-redes` : ""}" aria-label="Equipos por red">`
+  if(r.visibles && conRedes(modoTooltip) && !cruzado && (r.redes.length || r.sinRed)){
+    cuerpo += `<table class="${P}mapa-tt-tabla" aria-label="Equipos por red">`
       + r.redes.map(x=>fila(punto(x.color), x.nombre, x.n)).join("")
       + (r.sinRed ? fila(punto(null), "Sin red", r.sinRed, "mapa-tt-especial") : "")
       + `</table>`;

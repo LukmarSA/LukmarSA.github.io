@@ -1443,25 +1443,136 @@ prueba("v15: textos de la cobertura", ()=>{
 });
 
 // ---------------------------------------------------------------- v15 (3.10): tooltip de las ubicaciones
-prueba("v15: el resumen de una ubicación cuenta todo, por tipo y por red, y avisa lo oculto", ()=>{
+prueba("v15 y v19 (3.20): el resumen de una ubicación cuenta por tipo y por red lo que dejan a la vista los filtros, y avisa cuántos esconden", ()=>{
   const tipos = [{ valor:"router", etiqueta:"Router", orden:10 }, { valor:"ptp", etiqueta:"PtP-E", orden:30 }, { valor:"camara", etiqueta:"Cámara", orden:60 }];
   const redes = [{ id:2, nombre:"CCTV", color:"#fbff00" }, { id:3, nombre:"Red Oficina", color:"#007eb2" }];
   const equipos = [
     { id:1, tipo_equipo:"camara", red_id:2 }, { id:2, tipo_equipo:"ptp", red_id:2 }, { id:3, tipo_equipo:"ptp", red_id:3 },
     { id:4, tipo_equipo:null, red_id:null }, { id:5, tipo_equipo:"inyector_poe", red_id:9 }, { id:6, tipo_equipo:"camara", red_id:2 },
   ];
+  // Sin filtros, todo (como en el v15).
+  const todo = TU.resumenUbicacion({ equipos, tipos, redes, activos: 2 });
+  assert.equal(todo.total, 6); assert.equal(todo.visibles, 6); assert.equal(todo.ocultos, 0);
+  assert.deepEqual(todo.tipos.map(t=>[t.etiqueta, t.n]), [["PtP-E", 2], ["Cámara", 2], ["inyector_poe", 1]], "en el orden de los tipos; uno que no está en el catálogo, al final");
+  assert.deepEqual(todo.redes.map(x=>[x.nombre, x.n]), [["CCTV", 3], ["Red Oficina", 1], ["Red 9", 1]], "en el orden de las redes");
+  // v19 (3.20): con los equipos 3 y 6 ocultos por los filtros, cuenta lo que queda a la vista.
   const r = TU.resumenUbicacion({ equipos, tipos, redes, visibleEquipo:id=>id !== 3 && id !== 6, activos: 2 });
-  assert.equal(r.total, 6);
-  assert.deepEqual(r.tipos.map(t=>[t.etiqueta, t.n]), [["PtP-E", 2], ["Cámara", 2], ["inyector_poe", 1]], "en el orden de los tipos; uno que no está en el catálogo, al final");
+  assert.equal(r.total, 6, "total: todo lo que hay (para «Sin equipos de red»)");
+  assert.equal(r.visibles, 4);
+  assert.deepEqual(r.tipos.map(t=>[t.etiqueta, t.n]), [["PtP-E", 1], ["Cámara", 1], ["inyector_poe", 1]], "solo lo que se ve");
   assert.equal(r.sinTipo, 1);
-  assert.deepEqual(r.redes.map(x=>[x.nombre, x.n]), [["CCTV", 3], ["Red Oficina", 1], ["Red 9", 1]], "en el orden de las redes");
+  assert.deepEqual(r.redes.map(x=>[x.nombre, x.n]), [["CCTV", 2], ["Red 9", 1]], "Red Oficina, con su único equipo oculto, no aparece");
+  assert.deepEqual(r.tipos.map(t=>t.porRed.map(x=>[x.id, x.n])), [[[2, 1]], [[2, 1]], [[9, 1]]], "el reparto por red, también solo lo visible");
   assert.equal(r.sinRed, 1);
-  assert.equal(r.ocultos, 2, "los que ocultan los filtros también se cuentan, y se avisa cuántos son");
-  assert.equal(r.activos, 2);
+  assert.equal(r.ocultos, 2, "y se avisa cuántos esconden los filtros");
+  assert.equal(r.activos, 2, "los activos no dependen de los filtros de equipos");
+  const nada = TU.resumenUbicacion({ equipos, tipos, redes, visibleEquipo:()=>false });
+  assert.deepEqual([nada.total, nada.visibles, nada.ocultos, nada.tipos.length, nada.redes.length, nada.sinTipo, nada.sinRed], [6, 0, 6, 0, 0, 0, 0], "todo oculto: solo la cuenta de ocultos");
+  const routers = TU.resumenUbicacion({ equipos:[{ id:1, tipo_equipo:"ptp", red_id:2 }, { id:2, tipo_equipo:"ptp", red_id:3 }], tipos, redes, visibleEquipo:id=>id === 1, routerDe:()=>true });
+  assert.deepEqual(routers.tipos.map(t=>[t.n, t.routers]), [[1, 1]], "los routers, también solo los visibles");
   const conHerencia = TU.resumenUbicacion({ equipos:[{ id:1, red_id:null, red_efectiva:2 }], redes, redDe:e=>e.red_efectiva ?? null });
   assert.deepEqual(conHerencia.redes.map(x=>x.nombre), ["CCTV"], "con la red efectiva (011)");
   const vacia = TU.resumenUbicacion({});
   assert.deepEqual([vacia.total, vacia.tipos.length, vacia.redes.length, vacia.ocultos, vacia.activos], [0, 0, 0, 0, 0]);
+});
+// ---------------------------------------------------------------- v18 (3.17): «Tipos y redes», cada tipo repartido por red
+prueba("v18: cada tipo trae cuántos hay en cada red, en el orden de las redes, con las desconocidas después y «Sin red» al final", ()=>{
+  const tipos = [{ valor:"switch", etiqueta:"Switch", orden:20 }, { valor:"ptp", etiqueta:"PtP-E", orden:30 }, { valor:"camara", etiqueta:"Cámara", orden:60 }];
+  const redes = [{ id:2, nombre:"CCTV", color:"#1eb913" }, { id:3, nombre:"Red Oficina", color:"#007eb2" }, { id:4, nombre:"AQ1", color:"#ff0000" }];
+  // Desordenados a propósito: el orden sale de las redes, no de los equipos.
+  const equipos = [
+    { id:1, tipo_equipo:"ptp", red_id:4 }, { id:2, tipo_equipo:"ptp", red_id:2 }, { id:3, tipo_equipo:"ptp", red_id:null }, { id:4, tipo_equipo:"ptp", red_id:2 },
+    { id:5, tipo_equipo:"ptp", red_id:9 }, { id:6, tipo_equipo:"ptp", red_id:3 }, { id:7, tipo_equipo:"camara", red_id:2 }, { id:8, tipo_equipo:"switch", red_id:4 },
+    { id:9, tipo_equipo:null, red_id:null }, { id:10, tipo_equipo:null, red_id:3 }, { id:11, tipo_equipo:"inyector_poe", red_id:4 },
+  ];
+  const r = TU.resumenUbicacion({ equipos, tipos, redes });
+  const reparto = lista=>lista.map(x=>[x.id, x.n]);
+  assert.deepEqual(r.tipos.map(t=>[t.etiqueta, t.n, reparto(t.porRed)]), [
+    ["Switch", 1, [[4, 1]]],
+    ["PtP-E", 6, [[2, 2], [3, 1], [4, 1], [9, 1], [null, 1]]],
+    ["Cámara", 1, [[2, 1]]],
+    ["inyector_poe", 1, [[4, 1]]],
+  ]);
+  assert.deepEqual(reparto(r.sinTipoPorRed), [[3, 1], [null, 1]], "«Sin tipo» también se reparte");
+  const ptp = r.tipos[1].porRed;
+  assert.deepEqual(ptp.map(x=>x.nombre), ["CCTV", "Red Oficina", "AQ1", "Red 9", "Sin red"], "con el nombre de cada red");
+  assert.deepEqual(ptp.map(x=>x.color), ["#1eb913", "#007eb2", "#ff0000", null, null], "y su color (la desconocida y «Sin red», sin color)");
+  for(const t of r.tipos) assert.equal(t.porRed.reduce((s, x)=>s + x.n, 0), t.n, `${t.etiqueta}: el reparto suma lo del tipo`);
+  for(const red of r.redes) assert.equal([...r.tipos.map(t=>t.porRed), r.sinTipoPorRed].flat().filter(x=>x.id === red.id).reduce((s, x)=>s + x.n, 0), red.n, `${red.nombre}: suma lo de la red`);
+  assert.equal([...r.tipos.map(t=>t.porRed), r.sinTipoPorRed].flat().filter(x=>x.id === null).reduce((s, x)=>s + x.n, 0), r.sinRed, "«Sin red» suma lo de «Sin red»");
+  const conHerencia = TU.resumenUbicacion({ equipos:[{ id:1, tipo_equipo:"ptp", red_id:null, red_efectiva:3 }], tipos, redes, redDe:e=>e.red_efectiva ?? null });
+  assert.deepEqual(reparto(conHerencia.tipos[0].porRed), [[3, 1]], "con la red efectiva (011)");
+  assert.deepEqual(TU.resumenUbicacion({ equipos:[{ id:1, tipo_equipo:"ptp", red_id:2 }], tipos, redes }).sinTipoPorRed, [], "sin «Sin tipo», vacío");
+  const indefinida = TU.resumenUbicacion({ equipos:[{ id:1, tipo_equipo:"ptp" }], tipos, redes, redDe:()=>undefined });
+  assert.deepEqual(reparto(indefinida.tipos[0].porRed), [[null, 1]], "undefined cuenta como «Sin red»");
+});
+prueba("v18: el reparto dicho con palabras y los colores muy claros", ()=>{
+  assert.equal(TU.textoPorRed([{ id:2, nombre:"CCTV", n:10 }, { id:3, nombre:"Red Oficina", n:1 }, { id:4, nombre:"AQ1", n:1 }]), "10 en CCTV, 1 en Red Oficina y 1 en AQ1");
+  assert.equal(TU.textoPorRed([{ id:2, nombre:"CCTV", n:2 }, { id:null, nombre:"Sin red", n:1 }]), "2 en CCTV y 1 sin red");
+  assert.equal(TU.textoPorRed([{ id:4, nombre:"AQ1", n:1 }]), "1 en AQ1");
+  assert.equal(TU.textoPorRed([]), "");
+  // Contraste con el blanco menor que 2:1: el amarillo que tuvo CCTV, el blanco y un amarillo claro, sí.
+  for(const c of ["#fbff14", "#FFFFFF", "#ff0", "#f5e663"]) assert.equal(TU.colorMuyClaro(c), true, c);
+  // Los de hoy en la base real, y otros que se leen, no.
+  for(const c of ["#1eb913", "#007eb2", "#ff0000", "#dc0be0", "#EC741D", "#004DAB", "#000000", "#8B9AAA"]) assert.equal(TU.colorMuyClaro(c), false, c);
+  for(const c of [null, undefined, "", "rojo", "#12345", "#1234567"]) assert.equal(TU.colorMuyClaro(c), false, String(c));
+});
+// ---------------------------------------------------------------- v19 (3.21): con un solo tipo de equipo a la vista
+prueba("v19: el único tipo de equipo que deja a la vista el filtro (o ninguno)", ()=>{
+  const tipos = [{ valor:"router", etiqueta:"Router", orden:10, activo:true }, { valor:"ptp", etiqueta:"PtP-E", orden:30, activo:true }, { valor:"camara", etiqueta:"Cámara", orden:60, activo:true }, { valor:"nvr", etiqueta:"NVR", orden:70, activo:true }];
+  const equipos = [{ tipo_equipo:"router" }, { tipo_equipo:"ptp" }, { tipo_equipo:"ptp" }, { tipo_equipo:"camara" }, { tipo_equipo:null }];
+  const ops = FM.opcionesTiposEquipo(tipos, equipos, 2); // NVR sin equipos; «Sin tipo» y «Sin equipos» al final
+  const valores = ops.map(o=>o.valor);
+  assert.deepEqual(valores, ["router", "ptp", "camara", "nvr", "-sin-tipo", "-sin-equipos"]);
+  const soloPtp = FM.ocultosSoloEsta(valores, [], "ptp");
+  assert.equal(FM.tipoEquipoUnico(ops, soloPtp), "ptp", "«solo esta» en PtP-E");
+  assert.equal(FM.tipoEquipoUnico(ops, []), null, "sin filtro, ninguno");
+  assert.equal(FM.tipoEquipoUnico(ops, ["router"]), null, "quedan varios");
+  assert.equal(FM.tipoEquipoUnico(ops, ["router", "camara", "-sin-tipo"]), "ptp", "lo demás apagado a mano; NVR (sin equipos) y «Sin equipos» no cuentan");
+  assert.equal(FM.tipoEquipoUnico(ops, ["router", "ptp", "camara"]), "-sin-tipo", "«Sin tipo» como único");
+  assert.equal(FM.tipoEquipoUnico(ops, valores), null, "todo apagado: ninguno");
+  const unTipo = FM.opcionesTiposEquipo([{ valor:"ptp", etiqueta:"PtP-E", orden:30, activo:true }], [{ tipo_equipo:"ptp" }], 0);
+  assert.equal(FM.tipoEquipoUnico(unTipo, []), null, "si en toda la red hay un solo tipo con equipos, no hay filtro: la bolita queda como siempre");
+  assert.equal(FM.tipoEquipoUnico([], []), null);
+});
+prueba("v19: la bolita con el ícono de un tipo de equipo lo dice (clase y data-tipo-equipo)", ()=>{
+  const pin = htmlPin({ color:"#EC741D", tipo:"torre", icono:'<svg viewBox="0 0 24 24"><path d="M1 1h2"/></svg>', cantidad: 4, tipoEquipo:"ptp" });
+  assert.match(pin, /inventario-tecnologico-mapa-pin-por-tipo/);
+  assert.match(pin, /data-tipo-equipo="ptp"/);
+  assert.match(pin, /mapa-pin-cantidad">4</);
+  assert.match(pin, /<svg[^>]*\swidth="15" height="15"[^>]*viewBox="0 0 24 24"/, "el ícono, a 15 px como el de la ubicación");
+  const normal = htmlPin({ color:"#EC741D", tipo:"torre", cantidad: 2 });
+  assert.doesNotMatch(normal, /pin-por-tipo|data-tipo-equipo/, "sin tipo de equipo, como siempre");
+  assert.match(htmlPin({ color:"#000", tipo:"torre", tipoEquipo:'x"><script>' }), /data-tipo-equipo="xscript"/, "el valor va limpio");
+});
+// ---------------------------------------------------------------- v20 (3.22): las cifras del panel, según los filtros
+prueba("v20: cifras del panel: torres, equipos de red, radioenlaces (PtP-R colgados por radio de un PtP-E) y cámaras, con y sin filtros", ()=>{
+  const ubicaciones = [
+    { id:1, tipo:"torre", activa:true }, { id:2, tipo:"torre", activa:true }, { id:3, tipo:"oficina", activa:true }, { id:4, tipo:"torre", activa:false },
+  ];
+  const equipos = [
+    { id:10, ubicacion_id:1, tipo_equipo:"ptp", servidor_id:null },
+    { id:11, ubicacion_id:2, tipo_equipo:"estacion", servidor_id:10 },                       // radioenlace (otra ubicación: radio)
+    { id:12, ubicacion_id:3, tipo_equipo:"estacion", servidor_id:10 },                       // radioenlace
+    { id:13, ubicacion_id:1, tipo_equipo:"estacion", servidor_id:10 },                       // en la misma ubicación, sin medio: cable
+    { id:14, ubicacion_id:2, tipo_equipo:"estacion", servidor_id:10, medio:"cable" },        // por cable: no
+    { id:15, ubicacion_id:1, tipo_equipo:"ap", servidor_id:10 },
+    { id:16, ubicacion_id:3, tipo_equipo:"estacion", servidor_id:15 },                       // de un AP: no
+    { id:17, ubicacion_id:1, tipo_equipo:"camara", servidor_id:10 },
+    { id:18, ubicacion_id:2, tipo_equipo:"camara", servidor_id:11 },
+    { id:19, ubicacion_id:4, tipo_equipo:"camara", servidor_id:null },                       // en una archivada
+    { id:20, ubicacion_id:1, tipo_equipo:"estacion", servidor_id:10, medio:"inalambrico" },  // misma ubicación, por radio: sí
+    { id:21, ubicacion_id:2, tipo_equipo:"estacion", servidor_id:999 },                      // su servidor no existe: no
+  ];
+  const par = c=>[c.visibles, c.total];
+  const sin = J.cifrasPanel({ ubicaciones, equipos });
+  assert.deepEqual([par(sin.torres), par(sin.equipos), par(sin.radioenlaces), par(sin.camaras)], [[2, 2], [11, 11], [3, 3], [2, 2]], "sin filtros (la archivada no cuenta)");
+  const archivadas = J.cifrasPanel({ ubicaciones, equipos, verArchivadas: true });
+  assert.deepEqual([par(archivadas.torres), par(archivadas.equipos), par(archivadas.camaras)], [[3, 3], [12, 12], [3, 3]], "viendo las archivadas, también cuentan");
+  const filtrado = J.cifrasPanel({ ubicaciones, equipos, visibleUbicacion: id=>id !== 2, visibleEquipo: id=>id !== 12 });
+  assert.deepEqual([par(filtrado.torres), par(filtrado.equipos), par(filtrado.radioenlaces), par(filtrado.camaras)], [[1, 2], [6, 11], [1, 3], [1, 2]], "con filtros: lo visible y el total");
+  assert.deepEqual(J.cifrasPanel({}), { torres: { visibles: 0, total: 0 }, equipos: { visibles: 0, total: 0 }, radioenlaces: { visibles: 0, total: 0 }, camaras: { visibles: 0, total: 0 } });
+  assert.equal(J.TIPO_UBICACION_TORRE, "torre");
 });
 prueba("v15: modos del tooltip y sus textos", ()=>{
   assert.deepEqual(TU.MODOS_TOOLTIP.map(m=>m.id), ["nombre", "tipos", "redes", "ambos"]);

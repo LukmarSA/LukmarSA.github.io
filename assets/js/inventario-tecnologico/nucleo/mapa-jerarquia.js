@@ -532,6 +532,42 @@ export function resumenRed(red){
   };
 }
 
+// v20 (3.22, pedido y decidido el 7-oct): las cifras del panel sin nada
+// elegido, según los filtros (con la 007; sin ella, el panel muestra las de
+// siempre).
+//   * Torres: las ubicaciones de tipo «torre».
+//   * Equipos de red.
+//   * Radioenlaces: cada PtP-R (`estacion`) colgado por radio de un PtP-E
+//     (`ptp`); las estaciones de un AP o de un PtMP no cuentan.
+//   * Cámaras.
+// visibles: lo que dejan a la vista los filtros (la ubicación a la vista y,
+// para un equipo, también el equipo); total: lo mismo sin filtros (las
+// ubicaciones archivadas, solo si se están viendo). El panel muestra «de N»
+// cuando no coinciden.
+export const TIPO_UBICACION_TORRE = "torre";
+export function cifrasPanel({ ubicaciones = [], equipos = [], verArchivadas = false, visibleUbicacion = ()=>true, visibleEquipo = ()=>true } = {}){
+  const ubicacionPorId = new Map(ubicaciones.map(u=>[Number(u.id), u]));
+  const equipoPorId = new Map(equipos.map(e=>[Number(e.id), e]));
+  const seMira = u=>!!u && (verArchivadas || u.activa !== false);
+  const nueva = ()=>({ visibles: 0, total: 0 });
+  const out = { torres: nueva(), equipos: nueva(), radioenlaces: nueva(), camaras: nueva() };
+  const sumar = (c, visible)=>{ c.total++; if(visible) c.visibles++; };
+  for(const u of ubicaciones){
+    if(u.tipo === TIPO_UBICACION_TORRE && seMira(u)) sumar(out.torres, visibleUbicacion(u.id));
+  }
+  for(const e of equipos){
+    if(!seMira(ubicacionPorId.get(Number(e.ubicacion_id)))) continue;
+    const visible = !!(visibleUbicacion(e.ubicacion_id) && visibleEquipo(e.id));
+    sumar(out.equipos, visible);
+    if(e.tipo_equipo === "camara") sumar(out.camaras, visible);
+    if(e.tipo_equipo === "estacion" && tieneValor(e.servidor_id)){
+      const s = equipoPorId.get(Number(e.servidor_id));
+      if(s && s.tipo_equipo === "ptp" && medioDe(e, s) === "inalambrico") sumar(out.radioenlaces, visible);
+    }
+  }
+  return out;
+}
+
 // Por ubicación: cuántos equipos tiene y cómo quedaron en la simulación.
 export function estadoPorUbicacion(red, sim = null){
   const out = new Map();
